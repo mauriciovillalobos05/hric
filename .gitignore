@@ -1,0 +1,48 @@
+# .gitignore
+
+# Node dependencies (frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Python virtual environment (backend)
+backend/venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# SQLite database and uploads
+backend/src/database/app.db
+backend/src/uploads/
+
+# Environment variables
+*.env
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+*.swp
+*.swo
+*.tmp
+
+# VSCode
+.vscode/
+
+# Lockfiles (if you switch between package managers)
+package-lock.json
+yarn.lock
+
+# Mac-specific
+*.DS_Store
+
+# Optional: JetBrains IDEs
+.idea/
+
+# Optional: Build analysis artifacts
+*.tsbuildinfo

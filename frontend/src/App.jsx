@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate, Routes, Route } from 'react-router-dom';
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
@@ -23,10 +24,13 @@ import {
 } from 'lucide-react'
 import hricPoster from './assets/hrcposter.png'
 import './App.css'
+import EntrepreneurDashboard from './entrepreneurs-dashboard/entrepreneursDashboard';
+
 
 function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [selectedUserType, setSelectedUserType] = useState('investor')
+    const [selectedUserType, setSelectedUserType] = useState('investor')
+    const navigate = useNavigate()
 
   const features = [
     {
@@ -180,8 +184,14 @@ function App() {
     }
   ]
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    return (
+     
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+           
+       <Routes>
+         <Route path="/dashboard" element={<EntrepreneurDashboard />} />
+       </Routes>
+            
       {/* Navigation */}
       <nav className="bg-white/95 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -200,7 +210,7 @@ function App() {
                 <a href="#pricing" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">Pricing</a>
                 <a href="#events" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">Events</a>
                 <a href="#about" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">About</a>
-                <Button variant="outline" className="mr-2">Sign In</Button>
+                                <Button variant="outline" className="mr-2" onClick={() => navigate('/dashboard')}>Sign In</Button>
                 <Button>Get Started</Button>
               </div>
             </div>
@@ -226,8 +236,8 @@ function App() {
               <a href="#pricing" className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600">Pricing</a>
               <a href="#events" className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600">Events</a>
               <a href="#about" className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600">About</a>
-              <div className="px-3 py-2 space-y-2">
-                <Button variant="outline" className="w-full">Sign In</Button>
+                          <div className="px-3 py-2 space-y-2">
+                              <Button variant="outline" className="w-full" onClick={() => navigate() }>Sign In</Button>
                 <Button className="w-full">Get Started</Button>
               </div>
             </div>

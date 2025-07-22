@@ -294,7 +294,7 @@ class EntrepreneurProfile(db.Model):
 class Match(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     investor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    entrepreneur_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    entrepreneur_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
     compatibility_score = db.Column(db.Float, nullable=False)
     match_reasons = db.Column(db.Text)  # JSON array of string reasons

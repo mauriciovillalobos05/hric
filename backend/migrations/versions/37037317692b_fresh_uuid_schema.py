@@ -1,8 +1,8 @@
-"""Initial migration with all core tables
+"""Fresh UUID schema
 
-Revision ID: 942fafa82f71
+Revision ID: 37037317692b
 Revises: 
-Create Date: 2025-07-22 11:50:25.790789
+Create Date: 2025-07-22 15:01:57.543985
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '942fafa82f71'
+revision: str = '37037317692b'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -40,7 +40,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('user',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('email', sa.String(length=120), nullable=False),
     sa.Column('password_hash', sa.String(length=255), nullable=False),
     sa.Column('user_type', sa.String(length=20), nullable=False),
@@ -63,7 +63,7 @@ def upgrade() -> None:
     )
     op.create_table('document',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('owner_id', sa.Integer(), nullable=False),
+    sa.Column('owner_id', sa.UUID(), nullable=False),
     sa.Column('filename', sa.String(length=255), nullable=False),
     sa.Column('original_filename', sa.String(length=255), nullable=False),
     sa.Column('file_path', sa.String(length=500), nullable=False),
@@ -84,7 +84,7 @@ def upgrade() -> None:
     )
     op.create_table('entrepreneur_profile',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('headline', sa.String(length=150), nullable=True),
     sa.Column('company_name', sa.String(length=100), nullable=False),
     sa.Column('company_description', sa.Text(), nullable=True),
@@ -125,7 +125,7 @@ def upgrade() -> None:
     op.create_table('event_registration',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('event_id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('role', sa.String(length=20), nullable=False),
     sa.Column('answers', sa.JSON(), nullable=True),
     sa.Column('registration_status', sa.String(length=20), nullable=True),
@@ -140,7 +140,7 @@ def upgrade() -> None:
     )
     op.create_table('investor_profile',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('headline', sa.String(length=150), nullable=True),
     sa.Column('investment_stages', sa.Text(), nullable=True),
     sa.Column('industries', sa.Text(), nullable=True),
@@ -166,8 +166,8 @@ def upgrade() -> None:
     )
     op.create_table('match',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('investor_id', sa.Integer(), nullable=False),
-    sa.Column('entrepreneur_id', sa.Integer(), nullable=False),
+    sa.Column('investor_id', sa.UUID(), nullable=False),
+    sa.Column('entrepreneur_id', sa.UUID(), nullable=False),
     sa.Column('compatibility_score', sa.Float(), nullable=False),
     sa.Column('match_reasons', sa.Text(), nullable=True),
     sa.Column('match_algorithm_version', sa.String(length=20), nullable=True),
@@ -185,8 +185,8 @@ def upgrade() -> None:
     )
     op.create_table('message',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('sender_id', sa.Integer(), nullable=False),
-    sa.Column('recipient_id', sa.Integer(), nullable=False),
+    sa.Column('sender_id', sa.UUID(), nullable=False),
+    sa.Column('recipient_id', sa.UUID(), nullable=False),
     sa.Column('subject', sa.String(length=200), nullable=True),
     sa.Column('content', sa.Text(), nullable=False),
     sa.Column('message_type', sa.String(length=20), nullable=True),
@@ -204,8 +204,8 @@ def upgrade() -> None:
     op.create_table('document_access',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('document_id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('granted_by', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
+    sa.Column('granted_by', sa.UUID(), nullable=False),
     sa.Column('access_type', sa.String(length=20), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('granted_at', sa.DateTime(), nullable=True),

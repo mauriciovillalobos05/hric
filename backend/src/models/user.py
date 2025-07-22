@@ -6,7 +6,7 @@ import json
 db = SQLAlchemy()
 
 class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     user_type = db.Column(db.String(20), nullable=False)  # 'investor' or 'entrepreneur'
@@ -79,7 +79,7 @@ class User(db.Model):
 
 class InvestorProfile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
     
     # New: Optional headline for display
     headline = db.Column(db.String(150))
@@ -165,7 +165,7 @@ class InvestorProfile(db.Model):
 
 class EntrepreneurProfile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
     # NEW: One-liner description
     headline = db.Column(db.String(150))
@@ -291,7 +291,7 @@ class EntrepreneurProfile(db.Model):
 
 class Match(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    investor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    investor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
     entrepreneur_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
     compatibility_score = db.Column(db.Float, nullable=False)
@@ -413,7 +413,7 @@ class Event(db.Model):
 class EventRegistration(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.Integer, db.ForeignKey('event.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
     role = db.Column(db.String(20), nullable=False)  # 'entrepreneur' or 'investor'
     answers = db.Column(db.JSON, nullable=True)  # Stores role-specific form responses
@@ -449,7 +449,7 @@ class EventRegistration(db.Model):
 
 class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    owner_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
     # File info
     filename = db.Column(db.String(255), nullable=False)  # Saved filename
@@ -507,8 +507,8 @@ class Document(db.Model):
 class DocumentAccess(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     document_id = db.Column(db.Integer, db.ForeignKey('document.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # The receiver of the access
-    granted_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # The user who granted access
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)  # The receiver of the access
+    granted_by = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)  # The user who granted access
 
     # Permissions and status
     access_type = db.Column(db.String(20), default='view')  # 'view', 'download', 'edit'
@@ -542,8 +542,8 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # Sender and recipient
-    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    sender_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
+    recipient_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
     # Content
     subject = db.Column(db.String(200))

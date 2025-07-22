@@ -25,102 +25,109 @@ def validate_password(password):
 def register():
     try:
         data = request.json
-        
+
         # Validate required fields
         required_fields = ['email', 'password', 'user_type', 'first_name', 'last_name']
         for field in required_fields:
             if field not in data or not data[field]:
                 return jsonify({'error': f'{field} is required'}), 400
-        
-        # Validate email format
-        if not validate_email(data['email']):
+
+        # Normalize and validate email
+        email = data['email'].strip().lower()
+        if not validate_email(email):
             return jsonify({'error': 'Invalid email format'}), 400
-        
+
         # Validate password strength
         if not validate_password(data['password']):
             return jsonify({'error': 'Password must be at least 8 characters with uppercase, lowercase, and number'}), 400
-        
+
         # Validate user type
         if data['user_type'] not in ['investor', 'entrepreneur']:
             return jsonify({'error': 'User type must be investor or entrepreneur'}), 400
-        
+
         # Check if user already exists
-        existing_user = User.query.filter_by(email=data['email']).first()
+        existing_user = User.query.filter_by(email=email).first()
         if existing_user:
             return jsonify({'error': 'User with this email already exists'}), 409
-        
+
         # Create new user
         user = User(
-            email=data['email'],
+            email=email,
             user_type=data['user_type'],
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            phone=data.get('phone'),
-            location=data.get('location'),
-            bio=data.get('bio'),
-            linkedin_url=data.get('linkedin_url'),
-            website_url=data.get('website_url')
+            first_name=data['first_name'].strip(),
+            last_name=data['last_name'].strip(),
+            phone=data.get('phone', '').strip() or None,
+            location=data.get('location', '').strip() or None,
+            bio=data.get('bio', '').strip() or None,
+            linkedin_url=data.get('linkedin_url', '').strip() or None,
+            website_url=data.get('website_url', '').strip() or None
         )
         user.set_password(data['password'])
-        
+
         db.session.add(user)
-        db.session.flush()  # Get the user ID
-        
+        db.session.flush()  # Get the user ID before creating profile
+
         # Create profile based on user type
-        if data['user_type'] == 'investor':
+        if user.user_type == 'investor':
             profile = InvestorProfile(user_id=user.id)
             db.session.add(profile)
         else:
             profile = EntrepreneurProfile(
                 user_id=user.id,
-                company_name=data.get('company_name', '')
+                company_name=data.get('company_name', '').strip() or ''
             )
             db.session.add(profile)
-        
+
         db.session.commit()
-        
+
         # Set session
         session['user_id'] = user.id
         session['user_type'] = user.user_type
-        
+        # Optional future: add session expiry, CSRF protection
+
         return jsonify({
             'message': 'User registered successfully',
-            'user': user.to_dict()
+            'user': user.to_summary()
         }), 201
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
     try:
         data = request.json
-        
+
         if not data.get('email') or not data.get('password'):
             return jsonify({'error': 'Email and password are required'}), 400
-        
+
         user = User.query.filter_by(email=data['email']).first()
-        
+
         if not user or not user.check_password(data['password']):
             return jsonify({'error': 'Invalid email or password'}), 401
-        
+
         if not user.is_active:
             return jsonify({'error': 'Account is deactivated'}), 401
-        
+
         # Update last login
         user.last_login = datetime.utcnow()
         db.session.commit()
-        
+
         # Set session
         session['user_id'] = user.id
         session['user_type'] = user.user_type
-        
+        # TODO: Add CSRF protection if using session-based auth in production
+
+        # Return safe user summary only
+        user_data = user.to_summary()
+
         return jsonify({
             'message': 'Login successful',
-            'user': user.to_dict()
+            'user': user_data
         }), 200
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -317,4 +324,3 @@ def update_subscription():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
-

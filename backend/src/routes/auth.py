@@ -21,116 +21,71 @@ def validate_password(password):
         return False
     return True
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
+@auth_bp.route('/register-complete', methods=['POST'])
+def register_complete():
     try:
         data = request.json
 
-        # Validate required fields
-        required_fields = ['email', 'password', 'user_type', 'first_name', 'last_name']
+        required_fields = ['supabase_id', 'email', 'user_type', 'first_name', 'last_name']
         for field in required_fields:
             if field not in data or not data[field]:
                 return jsonify({'error': f'{field} is required'}), 400
 
-        # Normalize and validate email
-        email = data['email'].strip().lower()
-        if not validate_email(email):
-            return jsonify({'error': 'Invalid email format'}), 400
-
-        # Validate password strength
-        if not validate_password(data['password']):
-            return jsonify({'error': 'Password must be at least 8 characters with uppercase, lowercase, and number'}), 400
-
-        # Validate user type
-        if data['user_type'] not in ['investor', 'entrepreneur']:
-            return jsonify({'error': 'User type must be investor or entrepreneur'}), 400
-
         # Check if user already exists
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            return jsonify({'error': 'User with this email already exists'}), 409
+        if User.query.filter_by(id=data['supabase_id']).first():
+            return jsonify({'error': 'User already exists'}), 409
 
-        # Create new user
         user = User(
-            email=email,
+            id=data['supabase_id'],
+            email=data['email'],
             user_type=data['user_type'],
-            first_name=data['first_name'].strip(),
-            last_name=data['last_name'].strip(),
-            phone=data.get('phone', '').strip() or None,
-            location=data.get('location', '').strip() or None,
-            bio=data.get('bio', '').strip() or None,
-            linkedin_url=data.get('linkedin_url', '').strip() or None,
-            website_url=data.get('website_url', '').strip() or None
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            phone=data.get('phone'),
+            location=data.get('location'),
+            bio=data.get('bio'),
+            linkedin_url=data.get('linkedin_url'),
+            website_url=data.get('website_url'),
+            is_verified=True
         )
-        user.set_password(data['password'])
-
         db.session.add(user)
-        db.session.flush()  # Get the user ID before creating profile
+        db.session.flush()
 
-        # Create profile based on user type
-        if user.user_type == 'investor':
-            profile = InvestorProfile(user_id=user.id)
-            db.session.add(profile)
+        if data['user_type'] == 'investor':
+            db.session.add(InvestorProfile(user_id=user.id))
         else:
-            profile = EntrepreneurProfile(
+            db.session.add(EntrepreneurProfile(
                 user_id=user.id,
-                company_name=data.get('company_name', '').strip() or ''
-            )
-            db.session.add(profile)
+                company_name=data.get('company_name', '')
+            ))
 
         db.session.commit()
-
-        # Set session
-        session['user_id'] = user.id
-        session['user_type'] = user.user_type
-        # Optional future: add session expiry, CSRF protection
-
-        return jsonify({
-            'message': 'User registered successfully',
-            'user': user.to_summary()
-        }), 201
+        return jsonify({'message': 'User registration completed', 'user': user.to_dict()}), 201
 
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-
-@auth_bp.route('/login', methods=['POST'])
-def login():
+@auth_bp.route('/track-login', methods=['POST'])
+def track_login():
     try:
         data = request.json
+        email = data.get('email')
 
-        if not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Email and password are required'}), 400
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
 
-        user = User.query.filter_by(email=data['email']).first()
-
-        if not user or not user.check_password(data['password']):
-            return jsonify({'error': 'Invalid email or password'}), 401
-
-        if not user.is_active:
-            return jsonify({'error': 'Account is deactivated'}), 401
-
-        # Update last login
-        user.last_login = datetime.utcnow()
-        db.session.commit()
-
-        # Set session
-        session['user_id'] = user.id
-        session['user_type'] = user.user_type
-        # TODO: Add CSRF protection if using session-based auth in production
-
-        # Return safe user summary only
-        user_data = user.to_summary()
-
-        return jsonify({
-            'message': 'Login successful',
-            'user': user_data
-        }), 200
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            return jsonify({'message': 'Login tracked'}), 200
+        else:
+            return jsonify({'error': 'User not found'}), 404
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+        
 @auth_bp.route('/logout', methods=['POST'])
 def logout():
     session.clear()

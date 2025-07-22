@@ -2,13 +2,17 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
+import uuid
+from sqlalchemy.dialects.postgresql import UUID
 
 db = SQLAlchemy()
 
 class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    __tablename__ = 'user'
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # Now UUID instead of Integer
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=True)  # Optional if using Supabase
     user_type = db.Column(db.String(20), nullable=False)  # 'investor' or 'entrepreneur'
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50), nullable=False)
@@ -20,30 +24,24 @@ class User(db.Model):
     website_url = db.Column(db.String(255))
     is_verified = db.Column(db.Boolean, default=False)
     is_active = db.Column(db.Boolean, default=True)
-    subscription_tier = db.Column(db.String(20), default='free')  # free, basic, premium, vip, enterprise
+    subscription_tier = db.Column(db.String(20), default='free')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = db.Column(db.DateTime)
 
-    # Relationships
+    # Relationships (unchanged)
     investor_profile = db.relationship('InvestorProfile', backref='user', uselist=False, cascade='all, delete-orphan')
     entrepreneur_profile = db.relationship('EntrepreneurProfile', backref='user', uselist=False, cascade='all, delete-orphan')
     sent_messages = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender', cascade='all, delete-orphan')
     received_messages = db.relationship('Message', foreign_keys='Message.recipient_id', backref='recipient', cascade='all, delete-orphan')
     documents = db.relationship('Document', backref='owner', cascade='all, delete-orphan')
 
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-
     def __repr__(self):
         return f'<User {self.email}>'
 
     def to_dict(self, include_sensitive=False):
         data = {
-            'id': self.id,
+            'id': str(self.id),
             'email': self.email,
             'user_type': self.user_type,
             'first_name': self.first_name,
@@ -61,10 +59,10 @@ class User(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'last_login': self.last_login.isoformat() if self.last_login else None
         }
-        
+
         if include_sensitive:
             data['password_hash'] = self.password_hash
-            
+
         return data
 
 class InvestorProfile(db.Model):

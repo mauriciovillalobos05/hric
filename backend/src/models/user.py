@@ -10,7 +10,6 @@ db = SQLAlchemy()
 class User(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=None)  # set manually from Supabase
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
     user_type = db.Column(db.String(20), nullable=False)  # 'investor' or 'entrepreneur'
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50), nullable=False)
@@ -30,8 +29,6 @@ class User(db.Model):
     # Relationships
     investor_profile = db.relationship('InvestorProfile', backref='user', uselist=False, cascade='all, delete-orphan')
     enterprises = db.relationship('Enterprise', backref='user', cascade='all, delete-orphan')
-    sent_messages = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender', cascade='all, delete-orphan')
-    received_messages = db.relationship('Message', foreign_keys='Message.recipient_id', backref='recipient', cascade='all, delete-orphan')
     documents = db.relationship('Document', backref='owner', cascade='all, delete-orphan')
 
     def set_password(self, password):
@@ -381,9 +378,6 @@ class Event(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    registrations = db.relationship('EventRegistration', backref='event', cascade='all, delete-orphan')
-
     # Utility methods
     def get_agenda(self):
         return json.loads(self.agenda) if self.agenda else []
@@ -437,7 +431,7 @@ class EventRegistration(db.Model):
 
     # Relationships
     user = db.relationship('User', backref='event_registrations')
-    event = db.relationship('Event', backref='registrations')
+    event = db.relationship('Event', backref=db.backref('registrations', cascade='all, delete-orphan'))
 
     def to_dict(self):
         return {
@@ -571,8 +565,10 @@ class Message(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
-    sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
-    recipient = db.relationship('User', foreign_keys=[recipient_id], backref='received_messages')
+    # Message model
+    sender = db.relationship('User', foreign_keys=[sender_id], backref='messages_sent')
+    recipient = db.relationship('User', foreign_keys=[recipient_id], backref='messages_received')
+
 
     def get_attachments(self):
         return json.loads(self.attachments) if self.attachments else []

@@ -46,6 +46,7 @@ def register_complete():
             bio=data.get('bio'),
             linkedin_url=data.get('linkedin_url'),
             website_url=data.get('website_url'),
+            profile_image=data.get('profile_image'),
             is_verified=True
         )
         db.session.add(user)

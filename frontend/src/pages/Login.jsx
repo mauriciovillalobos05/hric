@@ -1,40 +1,65 @@
 // src/pages/Login.jsx
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { createClient } from '@supabase/supabase-js'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { AlertTriangle } from 'lucide-react'
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { AlertTriangle } from "lucide-react";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
-)
+);
 
 function Login() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState(null)
-  const navigate = useNavigate()
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
   const handleLogin = async (e) => {
-    e.preventDefault()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    e.preventDefault();
+    setError(null);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
     if (error) {
-      setError(error.message)
+      setError(error.message);
     } else {
-      navigate('/dashboard')
+      // Track login on your Flask backend
+      try {
+        await fetch("http://localhost:8000/api/auth/track-login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(data.session?.access_token && {
+              Authorization: `Bearer ${data.session.access_token}`,
+            }),
+          },
+          body: JSON.stringify({ email }),
+        });
+      } catch (err) {
+        console.error("Tracking login failed", err);
+        // Optional: log silently or display to user
+      }
+
+      navigate("/dashboard");
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 px-4">
       <Card className="w-full max-w-md shadow-lg border-0">
         <CardHeader className="space-y-1 text-center">
           <Badge className="bg-blue-100 text-blue-800 mb-2">Welcome Back</Badge>
-          <CardTitle className="text-2xl font-bold text-gray-900">Sign in to HRIC</CardTitle>
+          <CardTitle className="text-2xl font-bold text-gray-900">
+            Sign in to HRIC
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-6">
@@ -49,7 +74,9 @@ function Login() {
               />
             </div>
             <div>
-              <label className="block mb-1 text-sm text-gray-700">Password</label>
+              <label className="block mb-1 text-sm text-gray-700">
+                Password
+              </label>
               <Input
                 type="password"
                 placeholder="••••••••"
@@ -64,14 +91,17 @@ function Login() {
                 {error}
               </div>
             )}
-            <Button type="submit" className="w-full text-white bg-blue-600 hover:bg-blue-700">
+            <Button
+              type="submit"
+              className="w-full text-white bg-blue-600 hover:bg-blue-700"
+            >
               Log In
             </Button>
           </form>
           <p className="mt-4 text-sm text-center text-gray-600">
-            Don’t have an account?{' '}
+            Don't have an account?{" "}
             <span
-              onClick={() => navigate('/register')}
+              onClick={() => navigate("/register")}
               className="text-blue-600 hover:underline cursor-pointer"
             >
               Register here
@@ -80,7 +110,7 @@ function Login() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
 
-export default Login
+export default Login;

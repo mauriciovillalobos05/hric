@@ -29,7 +29,7 @@ class User(db.Model):
 
     # Relationships
     investor_profile = db.relationship('InvestorProfile', backref='user', uselist=False, cascade='all, delete-orphan')
-    entrepreneur_profile = db.relationship('EntrepreneurProfile', backref='user', uselist=False, cascade='all, delete-orphan')
+    enterprises = db.relationship('Enterprise', backref='user', cascade='all, delete-orphan')
     sent_messages = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender', cascade='all, delete-orphan')
     received_messages = db.relationship('Message', foreign_keys='Message.recipient_id', backref='recipient', cascade='all, delete-orphan')
     documents = db.relationship('Document', backref='owner', cascade='all, delete-orphan')
@@ -114,6 +114,9 @@ class InvestorProfile(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # In InvestorProfile
+    subscription_tier = db.Column(db.String(20), default='tier_1')  # tier_1, tier_2, tier_3
+
     # JSON helpers
     def get_investment_stages(self):
         return json.loads(self.investment_stages) if self.investment_stages else []
@@ -165,7 +168,7 @@ class InvestorProfile(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
-class EntrepreneurProfile(db.Model):
+class Enterprise(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
@@ -219,6 +222,8 @@ class EntrepreneurProfile(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    subscription_tier = db.Column(db.String(20), default='free')  # free, growth, visibility
 
     # JSON helpers
     def get_previous_funding_rounds(self):
@@ -294,7 +299,7 @@ class EntrepreneurProfile(db.Model):
 class Match(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     investor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    entrepreneur_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
+    enterprise_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
     compatibility_score = db.Column(db.Float, nullable=False)
     match_reasons = db.Column(db.Text)  # JSON array of string reasons
@@ -306,7 +311,7 @@ class Match(db.Model):
     # Status and interest
     status = db.Column(db.String(20), default='pending')  # 'pending', 'accepted', etc.
     investor_interest = db.Column(db.String(20))  # 'interested', 'not_interested', 'maybe'
-    entrepreneur_interest = db.Column(db.String(20))  # same
+    enterprise_interest = db.Column(db.String(20))  # same
 
     notes = db.Column(db.Text)
     is_hidden = db.Column(db.Boolean, default=False)  # Soft hide from frontend
@@ -316,7 +321,7 @@ class Match(db.Model):
 
     # Relationships
     investor = db.relationship('User', foreign_keys=[investor_id])
-    entrepreneur = db.relationship('User', foreign_keys=[entrepreneur_id])
+    enterprise = db.relationship('User', foreign_keys=[enterprise_id])
 
     def get_match_reasons(self):
         return json.loads(self.match_reasons) if self.match_reasons else []
@@ -334,20 +339,20 @@ class Match(db.Model):
         return {
             'id': self.id,
             'investor_id': self.investor_id,
-            'entrepreneur_id': self.entrepreneur_id,
+            'enterprise_id': self.enterprise_id,
             'compatibility_score': self.compatibility_score,
             'match_reasons': self.get_match_reasons(),
             'match_algorithm_version': self.match_algorithm_version,
             'match_score_breakdown': self.get_match_score_breakdown(),
             'status': self.status,
             'investor_interest': self.investor_interest,
-            'entrepreneur_interest': self.entrepreneur_interest,
+            'enterprise_interest': self.enterprise_interest,
             'notes': self.notes,
             'is_hidden': self.is_hidden,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'investor': self.investor.to_summary() if self.investor else None,
-            'entrepreneur': self.entrepreneur.to_summary() if self.entrepreneur else None,
+            'enterprise': self.enterprise.to_summary() if self.enterprise else None,
         }
 
 class Event(db.Model):
@@ -592,4 +597,24 @@ class Message(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'sender': self.sender.to_summary() if self.sender else None,
             'recipient': self.recipient.to_summary() if self.recipient else None
+        }
+    
+class Like(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    
+    investor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
+    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    investor = db.relationship('User', backref='likes_sent', foreign_keys=[investor_id])
+    enterprise = db.relationship('Enterprise', backref='likes_received', foreign_keys=[enterprise_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'investor_id': self.investor_id,
+            'enterprise_id': self.enterprise_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }

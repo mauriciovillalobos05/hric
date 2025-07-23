@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, EntrepreneurProfile, db
+from src.models.user import User, InvestorProfile, Enterprise, Like,db
 from datetime import datetime
 import re
 
@@ -51,12 +51,19 @@ def register_complete():
         db.session.add(user)
         db.session.flush()
 
+        # Determine subscription tier (optional)
+        subscription_tier = data.get('subscription_tier')
+
         if data['user_type'] == 'investor':
-            db.session.add(InvestorProfile(user_id=user.id))
-        else:
-            db.session.add(EntrepreneurProfile(
+            db.session.add(InvestorProfile(
                 user_id=user.id,
-                company_name=data.get('company_name', '')
+                subscription_tier=subscription_tier or 'tier_1'
+            ))
+        else:
+            db.session.add(Enterprise(
+                user_id=user.id,
+                company_name=data.get('company_name', ''),
+                subscription_tier=subscription_tier or 'free'
             ))
 
         db.session.commit()
@@ -279,3 +286,47 @@ def update_subscription():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+@auth_bp.route('/enterprise/<int:enterprise_id>/likes', methods=['POST', 'GET'])
+def handle_likes(enterprise_id):
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    user = User.query.get(user_id)
+    if not user or user.user_type != 'investor':
+        return jsonify({'error': 'Only investors can perform this action'}), 403
+
+    investor_profile = user.investor_profile
+    if not investor_profile:
+        return jsonify({'error': 'Investor profile not found'}), 404
+
+    enterprise = Enterprise.query.get(enterprise_id)
+    if not enterprise:
+        return jsonify({'error': 'Enterprise not found'}), 404
+
+    if request.method == 'POST':
+        # Check if already liked
+        existing_like = Like.query.filter_by(investor_id=user.id, enterprise_id=enterprise_id).first()
+        if existing_like:
+            return jsonify({'message': 'Already liked'}), 200
+
+        like = Like(investor_id=user.id, enterprise_id=enterprise_id)
+        db.session.add(like)
+        db.session.commit()
+        return jsonify({'message': 'Enterprise liked'}), 201
+
+    elif request.method == 'GET':
+        likes = enterprise.likes_received
+        tier = investor_profile.subscription_tier
+
+        if tier == 'tier_3':
+            return jsonify({
+                'likes': [like.investor.to_summary() for like in likes],
+                'count': len(likes)
+            })
+        elif tier == 'tier_2':
+            return jsonify({'count': len(likes)})
+        else:
+            return jsonify({'message': 'Upgrade to view likes'}), 403

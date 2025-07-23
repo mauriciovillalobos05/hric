@@ -17,12 +17,12 @@ def create_user():
     db.session.commit()
     return jsonify(user.to_dict()), 201
 
-@user_bp.route('/users/<int:user_id>', methods=['GET'])
+@user_bp.route('/users/<uuid:user_id>', methods=['GET'])
 def get_user(user_id):
     user = User.query.get_or_404(user_id)
     return jsonify(user.to_dict())
 
-@user_bp.route('/users/<int:user_id>', methods=['PUT'])
+@user_bp.route('/users/<uuid:user_id>', methods=['PUT'])
 def update_user(user_id):
     user = User.query.get_or_404(user_id)
     data = request.json
@@ -31,7 +31,7 @@ def update_user(user_id):
     db.session.commit()
     return jsonify(user.to_dict())
 
-@user_bp.route('/users/<int:user_id>', methods=['DELETE'])
+@user_bp.route('/users/<uuid:user_id>', methods=['DELETE'])
 def delete_user(user_id):
     user = User.query.get_or_404(user_id)
     db.session.delete(user)

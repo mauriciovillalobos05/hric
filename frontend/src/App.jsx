@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
@@ -27,6 +28,19 @@ import './App.css'
 function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [selectedUserType, setSelectedUserType] = useState('investor')
+  const navigate = useNavigate()
+
+  const handleNavigate = (role) => {
+    if (role) {
+      navigate(`/register?role=${role}`)
+    } else {
+      navigate('/register')
+    }
+  }
+
+  const handleSignIn = () => {
+    navigate('/login')
+  }
 
   const features = [
     {
@@ -183,7 +197,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Navigation */}
-      <nav className="bg-white/95 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50">
+            <nav className="bg-white/95 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
@@ -192,33 +206,23 @@ function App() {
                 <p className="text-xs text-gray-600">Hyatt Residence Investment Club</p>
               </div>
             </div>
-            
-            {/* Desktop Navigation */}
             <div className="hidden md:block">
               <div className="ml-10 flex items-baseline space-x-8">
                 <a href="#features" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">Features</a>
                 <a href="#pricing" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">Pricing</a>
                 <a href="#events" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">Events</a>
                 <a href="#about" className="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm font-medium transition-colors">About</a>
-                <Button variant="outline" className="mr-2">Sign In</Button>
-                <Button>Get Started</Button>
+                <Button variant="outline" className="mr-2" onClick={handleSignIn}>Sign In</Button>
+                <Button onClick={() => handleNavigate()}>Get Started</Button>
               </div>
             </div>
-
-            {/* Mobile menu button */}
             <div className="md:hidden">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setIsMenuOpen(!isMenuOpen)}>
                 {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
               </Button>
             </div>
           </div>
         </div>
-
-        {/* Mobile Navigation */}
         {isMenuOpen && (
           <div className="md:hidden">
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 bg-white border-t">
@@ -227,60 +231,40 @@ function App() {
               <a href="#events" className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600">Events</a>
               <a href="#about" className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-blue-600">About</a>
               <div className="px-3 py-2 space-y-2">
-                <Button variant="outline" className="w-full">Sign In</Button>
-                <Button className="w-full">Get Started</Button>
+                <Button variant="outline" className="w-full" onClick={handleSignIn}>Sign In</Button>
+                <Button className="w-full" onClick={() => handleNavigate()}>Get Started</Button>
               </div>
             </div>
           </div>
         )}
       </nav>
 
-      {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-8">
-              <div className="space-y-4">
-                <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">
-                  Shark Tank para Guadalajara
-                </Badge>
-                <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
-                  Connect Capital with 
-                  <span className="text-blue-600"> Innovation</span>
-                </h1>
-                <p className="text-xl text-gray-600 leading-relaxed">
-                  The premier AI-powered investment platform connecting qualified investors 
-                  with Mexico's most promising startups. Join Guadalajara's exclusive 
-                  investment community at Hyatt Residence.
-                </p>
-              </div>
-              
+              <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">
+                Shark Tank para Guadalajara
+              </Badge>
+              <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
+                Connect Capital with 
+                <span className="text-blue-600"> Innovation</span>
+              </h1>
+              <p className="text-xl text-gray-600 leading-relaxed">
+                The premier AI-powered investment platform connecting qualified investors 
+                with Mexico's most promising startups. Join Guadalajara's exclusive 
+                investment community at Hyatt Residence.
+              </p>
               <div className="flex flex-col sm:flex-row gap-4">
-                <Button size="lg" className="text-lg px-8 py-4">
+                <Button size="lg" className="text-lg px-8 py-4" onClick={() => handleNavigate('investor')}>
                   Join as Investor
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
-                <Button variant="outline" size="lg" className="text-lg px-8 py-4">
+                <Button variant="outline" size="lg" className="text-lg px-8 py-4" onClick={() => handleNavigate('entrepreneur')}>
                   Apply as Entrepreneur
                 </Button>
               </div>
-
-              <div className="flex items-center space-x-8 text-sm text-gray-600">
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  <span>$1M+ Investment Goal</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  <span>25-50 Select Members</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  <span>Monthly Events</span>
-                </div>
-              </div>
             </div>
-
             <div className="relative">
               <div className="relative z-10">
                 <img 
@@ -588,4 +572,3 @@ function App() {
 }
 
 export default App
-

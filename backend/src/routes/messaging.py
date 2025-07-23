@@ -216,7 +216,7 @@ def send_message():
         return jsonify({'error': str(e)}), 500
 
 @messaging_bp.route('/messages/<int:message_id>/read', methods=['POST'])
-def mark_message_read():
+def mark_message_read(message_id):
     """Mark a message as read"""
     try:
         user, error_response, status_code = require_auth()
@@ -243,7 +243,7 @@ def mark_message_read():
         return jsonify({'error': str(e)}), 500
 
 @messaging_bp.route('/messages/<int:message_id>', methods=['DELETE'])
-def delete_message():
+def delete_message(message_id):
     """Delete a message (only sender can delete)"""
     try:
         user, error_response, status_code = require_auth()
@@ -362,7 +362,7 @@ def search_messages():
         return jsonify({'error': str(e)}), 500
 
 @messaging_bp.route('/thread/<thread_id>', methods=['GET'])
-def get_thread_messages():
+def get_thread_messages(thread_id):
     """Get all messages in a specific thread"""
     try:
         user, error_response, status_code = require_auth()

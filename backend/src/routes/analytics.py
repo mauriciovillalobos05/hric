@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, EntrepreneurProfile, Match, Event, EventRegistration, Document, Message, db
+from src.models.user import User, InvestorProfile, Enterprise, Match, Event, EventRegistration, Document, Message, db
 from datetime import datetime, timedelta
 from sqlalchemy import func, extract
 
@@ -23,56 +23,51 @@ def get_dashboard_analytics():
         user, error_response, status_code = require_auth()
         if error_response:
             return error_response, status_code
-        
+
         # Platform overview
         total_users = User.query.filter_by(is_active=True).count()
         total_investors = User.query.filter_by(user_type='investor', is_active=True).count()
         total_entrepreneurs = User.query.filter_by(user_type='entrepreneur', is_active=True).count()
         total_matches = Match.query.count()
         successful_matches = Match.query.filter_by(status='invested').count()
-        
+
         # Recent activity (last 30 days)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        
         new_users = User.query.filter(User.created_at >= thirty_days_ago).count()
         new_matches = Match.query.filter(Match.created_at >= thirty_days_ago).count()
         recent_events = Event.query.filter(Event.created_at >= thirty_days_ago).count()
-        
+
         # User-specific analytics
         user_analytics = {}
-        
+
         if user.user_type == 'investor':
             user_matches = Match.query.filter_by(investor_id=user.id).count()
             user_interested = Match.query.filter_by(investor_id=user.id, investor_interest='interested').count()
             user_investments = Match.query.filter_by(investor_id=user.id, status='invested').count()
-            
             user_analytics = {
                 'total_matches': user_matches,
                 'interested_matches': user_interested,
                 'investments_made': user_investments,
                 'success_rate': (user_investments / user_interested * 100) if user_interested > 0 else 0
             }
-        
         elif user.user_type == 'entrepreneur':
-            user_matches = Match.query.filter_by(entrepreneur_id=user.id).count()
-            investor_interest = Match.query.filter_by(entrepreneur_id=user.id, investor_interest='interested').count()
-            funding_received = Match.query.filter_by(entrepreneur_id=user.id, status='invested').count()
-            
+            user_matches = Match.query.filter_by(enterprise_id=user.id).count()
+            investor_interest = Match.query.filter_by(enterprise_id=user.id, investor_interest='interested').count()
+            funding_received = Match.query.filter_by(enterprise_id=user.id, status='invested').count()
             user_analytics = {
                 'total_matches': user_matches,
                 'investor_interest': investor_interest,
                 'funding_received': funding_received,
                 'interest_rate': (investor_interest / user_matches * 100) if user_matches > 0 else 0
             }
-        
+
         # Event analytics
         upcoming_events = Event.query.filter(
             Event.date >= datetime.utcnow(),
             Event.status == 'upcoming'
         ).count()
-        
         user_registrations = EventRegistration.query.filter_by(user_id=user.id).count()
-        
+
         dashboard_data = {
             'platform_overview': {
                 'total_users': total_users,
@@ -93,9 +88,9 @@ def get_dashboard_analytics():
                 'user_registrations': user_registrations
             }
         }
-        
+
         return jsonify({'dashboard': dashboard_data}), 200
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -137,18 +132,18 @@ def get_platform_statistics():
         
         # Industry distribution
         industry_stats = db.session.query(
-            EntrepreneurProfile.industry,
-            func.count(EntrepreneurProfile.id).label('count')
-        ).filter(EntrepreneurProfile.industry.isnot(None)).group_by(
-            EntrepreneurProfile.industry
-        ).order_by(func.count(EntrepreneurProfile.id).desc()).limit(10).all()
+            Enterprise.industry,
+            func.count(Enterprise.id).label('count')
+        ).filter(Enterprise.industry.isnot(None)).group_by(
+            Enterprise.industry
+        ).order_by(func.count(Enterprise.id).desc()).limit(10).all()
         
         # Investment stage distribution
         stage_stats = db.session.query(
-            EntrepreneurProfile.funding_stage,
-            func.count(EntrepreneurProfile.id).label('count')
-        ).filter(EntrepreneurProfile.funding_stage.isnot(None)).group_by(
-            EntrepreneurProfile.funding_stage
+            Enterprise.funding_stage,
+            func.count(Enterprise.id).label('count')
+        ).filter(Enterprise.funding_stage.isnot(None)).group_by(
+            Enterprise.funding_stage
         ).all()
         
         # Event statistics
@@ -406,28 +401,24 @@ def get_engagement_metrics():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@analytics_bp.route('/user-analytics/<int:target_user_id>', methods=['GET'])
-def get_user_analytics():
+@analytics_bp.route('/user-analytics/<uuid:target_user_id>', methods=['GET'])
+def get_user_analytics(target_user_id):
     """Get analytics for a specific user (admin function)"""
     try:
         user, error_response, status_code = require_auth()
         if error_response:
             return error_response, status_code
-        
-        # In a real implementation, this would be restricted to admin users
+
         target_user = User.query.get(target_user_id)
         if not target_user:
             return jsonify({'error': 'User not found'}), 404
-        
-        # Basic user info
+
         user_info = target_user.to_dict()
-        
-        # Activity statistics
+
         if target_user.user_type == 'investor':
             matches = Match.query.filter_by(investor_id=target_user_id).count()
             interested = Match.query.filter_by(investor_id=target_user_id, investor_interest='interested').count()
             investments = Match.query.filter_by(investor_id=target_user_id, status='invested').count()
-            
             activity_stats = {
                 'total_matches': matches,
                 'interested_matches': interested,
@@ -435,31 +426,25 @@ def get_user_analytics():
                 'success_rate': (investments / interested * 100) if interested > 0 else 0
             }
         else:
-            matches = Match.query.filter_by(entrepreneur_id=target_user_id).count()
-            investor_interest = Match.query.filter_by(entrepreneur_id=target_user_id, investor_interest='interested').count()
-            funding = Match.query.filter_by(entrepreneur_id=target_user_id, status='invested').count()
-            
+            matches = Match.query.filter_by(enterprise_id=target_user_id).count()
+            investor_interest = Match.query.filter_by(enterprise_id=target_user_id, investor_interest='interested').count()
+            funding = Match.query.filter_by(enterprise_id=target_user_id, status='invested').count()
             activity_stats = {
                 'total_matches': matches,
                 'investor_interest': investor_interest,
                 'funding_received': funding,
                 'interest_rate': (investor_interest / matches * 100) if matches > 0 else 0
             }
-        
-        # Message statistics
+
         messages_sent = Message.query.filter_by(sender_id=target_user_id).count()
         messages_received = Message.query.filter_by(recipient_id=target_user_id).count()
-        
-        # Event participation
         event_registrations = EventRegistration.query.filter_by(user_id=target_user_id).count()
         events_attended = EventRegistration.query.filter_by(
             user_id=target_user_id,
-            attendance_status='attended'
+            registration_status='attended'
         ).count()
-        
-        # Document activity
         documents_uploaded = Document.query.filter_by(owner_id=target_user_id).count()
-        
+
         user_analytics = {
             'user_info': user_info,
             'activity_stats': activity_stats,
@@ -477,9 +462,9 @@ def get_user_analytics():
                 'uploaded': documents_uploaded
             }
         }
-        
+
         return jsonify({'user_analytics': user_analytics}), 200
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

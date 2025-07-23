@@ -1,8 +1,8 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, EntrepreneurProfile, Match, db
+from src.models.user import User, InvestorProfile, Match, db
 from datetime import datetime
 
-entrepreneur_bp = Blueprint('entrepreneur', __name__)
+enterprise_bp = Blueprint('entrepreneur', __name__)
 
 def require_auth():
     user_id = session.get('user_id')
@@ -25,7 +25,7 @@ def require_entrepreneur_auth():
     
     return user, None, None
 
-@entrepreneur_bp.route('/profile', methods=['GET'])
+@enterprise_bp.route('/profile', methods=['GET'])
 def get_entrepreneur_profile():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -43,7 +43,7 @@ def get_entrepreneur_profile():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/investors', methods=['GET'])
+@enterprise_bp.route('/investors', methods=['GET'])
 def browse_investors():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -127,8 +127,8 @@ def browse_investors():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/investors/<int:investor_id>', methods=['GET'])
-def get_investor_details():
+@enterprise_bp.route('/investors/<int:investor_id>', methods=['GET'])
+def get_investor_details(investor_id):
     try:
         user, error_response, status_code = require_entrepreneur_auth()
         if error_response:
@@ -166,7 +166,7 @@ def get_investor_details():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/matches', methods=['GET'])
+@enterprise_bp.route('/matches', methods=['GET'])
 def get_matches():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -211,8 +211,8 @@ def get_matches():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/matches/<int:match_id>/interest', methods=['POST'])
-def express_interest():
+@enterprise_bp.route('/matches/<int:match_id>/interest', methods=['POST'])
+def express_interest(match_id):
     try:
         user, error_response, status_code = require_entrepreneur_auth()
         if error_response:
@@ -254,7 +254,7 @@ def express_interest():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/fundraising-status', methods=['PUT'])
+@enterprise_bp.route('/fundraising-status', methods=['PUT'])
 def update_fundraising_status():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -290,7 +290,7 @@ def update_fundraising_status():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/company-metrics', methods=['PUT'])
+@enterprise_bp.route('/company-metrics', methods=['PUT'])
 def update_company_metrics():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -332,7 +332,7 @@ def update_company_metrics():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/team', methods=['PUT'])
+@enterprise_bp.route('/team', methods=['PUT'])
 def update_team_info():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -368,7 +368,7 @@ def update_team_info():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/investor-preferences', methods=['GET'])
+@enterprise_bp.route('/investor-preferences', methods=['GET'])
 def get_investor_preferences():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -389,7 +389,7 @@ def get_investor_preferences():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/investor-preferences', methods=['PUT'])
+@enterprise_bp.route('/investor-preferences', methods=['PUT'])
 def update_investor_preferences():
     try:
         user, error_response, status_code = require_entrepreneur_auth()
@@ -427,7 +427,7 @@ def update_investor_preferences():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@entrepreneur_bp.route('/stats', methods=['GET'])
+@enterprise_bp.route('/stats', methods=['GET'])
 def get_entrepreneur_stats():
     try:
         user, error_response, status_code = require_entrepreneur_auth()

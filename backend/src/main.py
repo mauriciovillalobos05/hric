@@ -9,7 +9,7 @@ from src.models.user import db
 from src.routes.user import user_bp
 from src.routes.auth import auth_bp
 from src.routes.investor import investor_bp
-from src.routes.entrepreneur import entrepreneur_bp
+from src.routes.enterprise import enterprise_bp
 from src.routes.matching import matching_bp
 from src.routes.events import events_bp
 from src.routes.documents import documents_bp
@@ -29,7 +29,7 @@ load_dotenv()
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(investor_bp, url_prefix='/api/investors')
-app.register_blueprint(entrepreneur_bp, url_prefix='/api/entrepreneurs')
+app.register_blueprint(enterprise_bp, url_prefix='/api/enterprise')
 app.register_blueprint(matching_bp, url_prefix='/api/matching')
 app.register_blueprint(events_bp, url_prefix='/api/events')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')

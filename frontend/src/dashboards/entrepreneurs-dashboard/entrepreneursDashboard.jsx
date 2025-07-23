@@ -5,6 +5,9 @@ import MessagesPreview from "./dashboard-components/components/messagesComponent
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
 import InvestorMatches from "./dashboard-components/components/matchComponents/investorMatches.jsx";
 import PipelineSummary from "./dashboard-components/components/pipelineSummary.jsx";
+import ProfileStatusCard from "./dashboard-components/components/profileStatusComponents/profileStatusCard.jsx";
+import EventShowcaseAccess from "./dashboard-components/components/eventShowcaseComponents/eventShowcaseAccess.jsx";
+import DocumentStatus from "./dashboard-components/components/documentStatus.jsx";
 
 function EntrepreneurDashboard() {
   const [openChats, setOpenChats] = useState([]);
@@ -46,7 +49,7 @@ function EntrepreneurDashboard() {
     interested: 3,
     scheduled: 2,
     diligence: 1,
-    termSheet: 0
+    termSheet: 0,
   };
 
   const mockInvestorMatches = [
@@ -72,7 +75,7 @@ function EntrepreneurDashboard() {
       match_reasons: ["SaaS focus", "Prior investment in similar space"],
       funding_stage: "Seed",
       industry: "SaaS",
-      isFavorite: true,
+      isFavorite: false,
     },
   ];
 
@@ -100,6 +103,21 @@ function EntrepreneurDashboard() {
     setMessages(mockMessages);
   };
 
+  const mockPitchEvents = [
+    {
+      title: "AI Startup Demo Day",
+      type: "Pitch Showcase",
+      date: "2025-08-12T14:00:00Z",
+      registration_status: "not_registered", // or "registered"
+    },
+    {
+      title: "Web3 Founder Roundtable",
+      type: "Virtual Pitch Session",
+      date: "2025-09-01T17:30:00Z",
+      registration_status: "registered",
+    },
+  ];
+
   useEffect(() => {
     handleMetricsLoaded();
   }, []);
@@ -120,7 +138,11 @@ function EntrepreneurDashboard() {
       <PipelineSummary data={pipelineData} />
 
       {/* show completion %, CTA to update profile */}
-      {/* <ProfileStatusCard /> */}
+      <ProfileStatusCard
+        completion={60}
+        missingSections={["Company Pitch", "Financials", "Team Info"]}
+        onUpdateClick={() => navigate("/dashboard/user")}
+      />
 
       {/* AI-generated investor cards */}
       <InvestorMatches
@@ -129,10 +151,10 @@ function EntrepreneurDashboard() {
       />
 
       {/* pitch event CTA or registration card */}
-      {/* <EventShowcaseAccess /> */}
+      <EventShowcaseAccess events={mockPitchEvents}/>
 
       {/* uploaded docs & access log */}
-      {/* <DocumentStatus /> */}
+      <DocumentStatus initialDocuments={[]}/>
 
       {/* preview or open recent chats */}
       <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />

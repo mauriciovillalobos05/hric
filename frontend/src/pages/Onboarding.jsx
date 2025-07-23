@@ -1,3 +1,4 @@
+// src/pages/Onboarding.jsx
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createClient } from '@supabase/supabase-js'
@@ -24,13 +25,15 @@ export default function Onboarding() {
   })
   const [error, setError] = useState(null)
   const [user, setUser] = useState(null)
+  const [accessToken, setAccessToken] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     const fetchSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
+      const { data: { session }, error } = await supabase.auth.getSession()
       if (session?.user) {
         setUser(session.user)
+        setAccessToken(session.access_token)
       } else {
         setError('No session found. Please login again.')
       }
@@ -42,33 +45,47 @@ export default function Onboarding() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
+    setError(null)
 
     const payload = {
       ...form,
+      supabase_id: user.id, // Required for backend to associate user
       email: user.email,
       user_type: user.user_metadata.role || 'entrepreneur'
     }
 
-    const res = await fetch('http://localhost:8000/api/users/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
+    try {
+      const res = await fetch('http://localhost:8000/api/users/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { Authorization: `Bearer ${accessToken}` })
+        },
+        body: JSON.stringify(payload)
+      })
 
-    if (!res.ok) {
-      const msg = await res.text()
-      setError(msg || 'Failed to save user')
+      if (!res.ok) {
+        const msg = await res.text()
+        throw new Error(msg || 'Failed to save user')
+      }
+
+      // Optionally store role locally for convenience
+      localStorage.setItem('user_role', payload.user_type)
+
+      navigate('/')
+    } catch (err) {
+      setError(err.message)
+    } finally {
       setLoading(false)
-      return
     }
-
-    navigate('/')
   }
 
   if (loading) {
-    return <div className="flex justify-center items-center h-screen"><Loader2 className="animate-spin" /></div>
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <Loader2 className="animate-spin h-6 w-6 text-gray-600" />
+      </div>
+    )
   }
 
   return (

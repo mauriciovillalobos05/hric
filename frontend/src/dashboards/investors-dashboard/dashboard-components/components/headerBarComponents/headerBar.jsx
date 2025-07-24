@@ -1,6 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Bell, MessageCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 function HeaderBar({
   investorName,
@@ -31,9 +37,30 @@ function HeaderBar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Logout function
   const handleLogout = async () => {
-    // await supabase.auth.signOut();
-    navigate("/"); // Back to home
+    
+    // 1. Update role metadata while still logged in
+    const { error: updateError } = await supabase.auth.updateUser({
+      data: { role: "" }, // or null / undefined
+    });
+
+    const { data: { user } } = await supabase.auth.getUser();
+    console.log("Role before logout:", user?.user_metadata?.role);
+    
+    if (updateError) {
+      console.error("Failed to clear role:", updateError);
+      return; // optional: stop if update fails
+    }
+
+    // 2. Now sign out
+    const { error: logoutError } = await supabase.auth.signOut();
+    if (logoutError) {
+      console.error("Logout failed:", logoutError);
+    }
+
+    // 3. Go to homepage
+    navigate("/");
   };
   return (
     <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b relative">
@@ -144,7 +171,6 @@ function HeaderBar({
             src={profileImage}
             alt=""
             className="h-10 w-10 rounded-full object-cover border border-gray-300"
-            onClick={() => console.log(profileImage)}
           />
 
           {/* Dropdown Menu */}

@@ -1,6 +1,6 @@
-import React from "react";
-import { useState, useEffect } from "react";
-import HeaderBar from "./dashboard-components/components/headerBar.jsx";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
 import InvestorMatches from "./dashboard-components/components/matchComponents/investorMatches.jsx";
@@ -8,10 +8,150 @@ import PipelineSummary from "./dashboard-components/components/pipelineSummary.j
 import ProfileStatusCard from "./dashboard-components/components/profileStatusComponents/profileStatusCard.jsx";
 import EventShowcaseAccess from "./dashboard-components/components/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import DocumentStatus from "./dashboard-components/components/documentStatus.jsx";
+import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 function EntrepreneurDashboard() {
+  const [entrepreneurName, setEntrepreneurName] = useState("Founder");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [notifications, setNotifications] = useState([]);
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [pipelineData, setPipelineData] = useState({
+    contacted: 0,
+    interested: 0,
+    scheduled: 0,
+    diligence: 0,
+    termSheet: 0,
+  });
+
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.user) return;
+        const userId = session.user.id;
+
+        // Fetch user details
+        const { data: user, error: userErr } = await supabase
+          .from("user")
+          .select("first_name, last_name, profile_image")
+          .eq("id", userId)
+          .single();
+
+        if (userErr) throw userErr;
+
+        setEntrepreneurName(`${user.first_name} ${user.last_name}`);
+
+        if (user.profile_image) {
+          const { data: publicUrlData } = supabase.storage
+            .from("profile-images")
+            .getPublicUrl(user.profile_image);
+
+          setAvatarUrl(
+            publicUrlData?.publicUrl || "./src/assets/default_user_image.png"
+          );
+        } else {
+          setAvatarUrl("./src/assets/default_user_image.png");
+        }
+
+        // Fetch messages
+        const { data: msgData } = await supabase
+          .from("message")
+          .select("content, sender_id, created_at, is_read")
+          .eq("recipient_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        const formattedMessages = (msgData || []).map((msg) => ({
+          sender: `Sender ${msg.sender_id.slice(0, 6)}`,
+          preview: msg.content.slice(0, 60),
+          time: new Date(msg.created_at).toLocaleTimeString(),
+          read: msg.is_read,
+        }));
+
+        setMessages(formattedMessages);
+
+        // Fetch investor matches
+        const { data: matchData } = await supabase
+          .from("match")
+          .select(
+            `
+            id,
+            compatibility_score,
+            match_reasons,
+            investor:investor_id (
+              company_name,
+              location,
+              industry,
+              funding_stage,
+              profile_image
+            )
+          `
+          )
+          .eq("enterprise_id", userId)
+          .order("compatibility_score", { ascending: false });
+
+        const formattedMatches = (matchData || []).map((m) => ({
+          founder: m.investor.company_name,
+          company_name: m.investor.company_name,
+          description: `Invests in ${m.investor.industry}`,
+          location: m.investor.location,
+          profile_image: m.investor.profile_image,
+          match_score: m.compatibility_score,
+          match_reasons: m.match_reasons ? m.match_reasons.split(",") : [],
+          funding_stage: m.investor.funding_stage,
+          industry: m.investor.industry,
+        }));
+
+        setMatches(formattedMatches);
+
+        // Fetch events
+        const { data: eventsData } = await supabase
+          .from("event")
+          .select("*")
+          .gte("date", new Date().toISOString())
+          .order("date", { ascending: true })
+          .limit(5);
+
+        setEvents(eventsData || []);
+
+        // Placeholder notifications
+        setNotifications([
+          {
+            title: "You have a new investor match",
+            time: "Just now",
+            read: false,
+          },
+        ]);
+
+        // Static pipeline data (replace with real queries if available)
+        setPipelineData({
+          contacted: 3,
+          interested: 2,
+          scheduled: 1,
+          diligence: 0,
+          termSheet: 0,
+        });
+      } catch (err) {
+        console.error("Entrepreneur dashboard fetch error:", err);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const handleOpenChat = (msg) => {
     setOpenChats((prev) => {
@@ -26,145 +166,99 @@ function EntrepreneurDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
-  const testNotifications = [
+  // MOCK DATA FOR MATEO
+  const formattedMessages = [
     {
-      title: "New investor match: Angel Partners",
-      time: "Just now",
+      sender: "Sender user_0",
+      preview: "This is a test message from user_0.",
+      time: "9:06 PM",
       read: false,
     },
     {
-      title: "Pitch event tomorrow at 4pm",
-      time: "3h ago",
-      read: false,
-    },
-    {
-      title: "Investor Smith viewed your deck",
-      time: "Yesterday",
+      sender: "Sender user_1",
+      preview: "This is a test message from user_1.",
+      time: "6:06 PM",
       read: true,
     },
+    {
+      sender: "Sender user_2",
+      preview: "This is a test message from user_2.",
+      time: "3:06 PM",
+      read: false,
+    },
   ];
 
-  const pipelineData = {
-    contacted: 4,
-    interested: 3,
-    scheduled: 2,
-    diligence: 1,
-    termSheet: 0,
-  };
-
-  const mockInvestorMatches = [
+  const formattedMatches = [
     {
-      founder: "Jane Capital",
-      company_name: "Capital Group Ventures",
-      description: "Invests in early-stage health and fintech startups.",
-      location: "New York, NY",
-      profile_image: "https://i.pravatar.cc/150?img=12",
-      match_score: 92,
-      match_reasons: ["HealthTech", "Pre-seed fit", "Mentorship available"],
-      funding_stage: "Pre-seed",
-      industry: "HealthTech",
-      isFavorite: false,
-    },
-    {
-      founder: "Tom Bridges",
-      company_name: "Bridge Equity",
-      description: "Focused on scalable SaaS companies.",
+      founder: "InvestorCo 0",
+      company_name: "InvestorCo 0",
+      description: "Invests in Fintech",
       location: "San Francisco, CA",
-      profile_image: "https://i.pravatar.cc/150?img=7",
-      match_score: 85,
-      match_reasons: ["SaaS focus", "Prior investment in similar space"],
+      profile_image: "https://i.pravatar.cc/150?img=10",
+      match_score: 94,
+      match_reasons: ["Industry match", "Stage fit"],
       funding_stage: "Seed",
-      industry: "SaaS",
-      isFavorite: false,
+      industry: "Fintech",
+    },
+    {
+      founder: "InvestorCo 1",
+      company_name: "InvestorCo 1",
+      description: "Invests in Fintech",
+      location: "San Francisco, CA",
+      profile_image: "https://i.pravatar.cc/150?img=11",
+      match_score: 77,
+      match_reasons: ["Industry match", "Stage fit"],
+      funding_stage: "Seed",
+      industry: "Fintech",
     },
   ];
 
-  const handleMetricsLoaded = () => {
-    const mockMessages = [
-      {
-        sender: "Mateo (Investor)",
-        preview: "Let’s connect about the pitch session...",
-        time: "2h ago",
-        read: false,
-      },
-      {
-        sender: "Sophia (VC Bridge Fund)",
-        preview: "I liked your deck, can we talk Monday?",
-        time: "6h ago",
-        read: false,
-      },
-      {
-        sender: "Alice (Startup X)",
-        preview: "Thanks for your interest!",
-        time: "1d ago",
-        read: true,
-      },
-    ];
-    setMessages(mockMessages);
-  };
-
-  const mockPitchEvents = [
+  const mockEvents = [
     {
-      title: "AI Startup Demo Day",
+      title: "Pitch Event 0",
+      date: "2025-07-24T21:06:33Z",
       type: "Pitch Showcase",
-      date: "2025-08-12T14:00:00Z",
-      registration_status: "not_registered", // or "registered"
+      registration_status: "not_registered",
     },
     {
-      title: "Web3 Founder Roundtable",
-      type: "Virtual Pitch Session",
-      date: "2025-09-01T17:30:00Z",
+      title: "Pitch Event 1",
+      date: "2025-07-29T21:06:33Z",
+      type: "Pitch Showcase",
       registration_status: "registered",
     },
   ];
 
-  useEffect(() => {
-    handleMetricsLoaded();
-  }, []);
-
-  const profileImage = "https://i.pravatar.cc/150?img=7"; // Placeholder image URL
   return (
     <>
-      {/* greeting, notifications, avatar menu */}
       <HeaderBar
-        entrepreneurName={"Michael"}
-        notifications={testNotifications}
-        profileImage={profileImage}
+        entrepreneurName={entrepreneurName}
+        notifications={notifications}
+        profileImage={avatarUrl}
         messages={messages}
         onOpenChat={handleOpenChat}
       />
 
-      {/* show interest stages (contacted, scheduled, etc.) */}
       <PipelineSummary data={pipelineData} />
 
-      {/* show completion %, CTA to update profile */}
       <ProfileStatusCard
         completion={60}
         missingSections={["Company Pitch", "Financials", "Team Info"]}
         onUpdateClick={() => navigate("/dashboard/user")}
       />
 
-      {/* AI-generated investor cards */}
-      <InvestorMatches
-        matches={mockInvestorMatches}
-        onToggleFavorite={(data) => console.log("Favorite toggled:", data)}
-      />
+      <InvestorMatches matches={formattedMatches} onToggleFavorite={() => {}} />
 
-      {/* pitch event CTA or registration card */}
-      <EventShowcaseAccess events={mockPitchEvents}/>
+      <EventShowcaseAccess events={mockEvents} />
 
-      {/* uploaded docs & access log */}
-      <DocumentStatus initialDocuments={[]}/>
+      <DocumentStatus initialDocuments={[]} />
 
-      {/* preview or open recent chats */}
-      <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
+      <MessagesPreview messages={formattedMessages} onOpenChat={handleOpenChat} />
 
-      {/* chat dock for ongoing conversations */}
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
 
-      {/* THIS WILL BE A PREMIUM OPTION */}
-      {/* who viewed, when, and how often */}
-      {/* <EngagementAnalytics />  */}
+      {/* TO BE DONE IN A NEAR FUTURE */}
+      {/* analytics & trends */}
+      <InsightsPanel />
     </>
   );
 }

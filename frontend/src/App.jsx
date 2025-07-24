@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import HomePage from "./dashboards/HomePage";
 import MainUserDashboard from "./dashboards/MainUserDashboard";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";
 import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard";
-import ProfileSettings from "./dashboards/investors-dashboard/dashboard-components/components/headerBarComponents/components/profileSettings";
+import ProfileSettings from "./pages/ProfileSettings/profileSettings";
 import ProtectedRoute from "./auth/protectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -24,23 +24,38 @@ function App() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
+
       if (session?.user) {
+        const { data: userProfile, error } = await supabase
+          .from("user")
+          .select("user_type")
+          .eq("id", session.user.id)
+          .single();
+
+        if (error) {
+          console.error("User profile fetch error:", error);
+          return;
+        }
+
         setUser({
           ...session.user,
-          role:
-            session.user.user_metadata?.role ||
-            localStorage.getItem("user_role"),
+          role: userProfile.user_type,
         });
       }
     };
+
     getUserSession();
   }, []);
+
+  useEffect(() => {
+    console.log("Updated user:", user);
+  }, [user]);
 
   // MOCK USER DATA
   const [ user1 ]  = useState({
     id: '123',
     name: 'John Doe',
-    role: 'investor', // or 'investor'
+    role: 'entrepreneur', // or 'investor'
 
   })
   return (
@@ -56,8 +71,8 @@ function App() {
       <Route
         path="/dashboard/user"
         element={
-          <ProtectedRoute isAllowed={!!user1} redirectPath="/login">
-            <MainUserDashboard role={ user1.role }/>
+          <ProtectedRoute isAllowed={!!user} redirectPath="/login">
+            <MainUserDashboard role={user?.role || ""} />
           </ProtectedRoute>
         }
       />
@@ -67,7 +82,7 @@ function App() {
         path="/dashboard/investor"
         element={
           <ProtectedRoute
-            isAllowed={!!user1 && user1.role === "investor"}
+            isAllowed={!!user && user.role === "investor"}
             redirectPath="/login"
           >
             <InvestorsDashboard />

@@ -67,7 +67,7 @@ def get_events():
         return jsonify({'error': str(e)}), 500
 
 @events_bp.route('/<int:event_id>', methods=['GET'])
-def get_event_details():
+def get_event_details(event_id):
     """Get detailed information about a specific event"""
     try:
         event = Event.query.get(event_id)
@@ -159,7 +159,7 @@ def create_event():
         return jsonify({'error': str(e)}), 500
 
 @events_bp.route('/<int:event_id>', methods=['PUT'])
-def update_event():
+def update_event(event_id):
     """Update an existing event (admin function)"""
     try:
         user, error_response, status_code = require_auth()
@@ -206,7 +206,7 @@ def update_event():
         return jsonify({'error': str(e)}), 500
 
 @events_bp.route('/<int:event_id>/register', methods=['POST'])
-def register_for_event():
+def register_for_event(event_id):
     """Register for an event"""
     try:
         user, error_response, status_code = require_auth()
@@ -263,7 +263,7 @@ def register_for_event():
         return jsonify({'error': str(e)}), 500
 
 @events_bp.route('/<int:event_id>/unregister', methods=['DELETE'])
-def unregister_from_event():
+def unregister_from_event(event_id):
     """Unregister from an event"""
     try:
         user, error_response, status_code = require_auth()
@@ -294,7 +294,7 @@ def unregister_from_event():
         return jsonify({'error': str(e)}), 500
 
 @events_bp.route('/<int:event_id>/registrations', methods=['GET'])
-def get_event_registrations():
+def get_event_registrations(event_id):
     """Get registrations for an event (admin function)"""
     try:
         user, error_response, status_code = require_auth()

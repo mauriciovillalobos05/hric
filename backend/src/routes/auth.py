@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, EntrepreneurProfile, db
+from src.models.user import User, InvestorProfile, Enterprise, Like,db
 from datetime import datetime
 import re
 
@@ -21,36 +21,22 @@ def validate_password(password):
         return False
     return True
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
+@auth_bp.route('/register-complete', methods=['POST'])
+def register_complete():
     try:
         data = request.json
-        
-        # Validate required fields
-        required_fields = ['email', 'password', 'user_type', 'first_name', 'last_name']
+
+        required_fields = ['supabase_id', 'email', 'user_type', 'first_name', 'last_name']
         for field in required_fields:
             if field not in data or not data[field]:
                 return jsonify({'error': f'{field} is required'}), 400
-        
-        # Validate email format
-        if not validate_email(data['email']):
-            return jsonify({'error': 'Invalid email format'}), 400
-        
-        # Validate password strength
-        if not validate_password(data['password']):
-            return jsonify({'error': 'Password must be at least 8 characters with uppercase, lowercase, and number'}), 400
-        
-        # Validate user type
-        if data['user_type'] not in ['investor', 'entrepreneur']:
-            return jsonify({'error': 'User type must be investor or entrepreneur'}), 400
-        
+
         # Check if user already exists
-        existing_user = User.query.filter_by(email=data['email']).first()
-        if existing_user:
-            return jsonify({'error': 'User with this email already exists'}), 409
-        
-        # Create new user
+        if User.query.filter_by(id=data['supabase_id']).first():
+            return jsonify({'error': 'User already exists'}), 409
+
         user = User(
+            id=data['supabase_id'],
             email=data['email'],
             user_type=data['user_type'],
             first_name=data['first_name'],
@@ -59,71 +45,55 @@ def register():
             location=data.get('location'),
             bio=data.get('bio'),
             linkedin_url=data.get('linkedin_url'),
-            website_url=data.get('website_url')
+            website_url=data.get('website_url'),
+            profile_image=data.get('profile_image'),
+            is_verified=True
         )
-        user.set_password(data['password'])
-        
         db.session.add(user)
-        db.session.flush()  # Get the user ID
-        
-        # Create profile based on user type
+        db.session.flush()
+
+        # Determine subscription tier (optional)
+        subscription_tier = data.get('subscription_tier')
+
         if data['user_type'] == 'investor':
-            profile = InvestorProfile(user_id=user.id)
-            db.session.add(profile)
-        else:
-            profile = EntrepreneurProfile(
+            db.session.add(InvestorProfile(
                 user_id=user.id,
-                company_name=data.get('company_name', '')
-            )
-            db.session.add(profile)
-        
+                subscription_tier=subscription_tier or 'tier_1'
+            ))
+        else:
+            db.session.add(Enterprise(
+                user_id=user.id,
+                company_name=data.get('company_name', ''),
+                subscription_tier=subscription_tier or 'free'
+            ))
+
         db.session.commit()
-        
-        # Set session
-        session['user_id'] = user.id
-        session['user_type'] = user.user_type
-        
-        return jsonify({
-            'message': 'User registered successfully',
-            'user': user.to_dict()
-        }), 201
-        
+        return jsonify({'message': 'User registration completed', 'user': user.to_dict()}), 201
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@auth_bp.route('/login', methods=['POST'])
-def login():
+@auth_bp.route('/track-login', methods=['POST'])
+def track_login():
     try:
         data = request.json
-        
-        if not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Email and password are required'}), 400
-        
-        user = User.query.filter_by(email=data['email']).first()
-        
-        if not user or not user.check_password(data['password']):
-            return jsonify({'error': 'Invalid email or password'}), 401
-        
-        if not user.is_active:
-            return jsonify({'error': 'Account is deactivated'}), 401
-        
-        # Update last login
-        user.last_login = datetime.utcnow()
-        db.session.commit()
-        
-        # Set session
-        session['user_id'] = user.id
-        session['user_type'] = user.user_type
-        
-        return jsonify({
-            'message': 'Login successful',
-            'user': user.to_dict()
-        }), 200
-        
+        email = data.get('email')
+
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            return jsonify({'message': 'Login tracked'}), 200
+        else:
+            return jsonify({'error': 'User not found'}), 404
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+        
 @auth_bp.route('/logout', methods=['POST'])
 def logout():
     session.clear()
@@ -318,3 +288,46 @@ def update_subscription():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@auth_bp.route('/enterprise/<int:enterprise_id>/likes', methods=['POST', 'GET'])
+def handle_likes(enterprise_id):
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    user = User.query.get(user_id)
+    if not user or user.user_type != 'investor':
+        return jsonify({'error': 'Only investors can perform this action'}), 403
+
+    investor_profile = user.investor_profile
+    if not investor_profile:
+        return jsonify({'error': 'Investor profile not found'}), 404
+
+    enterprise = Enterprise.query.get(enterprise_id)
+    if not enterprise:
+        return jsonify({'error': 'Enterprise not found'}), 404
+
+    if request.method == 'POST':
+        # Check if already liked
+        existing_like = Like.query.filter_by(investor_id=user.id, enterprise_id=enterprise_id).first()
+        if existing_like:
+            return jsonify({'message': 'Already liked'}), 200
+
+        like = Like(investor_id=user.id, enterprise_id=enterprise_id)
+        db.session.add(like)
+        db.session.commit()
+        return jsonify({'message': 'Enterprise liked'}), 201
+
+    elif request.method == 'GET':
+        likes = enterprise.likes_received
+        tier = investor_profile.subscription_tier
+
+        if tier == 'tier_3':
+            return jsonify({
+                'likes': [like.investor.to_summary() for like in likes],
+                'count': len(likes)
+            })
+        elif tier == 'tier_2':
+            return jsonify({'count': len(likes)})
+        else:
+            return jsonify({'message': 'Upgrade to view likes'}), 403

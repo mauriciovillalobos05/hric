@@ -237,7 +237,7 @@ function HomePage() {
                 <Button
                   variant="outline"
                   className="mr-2"
-                  onClick={() => navigate("/dashboard/user")}
+                  onClick={() => navigate("/login")}
                 >
                   Sign In
                 </Button>

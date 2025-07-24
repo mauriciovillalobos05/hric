@@ -143,7 +143,7 @@ def upload_document():
         return jsonify({'error': str(e)}), 500
 
 @documents_bp.route('/<int:document_id>', methods=['GET'])
-def get_document_details():
+def get_document_details(document_id):
     """Get document details"""
     try:
         user, error_response, status_code = require_auth()
@@ -172,7 +172,7 @@ def get_document_details():
         return jsonify({'error': str(e)}), 500
 
 @documents_bp.route('/<int:document_id>/download', methods=['GET'])
-def download_document():
+def download_document(document_id):
     """Download a document"""
     try:
         user, error_response, status_code = require_auth()
@@ -205,7 +205,7 @@ def download_document():
         return jsonify({'error': str(e)}), 500
 
 @documents_bp.route('/<int:document_id>', methods=['PUT'])
-def update_document():
+def update_document(document_id):
     """Update document metadata"""
     try:
         user, error_response, status_code = require_auth()
@@ -243,7 +243,7 @@ def update_document():
         return jsonify({'error': str(e)}), 500
 
 @documents_bp.route('/<int:document_id>', methods=['DELETE'])
-def delete_document():
+def delete_document(document_id):
     """Delete a document"""
     try:
         user, error_response, status_code = require_auth()
@@ -273,7 +273,7 @@ def delete_document():
         return jsonify({'error': str(e)}), 500
 
 @documents_bp.route('/<int:document_id>/grant-access', methods=['POST'])
-def grant_document_access():
+def grant_document_access(document_id):
     """Grant access to a document"""
     try:
         user, error_response, status_code = require_auth()
@@ -343,8 +343,8 @@ def grant_document_access():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@documents_bp.route('/<int:document_id>/revoke-access/<int:user_id>', methods=['DELETE'])
-def revoke_document_access():
+@documents_bp.route('/<int:document_id>/revoke-access/<uuid:user_id>', methods=['DELETE'])
+def revoke_document_access(document_id, user_id):
     """Revoke access to a document"""
     try:
         user, error_response, status_code = require_auth()

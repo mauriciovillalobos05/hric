@@ -1,17 +1,18 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Bell, MessageCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-function HeaderBar({ 
-  investorName, 
-  notifications = [], 
-  profileImage, 
-  messages = [], 
-  onOpenChat = () => {} 
+function HeaderBar({
+  investorName,
+  notifications = [],
+  profileImage,
+  messages = [],
+  onOpenChat = () => {},
 }) {
-  
   const [notificationBarOpen, setNotificationBarIsOpen] = useState(false);
   const [chatBarOpen, setChatBarIsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   const menuRef = useRef(null);
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
@@ -30,6 +31,10 @@ function HeaderBar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleLogout = async () => {
+    // await supabase.auth.signOut();
+    navigate("/"); // Back to home
+  };
   return (
     <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b relative">
       {/* Greeting */}
@@ -42,7 +47,6 @@ function HeaderBar({
 
       {/* Right Controls */}
       <div className="flex items-center space-x-6" ref={menuRef}>
-
         {/* Message Icon */}
         <div
           className="relative cursor-pointer"
@@ -61,7 +65,9 @@ function HeaderBar({
         {/* Chat Dropdown */}
         {chatBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">Recent Messages</div>
+            <div className="p-4 border-b font-semibold text-gray-700">
+              Recent Messages
+            </div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {messages.length === 0 ? (
                 <li className="p-4 text-gray-500 text-sm text-center">
@@ -69,12 +75,12 @@ function HeaderBar({
                 </li>
               ) : (
                 messages.map((msg, index) => (
-                  <li 
-                    key={index} 
+                  <li
+                    key={index}
                     className="p-4 hover:bg-gray-50 text-sm"
                     onClick={() => {
-                      onOpenChat(msg)
-                      setChatBarIsOpen(false)
+                      onOpenChat(msg);
+                      setChatBarIsOpen(false);
                     }} // trigger chat open
                   >
                     <p className="font-medium text-gray-800">{msg.sender}</p>
@@ -136,16 +142,31 @@ function HeaderBar({
         >
           <img
             src={profileImage}
-            alt="User avatar"
+            alt=""
             className="h-10 w-10 rounded-full object-cover border border-gray-300"
+            onClick={() => console.log(profileImage)}
           />
 
           {/* Dropdown Menu */}
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border z-50">
               <ul className="py-1 text-sm text-gray-700">
-                <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Profile Settings</li>
-                <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-600">
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => navigate("/profile-settings")}
+                >
+                  Profile Settings
+                </li>
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => navigate("/subscription")}
+                >
+                  Upgrade Subscription
+                </li>
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-600"
+                  onClick={handleLogout}
+                >
                   Log Out
                 </li>
               </ul>

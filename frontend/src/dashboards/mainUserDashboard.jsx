@@ -3,7 +3,7 @@ import InvestorsDashboard from './investors-dashboard/investorsDashboard.jsx';
 
 function MainUserDashboard() {
   // will be changed once we have authentication and user roles
-  const  role = 'entrepreneur'
+  const  role = 'investor'
 
   if (role === 'investor') return <InvestorsDashboard />;
   if (role === 'entrepreneur') return <EntrepreneurDashboard />;

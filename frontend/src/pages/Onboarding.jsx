@@ -11,6 +11,68 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+function LocationAutocomplete({ value, onChange }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [query, setQuery] = useState(value || "");
+
+  useEffect(() => {
+    if (query.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    const fetchCities = async () => {
+      const res = await fetch(
+        `https://wft-geo-db.p.rapidapi.com/v1/geo/cities?namePrefix=${query}&limit=5&sort=-population`,
+        {
+          method: "GET",
+          headers: {
+            "X-RapidAPI-Key":
+              "965b5a8f84msh2cc329de9240607p1b4158jsn7bc2cea9220a",
+            "X-RapidAPI-Host": "wft-geo-db.p.rapidapi.com",
+          },
+        }
+      );
+      const data = await res.json();
+      setSuggestions(data.data);
+    };
+
+    const debounce = setTimeout(fetchCities, 300);
+    return () => clearTimeout(debounce);
+  }, [query]);
+
+  return (
+    <div className="relative col-span-2">
+      <Input
+        placeholder="Location"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          onChange(e.target.value); // Pass up the change
+        }}
+      />
+      {suggestions.length > 0 && (
+        <ul className="absolute z-10 bg-white border mt-1 rounded-md shadow-md w-full max-h-40 overflow-y-auto">
+          {suggestions.map((city) => (
+            <li
+              key={city.id}
+              className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+              onClick={() => {
+                const location = `${city.city}, ${city.region}, ${city.country}`;
+                setQuery(location);
+                onChange(location);
+                setSuggestions([]);
+              }}
+            >
+              {city.city}, {city.region}, {city.country}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function Onboarding() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
@@ -60,13 +122,13 @@ export default function Onboarding() {
         const fileExt = file.name.split(".").pop();
         const fileName = `profile.${fileExt}`;
         const filePath = `${user.id}/${fileName}`;
-        console.log('Uploading file for user:', user.id)
+        console.log("Uploading file for user:", user.id);
         console.log("Uploading to:", filePath);
 
         const { error: uploadError } = await supabase.storage
           .from("profile-images")
           .upload(filePath, file, {
-            upsert: false,
+            upsert: true,
             cacheControl: "3600",
             contentType: file.type,
           });
@@ -84,14 +146,17 @@ export default function Onboarding() {
         user_type: user.user_metadata.role || "entrepreneur",
       };
 
-      const res = await fetch("http://localhost:8000/api/auth/register-complete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
-        },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        "http://localhost:8000/api/auth/register-complete",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
+          },
+          body: JSON.stringify(payload),
+        }
+      );
 
       if (!res.ok) {
         const msg = await res.text();
@@ -130,6 +195,30 @@ export default function Onboarding() {
             onSubmit={handleSubmit}
             className="grid grid-cols-1 md:grid-cols-2 gap-4"
           >
+            <div className="col-span-2 flex justify-center">
+              <label className="relative cursor-pointer group">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => setFile(e.target.files[0])}
+                />
+                <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-gray-300 group-hover:ring-2 group-hover:ring-blue-400 transition-all">
+                  <img
+                    src={
+                      file
+                        ? URL.createObjectURL(file)
+                        : "https://via.placeholder.com/150?text=Upload"
+                    }
+                    alt="Profile Preview"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="absolute bottom-0 w-full text-center text-xs text-gray-600 bg-white bg-opacity-70 py-1 rounded-b-full">
+                  Change
+                </div>
+              </label>
+            </div>
             <Input
               placeholder="First Name"
               value={form.first_name}
@@ -147,10 +236,9 @@ export default function Onboarding() {
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
-            <Input
-              placeholder="Location"
+            <LocationAutocomplete
               value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              onChange={(value) => setForm({ ...form, location: value })}
             />
             <Input
               placeholder="LinkedIn URL"
@@ -165,11 +253,6 @@ export default function Onboarding() {
               onChange={(e) =>
                 setForm({ ...form, website_url: e.target.value })
               }
-            />
-            <Input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setFile(e.target.files[0])}
             />
             <textarea
               placeholder="Short Bio"

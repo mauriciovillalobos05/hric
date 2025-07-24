@@ -25,7 +25,7 @@ import {
 import hricPoster from '../assets/hrcposter.png'
 import '../App.css'
 
-function homePage() {
+function HomePage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [selectedUserType, setSelectedUserType] = useState('investor')
   const navigate = useNavigate()
@@ -571,4 +571,4 @@ function homePage() {
   )
 }
 
-export default homePage;
+export default HomePage;

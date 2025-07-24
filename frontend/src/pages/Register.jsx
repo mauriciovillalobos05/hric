@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
+import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -17,29 +18,46 @@ export default function Register() {
   const navigate = useNavigate()
   const location = useLocation()
   const queryParams = new URLSearchParams(location.search)
-  const defaultRole = queryParams.get('role') // "investor" | "entrepreneur" | null
+  const defaultRole = queryParams.get('role')
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
   const [role, setRole] = useState(defaultRole)
+  const [countryCode, setCountryCode] = useState('US') // fallback
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    fetch('https://ipapi.co/json/')
+      .then(res => res.json())
+      .then(data => setCountryCode(data.country_code))
+      .catch(() => setCountryCode('US'))
+  }, [])
 
   const handleRegister = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
+    if (!isValidPhoneNumber(phone, countryCode)) {
+      setError('Please enter a valid phone number.')
+      setLoading(false)
+      return
+    }
+
     const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-            emailRedirectTo: 'http://localhost:5173/onboarding', // Or your production domain
-            data: {
-            role: role || null,
-            },
-        },
+      email,
+      password,
+      options: {
+        emailRedirectTo: 'http://localhost:5173/onboarding',
+        data: {
+          name,
+          phone,
+          role: role || null
+        }
+      }
     })
 
     if (error) {
@@ -59,6 +77,15 @@ export default function Register() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleRegister} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Full Name</label>
+              <Input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Phone Number</label>
+              <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+              <p className="text-xs text-gray-500">Include country code if possible</p>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Email</label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />

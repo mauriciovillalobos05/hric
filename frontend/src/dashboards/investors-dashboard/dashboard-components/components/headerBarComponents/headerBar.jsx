@@ -1,19 +1,34 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Bell, MessageCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-function HeaderBar({ 
-  entrepreneurName, 
-  notifications = [], 
-  profileImage, 
-  messages = [], 
-  onOpenChat = () => {} 
-}) {
-  
+function HeaderBar({ onOpenChat = () => {} }) {
   const [notificationBarOpen, setNotificationBarIsOpen] = useState(false);
   const [chatBarOpen, setChatBarIsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-
+  const [investorName, setInvestorName] = useState("Investor");
+  const [profileImage, setProfileImage] = useState("/default-profile.png");
+  const [notifications, setNotifications] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const navigate = useNavigate();
   const menuRef = useRef(null);
+
+  // Load data from sessionStorage
+  useEffect(() => {
+  const profile = JSON.parse(sessionStorage.getItem("profile"));
+  const storedNotifications = JSON.parse(sessionStorage.getItem("notifications")) || [];
+  const storedMessages = JSON.parse(sessionStorage.getItem("messages")) || [];
+
+  if (profile) {
+    setInvestorName(`${profile.firstName} ${profile.lastName}`); // ✅ camelCase
+    setProfileImage(profile.profile_image || "/default-profile.png");
+  }
+
+  setNotifications(storedNotifications);
+  setMessages(storedMessages);
+}, []);
+
+
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
   const unreadMessagesCount = messages.filter((n) => !n.read).length;
 
@@ -30,20 +45,24 @@ function HeaderBar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleLogout = () => {
+    sessionStorage.clear();
+    navigate("/");
+  };
+
   return (
     <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b relative">
       {/* Greeting */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">
-          Welcome back, {entrepreneurName}
+          Welcome back, {investorName}
         </h1>
-        <p className="text-sm text-gray-500">Your Ideas and Associate Partners dashboard</p>
+        <p className="text-sm text-gray-500">Your investment dashboard</p>
       </div>
 
       {/* Right Controls */}
       <div className="flex items-center space-x-6" ref={menuRef}>
-
-        {/* Message Icon */}
+        {/* Messages */}
         <div
           className="relative cursor-pointer"
           onClick={() => {
@@ -58,10 +77,11 @@ function HeaderBar({
           )}
         </div>
 
-        {/* Chat Dropdown */}
         {chatBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">Recent Messages</div>
+            <div className="p-4 border-b font-semibold text-gray-700">
+              Recent Messages
+            </div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {messages.length === 0 ? (
                 <li className="p-4 text-gray-500 text-sm text-center">
@@ -69,13 +89,13 @@ function HeaderBar({
                 </li>
               ) : (
                 messages.map((msg, index) => (
-                  <li 
-                    key={index} 
-                    className="p-4 hover:bg-gray-50 text-sm"
+                  <li
+                    key={index}
+                    className="p-4 hover:bg-gray-50 text-sm cursor-pointer"
                     onClick={() => {
-                      onOpenChat(msg)
-                      setChatBarIsOpen(false)
-                    }} // trigger chat open
+                      onOpenChat(msg);
+                      setChatBarIsOpen(false);
+                    }}
                   >
                     <p className="font-medium text-gray-800">{msg.sender}</p>
                     <p className="text-gray-600">{msg.preview}</p>
@@ -87,7 +107,7 @@ function HeaderBar({
           </div>
         )}
 
-        {/* Notification Bell */}
+        {/* Notifications */}
         <div
           className="relative cursor-pointer"
           onClick={() => {
@@ -102,7 +122,6 @@ function HeaderBar({
           )}
         </div>
 
-        {/* Notification Dropdown */}
         {notificationBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
             <div className="p-4 border-b font-semibold text-gray-700">
@@ -125,7 +144,7 @@ function HeaderBar({
           </div>
         )}
 
-        {/* Profile Image */}
+        {/* Avatar Menu */}
         <div
           className="relative cursor-pointer"
           onClick={() => {
@@ -136,16 +155,28 @@ function HeaderBar({
         >
           <img
             src={profileImage}
-            alt="User avatar"
+            alt="Profile"
             className="h-10 w-10 rounded-full object-cover border border-gray-300"
           />
-
-          {/* Dropdown Menu */}
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border z-50">
               <ul className="py-1 text-sm text-gray-700">
-                <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Profile Settings</li>
-                <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-600">
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => navigate("/profile-settings")}
+                >
+                  Profile Settings
+                </li>
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => navigate("/subscription")}
+                >
+                  Upgrade Subscription
+                </li>
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-600"
+                  onClick={handleLogout}
+                >
                   Log Out
                 </li>
               </ul>

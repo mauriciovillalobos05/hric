@@ -384,7 +384,7 @@ class Meeting(db.Model):
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
     meeting_url = db.Column(db.String(255))
     scheduled_at = db.Column(db.DateTime)
-    metadata = db.Column(JSONB)
+    meeting_metadata = db.Column(JSONB)
 
     def to_dict(self):
         return {

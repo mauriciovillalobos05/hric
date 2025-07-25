@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, Enterprise, Match, Event, EventRegistration, Document, Message, db
+from src.models.user import User, InvestorProfile, Enterprise, MatchRecommendation, Event, EventRegistration, Document, Message, db
 from datetime import datetime, timedelta
 from sqlalchemy import func, extract
 
@@ -28,37 +28,37 @@ def get_dashboard_analytics():
         total_users = User.query.filter_by(is_active=True).count()
         total_investors = User.query.filter_by(user_type='investor', is_active=True).count()
         total_entrepreneurs = User.query.filter_by(user_type='entrepreneur', is_active=True).count()
-        total_matches = Match.query.count()
-        successful_matches = Match.query.filter_by(status='invested').count()
+        total_MatchRecommendationes = MatchRecommendation.query.count()
+        successful_MatchRecommendationes = MatchRecommendation.query.filter_by(status='invested').count()
 
         # Recent activity (last 30 days)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         new_users = User.query.filter(User.created_at >= thirty_days_ago).count()
-        new_matches = Match.query.filter(Match.created_at >= thirty_days_ago).count()
+        new_MatchRecommendationes = MatchRecommendation.query.filter(MatchRecommendation.created_at >= thirty_days_ago).count()
         recent_events = Event.query.filter(Event.created_at >= thirty_days_ago).count()
 
         # User-specific analytics
         user_analytics = {}
 
         if user.user_type == 'investor':
-            user_matches = Match.query.filter_by(investor_id=user.id).count()
-            user_interested = Match.query.filter_by(investor_id=user.id, investor_interest='interested').count()
-            user_investments = Match.query.filter_by(investor_id=user.id, status='invested').count()
+            user_MatchRecommendationes = MatchRecommendation.query.filter_by(investor_id=user.id).count()
+            user_interested = MatchRecommendation.query.filter_by(investor_id=user.id, investor_interest='interested').count()
+            user_investments = MatchRecommendation.query.filter_by(investor_id=user.id, status='invested').count()
             user_analytics = {
-                'total_matches': user_matches,
-                'interested_matches': user_interested,
+                'total_MatchRecommendationes': user_MatchRecommendationes,
+                'interested_MatchRecommendationes': user_interested,
                 'investments_made': user_investments,
                 'success_rate': (user_investments / user_interested * 100) if user_interested > 0 else 0
             }
         elif user.user_type == 'entrepreneur':
-            user_matches = Match.query.filter_by(enterprise_id=user.id).count()
-            investor_interest = Match.query.filter_by(enterprise_id=user.id, investor_interest='interested').count()
-            funding_received = Match.query.filter_by(enterprise_id=user.id, status='invested').count()
+            user_MatchRecommendationes = MatchRecommendation.query.filter_by(enterprise_id=user.id).count()
+            investor_interest = MatchRecommendation.query.filter_by(enterprise_id=user.id, investor_interest='interested').count()
+            funding_received = MatchRecommendation.query.filter_by(enterprise_id=user.id, status='invested').count()
             user_analytics = {
-                'total_matches': user_matches,
+                'total_MatchRecommendationes': user_MatchRecommendationes,
                 'investor_interest': investor_interest,
                 'funding_received': funding_received,
-                'interest_rate': (investor_interest / user_matches * 100) if user_matches > 0 else 0
+                'interest_rate': (investor_interest / user_MatchRecommendationes * 100) if user_MatchRecommendationes > 0 else 0
             }
 
         # Event analytics
@@ -73,13 +73,13 @@ def get_dashboard_analytics():
                 'total_users': total_users,
                 'total_investors': total_investors,
                 'total_entrepreneurs': total_entrepreneurs,
-                'total_matches': total_matches,
-                'successful_matches': successful_matches,
-                'success_rate': (successful_matches / total_matches * 100) if total_matches > 0 else 0
+                'total_MatchRecommendationes': total_MatchRecommendationes,
+                'successful_MatchRecommendationes': successful_MatchRecommendationes,
+                'success_rate': (successful_MatchRecommendationes / total_MatchRecommendationes * 100) if total_MatchRecommendationes > 0 else 0
             },
             'recent_activity': {
                 'new_users': new_users,
-                'new_matches': new_matches,
+                'new_MatchRecommendationes': new_MatchRecommendationes,
                 'recent_events': recent_events
             },
             'user_analytics': user_analytics,
@@ -117,18 +117,18 @@ def get_platform_statistics():
             func.count(User.id).label('count')
         ).group_by(User.subscription_tier).all()
         
-        # Matching statistics
-        match_stats = {
-            'total_matches': Match.query.count(),
-            'pending_matches': Match.query.filter_by(status='pending').count(),
-            'accepted_matches': Match.query.filter_by(status='accepted').count(),
-            'declined_matches': Match.query.filter_by(status='declined').count(),
-            'invested_matches': Match.query.filter_by(status='invested').count()
+        # MatchRecommendationing statistics
+        MatchRecommendation_stats = {
+            'total_MatchRecommendationes': MatchRecommendation.query.count(),
+            'pending_MatchRecommendationes': MatchRecommendation.query.filter_by(status='pending').count(),
+            'accepted_MatchRecommendationes': MatchRecommendation.query.filter_by(status='accepted').count(),
+            'declined_MatchRecommendationes': MatchRecommendation.query.filter_by(status='declined').count(),
+            'invested_MatchRecommendationes': MatchRecommendation.query.filter_by(status='invested').count()
         }
         
         # Average compatibility score
-        avg_compatibility = db.session.query(func.avg(Match.compatibility_score)).scalar() or 0
-        match_stats['average_compatibility'] = round(avg_compatibility, 2)
+        avg_compatibility = db.session.query(func.avg(MatchRecommendation.compatibility_score)).scalar() or 0
+        MatchRecommendation_stats['average_compatibility'] = round(avg_compatibility, 2)
         
         # Industry distribution
         industry_stats = db.session.query(
@@ -171,7 +171,7 @@ def get_platform_statistics():
         platform_stats = {
             'users': user_stats,
             'subscriptions': [{'tier': tier, 'count': count} for tier, count in subscription_stats],
-            'matches': match_stats,
+            'MatchRecommendationes': MatchRecommendation_stats,
             'industries': [{'industry': industry, 'count': count} for industry, count in industry_stats],
             'funding_stages': [{'stage': stage, 'count': count} for stage, count in stage_stats],
             'events': event_stats,
@@ -209,13 +209,13 @@ def get_growth_metrics():
                 extract('month', User.created_at)
             ).order_by('year', 'month').all()
             
-            match_growth = db.session.query(
-                extract('year', Match.created_at).label('year'),
-                extract('month', Match.created_at).label('month'),
-                func.count(Match.id).label('count')
-            ).filter(Match.created_at >= start_date).group_by(
-                extract('year', Match.created_at),
-                extract('month', Match.created_at)
+            MatchRecommendation_growth = db.session.query(
+                extract('year', MatchRecommendation.created_at).label('year'),
+                extract('month', MatchRecommendation.created_at).label('month'),
+                func.count(MatchRecommendation.id).label('count')
+            ).filter(MatchRecommendation.created_at >= start_date).group_by(
+                extract('year', MatchRecommendation.created_at),
+                extract('month', MatchRecommendation.created_at)
             ).order_by('year', 'month').all()
         
         # Format growth data
@@ -227,12 +227,12 @@ def get_growth_metrics():
             for year, month, count in user_growth
         ]
         
-        match_growth_data = [
+        MatchRecommendation_growth_data = [
             {
                 'period': f"{int(year)}-{int(month):02d}",
-                'new_matches': count
+                'new_MatchRecommendationes': count
             }
-            for year, month, count in match_growth
+            for year, month, count in MatchRecommendation_growth
         ]
         
         # Calculate growth rates
@@ -243,19 +243,19 @@ def get_growth_metrics():
         else:
             user_growth_rate = 0
         
-        if len(match_growth_data) >= 2:
-            latest_matches = match_growth_data[-1]['new_matches']
-            previous_matches = match_growth_data[-2]['new_matches']
-            match_growth_rate = ((latest_matches - previous_matches) / previous_matches * 100) if previous_matches > 0 else 0
+        if len(MatchRecommendation_growth_data) >= 2:
+            latest_MatchRecommendationes = MatchRecommendation_growth_data[-1]['new_MatchRecommendationes']
+            previous_MatchRecommendationes = MatchRecommendation_growth_data[-2]['new_MatchRecommendationes']
+            MatchRecommendation_growth_rate = ((latest_MatchRecommendationes - previous_MatchRecommendationes) / previous_MatchRecommendationes * 100) if previous_MatchRecommendationes > 0 else 0
         else:
-            match_growth_rate = 0
+            MatchRecommendation_growth_rate = 0
         
         growth_metrics = {
             'user_growth': user_growth_data,
-            'match_growth': match_growth_data,
+            'MatchRecommendation_growth': MatchRecommendation_growth_data,
             'growth_rates': {
                 'user_growth_rate': round(user_growth_rate, 2),
-                'match_growth_rate': round(match_growth_rate, 2)
+                'MatchRecommendation_growth_rate': round(MatchRecommendation_growth_rate, 2)
             }
         }
         
@@ -356,9 +356,9 @@ def get_engagement_metrics():
             Message.created_at >= thirty_days_ago
         ).scalar() or 0
         
-        # Match engagement
-        matches_last_30_days = Match.query.filter(
-            Match.created_at >= thirty_days_ago
+        # MatchRecommendation engagement
+        MatchRecommendationes_last_30_days = MatchRecommendation.query.filter(
+            MatchRecommendation.created_at >= thirty_days_ago
         ).count()
         
         # Event engagement
@@ -386,13 +386,13 @@ def get_engagement_metrics():
             'activity_last_30_days': {
                 'messages_sent': messages_last_30_days,
                 'active_messagers': active_messagers,
-                'new_matches': matches_last_30_days,
+                'new_MatchRecommendationes': MatchRecommendationes_last_30_days,
                 'event_registrations': event_registrations_last_30_days,
                 'documents_uploaded': documents_uploaded_last_30_days
             },
             'average_activity_per_user': {
                 'messages_per_active_user': (messages_last_30_days / monthly_active_users) if monthly_active_users > 0 else 0,
-                'matches_per_active_user': (matches_last_30_days / monthly_active_users) if monthly_active_users > 0 else 0
+                'MatchRecommendationes_per_active_user': (MatchRecommendationes_last_30_days / monthly_active_users) if monthly_active_users > 0 else 0
             }
         }
         
@@ -416,24 +416,24 @@ def get_user_analytics(target_user_id):
         user_info = target_user.to_dict()
 
         if target_user.user_type == 'investor':
-            matches = Match.query.filter_by(investor_id=target_user_id).count()
-            interested = Match.query.filter_by(investor_id=target_user_id, investor_interest='interested').count()
-            investments = Match.query.filter_by(investor_id=target_user_id, status='invested').count()
+            MatchRecommendationes = MatchRecommendation.query.filter_by(investor_id=target_user_id).count()
+            interested = MatchRecommendation.query.filter_by(investor_id=target_user_id, investor_interest='interested').count()
+            investments = MatchRecommendation.query.filter_by(investor_id=target_user_id, status='invested').count()
             activity_stats = {
-                'total_matches': matches,
-                'interested_matches': interested,
+                'total_MatchRecommendationes': MatchRecommendationes,
+                'interested_MatchRecommendationes': interested,
                 'investments_made': investments,
                 'success_rate': (investments / interested * 100) if interested > 0 else 0
             }
         else:
-            matches = Match.query.filter_by(enterprise_id=target_user_id).count()
-            investor_interest = Match.query.filter_by(enterprise_id=target_user_id, investor_interest='interested').count()
-            funding = Match.query.filter_by(enterprise_id=target_user_id, status='invested').count()
+            MatchRecommendationes = MatchRecommendation.query.filter_by(enterprise_id=target_user_id).count()
+            investor_interest = MatchRecommendation.query.filter_by(enterprise_id=target_user_id, investor_interest='interested').count()
+            funding = MatchRecommendation.query.filter_by(enterprise_id=target_user_id, status='invested').count()
             activity_stats = {
-                'total_matches': matches,
+                'total_MatchRecommendationes': MatchRecommendationes,
                 'investor_interest': investor_interest,
                 'funding_received': funding,
-                'interest_rate': (investor_interest / matches * 100) if matches > 0 else 0
+                'interest_rate': (investor_interest / MatchRecommendationes * 100) if MatchRecommendationes > 0 else 0
             }
 
         messages_sent = Message.query.filter_by(sender_id=target_user_id).count()
@@ -485,7 +485,7 @@ def export_analytics():
                 'export_date': datetime.utcnow().isoformat(),
                 'platform_summary': {
                     'total_users': User.query.count(),
-                    'total_matches': Match.query.count(),
+                    'total_MatchRecommendationes': MatchRecommendation.query.count(),
                     'total_events': Event.query.count(),
                     'total_messages': Message.query.count()
                 }

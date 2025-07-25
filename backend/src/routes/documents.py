@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, session, send_file, zip_response
+from flask import Blueprint, request, jsonify, session, send_file
 from werkzeug.utils import secure_filename
 from src.models.user import db, User, Document, DocumentAccess
 from datetime import datetime, timedelta
@@ -8,6 +8,19 @@ import boto3
 from botocore.exceptions import ClientError
 import zipfile
 import io
+import io
+
+def create_zip_response(files_dict):
+    """
+    Creates a zip file response from a dictionary of {filename: file_content}
+    """
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        for filename, content in files_dict.items():
+            zip_file.writestr(filename, content)
+
+    zip_buffer.seek(0)
+    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='files.zip')
 
 documents_bp = Blueprint('documents', __name__)
 

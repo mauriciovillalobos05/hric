@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, session
 from datetime import datetime
 from src.models.user import User, Event, EventRegistration, EventPayment, db
 
-event_bp = Blueprint('event', __name__)
+events_bp = Blueprint('event', __name__)
 
 # ---------- AUTH HELPERS ----------
 def require_auth():
@@ -23,7 +23,7 @@ def require_admin_auth():
     return user, None, None
 
 # ---------- EVENTS ----------
-@event_bp.route('/events', methods=['GET'])
+@events_bp.route('/events', methods=['GET'])
 def list_events():
     try:
         events = Event.query.order_by(Event.date.desc()).all()
@@ -32,7 +32,7 @@ def list_events():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@event_bp.route('/events/<int:event_id>', methods=['GET'])
+@events_bp.route('/events/<int:event_id>', methods=['GET'])
 def get_event(event_id):
     try:
         event = Event.query.get(event_id)
@@ -43,7 +43,7 @@ def get_event(event_id):
         return jsonify({'error': str(e)}), 500
 
 # ---------- EVENT CREATION (ADMIN) ----------
-@event_bp.route('/events', methods=['POST'])
+@events_bp.route('/events', methods=['POST'])
 def create_event():
     admin, err, status = require_admin_auth()
     if err:
@@ -66,7 +66,7 @@ def create_event():
         return jsonify({'error': str(e)}), 500
 
 # ---------- EVENT REGISTRATION ----------
-@event_bp.route('/events/<int:event_id>/register', methods=['POST'])
+@events_bp.route('/events/<int:event_id>/register', methods=['POST'])
 def register_for_event(event_id):
     user, err, status = require_auth()
     if err:
@@ -95,7 +95,7 @@ def register_for_event(event_id):
         return jsonify({'error': str(e)}), 500
 
 # ---------- EVENT ANALYTICS (ADMIN) ----------
-@event_bp.route('/admin/events/<int:event_id>/attendees', methods=['GET'])
+@events_bp.route('/admin/events/<int:event_id>/attendees', methods=['GET'])
 def get_event_attendees(event_id):
     admin, err, status = require_admin_auth()
     if err:
@@ -132,7 +132,7 @@ def e_to_dict(event):
         'created_at': event.created_at.isoformat()
     }
 
-@event_bp.route('/events/<int:event_id>/pay', methods=['POST'])
+@events_bp.route('/events/<int:event_id>/pay', methods=['POST'])
 def pay_for_event(event_id):
     user, err, status = require_auth()
     if err:
@@ -180,7 +180,7 @@ def pay_for_event(event_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@event_bp.route('/admin/events/<int:event_id>/attendees/<uuid:user_id>/status', methods=['PUT'])
+@events_bp.route('/admin/events/<int:event_id>/attendees/<uuid:user_id>/status', methods=['PUT'])
 def update_attendee_status(event_id, user_id):
     admin, err, status = require_admin_auth()
     if err:
@@ -204,7 +204,7 @@ def update_attendee_status(event_id, user_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@event_bp.route('/events/<int:event_id>/check-in', methods=['POST'])
+@events_bp.route('/events/<int:event_id>/check-in', methods=['POST'])
 def check_in_user(event_id):
     user, err, status = require_auth()
     if err:

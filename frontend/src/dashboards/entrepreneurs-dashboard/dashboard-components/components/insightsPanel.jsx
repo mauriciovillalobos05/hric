@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -16,6 +16,12 @@ function InsightsPanel() {
   const [deckViews] = useState(32);
   const [messagesReceived] = useState(12);
   const [favoriteCount] = useState(7);
+  const [plan, setPlan] = useState("");
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("selected_plan");
+    if (stored) setPlan(stored.toLowerCase());
+  }, []);
 
   const engagementData = {
     labels: ["Jul 1", "Jul 8", "Jul 15", "Jul 22"],
@@ -31,7 +37,6 @@ function InsightsPanel() {
     ],
   };
 
-  // Simulated viewers (in a real app, you'd fetch this)
   const viewers = [
     {
       name: "Elena Woods",
@@ -69,32 +74,36 @@ function InsightsPanel() {
         </div>
       </div>
 
-      <div className="bg-gray-50 p-3 rounded-md mb-4">
-        <h3 className="text-xs font-semibold text-gray-700 mb-2">Weekly Engagement</h3>
-        <Line data={engagementData} options={{ plugins: { legend: { display: false } } }} />
-      </div>
+      {plan === "enterprise" && (
+        <div className="bg-gray-50 p-3 rounded-md mb-4">
+          <h3 className="text-xs font-semibold text-gray-700 mb-2">Weekly Engagement</h3>
+          <Line data={engagementData} options={{ plugins: { legend: { display: false } } }} />
+        </div>
+      )}
 
-      <div className="mt-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Recent Deck Viewers</h3>
-        <ul className="space-y-2">
-          {viewers.map((viewer, idx) => (
-            <li key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded-md">
-              <div className="flex items-center gap-3">
-                <img
-                  src={viewer.image}
-                  alt={viewer.name}
-                  className="h-8 w-8 rounded-full object-cover"
-                />
-                <div>
-                  <p className="text-sm font-medium text-gray-800">{viewer.name}</p>
-                  <p className="text-xs text-gray-500">{viewer.title}</p>
+      {(plan === "premium" || plan === "enterprise") && (
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Recent Deck Viewers</h3>
+          <ul className="space-y-2">
+            {viewers.map((viewer, idx) => (
+              <li key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded-md">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={viewer.image}
+                    alt={viewer.name}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{viewer.name}</p>
+                    <p className="text-xs text-gray-500">{viewer.title}</p>
+                  </div>
                 </div>
-              </div>
-              <button className="text-xs text-blue-600 hover:underline">View</button>
-            </li>
-          ))}
-        </ul>
-      </div>
+                <button className="text-xs text-blue-600 hover:underline">View</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,9 +15,13 @@ from src.routes.events import events_bp
 from src.routes.documents import documents_bp
 from src.routes.messaging import messaging_bp
 from src.routes.analytics import analytics_bp
+from src.socketio import socketio
+from flask import Flask
+from src.websockets import messages_ws
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = 'hric-platform-secret-key-2025'
+socketio.init_app(app)
 
 # Enable CORS for all routes
 CORS(app, origins="*")
@@ -72,4 +76,5 @@ def health_check():
     return {'status': 'healthy', 'service': 'HRIC Platform API'}, 200
 
 if __name__ == '__main__':
+    socketio.run(app, debug=True)
     app.run(host='0.0.0.0', port=6543, debug=True)

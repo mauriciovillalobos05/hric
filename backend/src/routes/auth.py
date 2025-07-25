@@ -5,70 +5,73 @@ import re
 
 auth_bp = Blueprint('auth', __name__)
 
-def validate_email(email):
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email) is not None
-
-def validate_password(password):
-    # At least 8 characters, one uppercase, one lowercase, one number
-    if len(password) < 8:
-        return False
-    if not re.search(r'[A-Z]', password):
-        return False
-    if not re.search(r'[a-z]', password):
-        return False
-    if not re.search(r'\d', password):
-        return False
-    return True
-
 @auth_bp.route('/register-complete', methods=['POST'])
 def register_complete():
     try:
         data = request.json
-
-        required_fields = ['supabase_id', 'email', 'user_type', 'first_name', 'last_name']
+        required_fields = ['supabase_id', 'email', 'role', 'first_name', 'last_name']
         for field in required_fields:
-            if field not in data or not data[field]:
+            if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
 
-        # Check if user already exists
         if User.query.filter_by(id=data['supabase_id']).first():
             return jsonify({'error': 'User already exists'}), 409
 
+        # Create base user
         user = User(
             id=data['supabase_id'],
             email=data['email'],
-            user_type=data['user_type'],
+            phone=data.get('phone'),
+            role=data['role'],
             first_name=data['first_name'],
             last_name=data['last_name'],
-            phone=data.get('phone'),
             location=data.get('location'),
             bio=data.get('bio'),
+            profile_image=data.get('profile_image'),
             linkedin_url=data.get('linkedin_url'),
             website_url=data.get('website_url'),
-            profile_image=data.get('profile_image'),
-            is_verified=True
+            onboarding_status='pending_review'
         )
         db.session.add(user)
-        db.session.flush()
+        db.session.flush()  # assign user.id
 
-        # Determine subscription tier (optional)
-        subscription_tier = data.get('subscription_tier')
+        # Role-based profile creation
+        if user.role == 'investor':
+            profile = InvestorProfile(
+                user_id=user.id,
+                industries=data.get('industries', []),
+                investment_stages=data.get('investment_stages', []),
+                geographic_focus=data.get('geographic_focus', []),
+                investment_range_min=data.get('investment_range_min'),
+                investment_range_max=data.get('investment_range_max'),
+                accredited_status=data.get('accredited_status', False),
+                investor_type=data.get('investor_type'),
+                risk_tolerance=data.get('risk_tolerance'),
+                portfolio_size=data.get('portfolio_size'),
+                advisory_availability=data.get('advisory_availability', False),
+                communication_frequency=data.get('communication_frequency'),
+                meeting_preference=data.get('meeting_preference')
+            )
+            db.session.add(profile)
 
-        if data['user_type'] == 'investor':
-            db.session.add(InvestorProfile(
+        elif user.role == 'entrepreneur':
+            enterprise = Enterprise(
                 user_id=user.id,
-                subscription_tier=subscription_tier or 'tier_1'
-            ))
-        else:
-            db.session.add(Enterprise(
-                user_id=user.id,
-                company_name=data.get('company_name', ''),
-                subscription_tier=subscription_tier or 'free'
-            ))
+                name=data.get('company_name', ''),
+                industry=data.get('industry'),
+                stage=data.get('stage'),
+                business_model=data.get('business_model'),
+                team_size=data.get('team_size'),
+                pitch_deck_url=data.get('pitch_deck_url'),
+                demo_url=data.get('demo_url'),
+                is_actively_fundraising=data.get('is_actively_fundraising', True),
+                financials=data.get('financials'),
+                target_market=data.get('target_market')
+            )
+            db.session.add(enterprise)
 
         db.session.commit()
-        return jsonify({'message': 'User registration completed', 'user': user.to_dict()}), 201
+        return jsonify({'message': 'User onboarding complete', 'user': user.to_dict()}), 201
 
     except Exception as e:
         db.session.rollback()
@@ -77,23 +80,16 @@ def register_complete():
 @auth_bp.route('/track-login', methods=['POST'])
 def track_login():
     try:
-        data = request.json
-        email = data.get('email')
-
-        if not email:
-            return jsonify({'error': 'Email is required'}), 400
-
+        email = request.json.get('email')
         user = User.query.filter_by(email=email).first()
         if user:
             user.last_login = datetime.utcnow()
             db.session.commit()
             return jsonify({'message': 'Login tracked'}), 200
-        else:
-            return jsonify({'error': 'User not found'}), 404
-
+        return jsonify({'error': 'User not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-        
+
 @auth_bp.route('/logout', methods=['POST'])
 def logout():
     session.clear()
@@ -105,21 +101,19 @@ def get_current_user():
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
-        
+
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
+
         user_data = user.to_dict()
-        
-        # Include profile data
-        if user.user_type == 'investor' and user.investor_profile:
+
+        if user.role == 'investor' and user.investor_profile:
             user_data['profile'] = user.investor_profile.to_dict()
-        elif user.user_type == 'entrepreneur' and user.entrepreneur_profile:
-            user_data['profile'] = user.entrepreneur_profile.to_dict()
-        
+        elif user.role == 'entrepreneur' and user.enterprises:
+            user_data['profile'] = user.enterprises[0].to_dict()
+
         return jsonify({'user': user_data}), 200
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -129,205 +123,89 @@ def update_profile():
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
-        
+
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
+
         data = request.json
-        
-        # Update user fields
-        user_fields = ['first_name', 'last_name', 'phone', 'location', 'bio', 'linkedin_url', 'website_url']
-        for field in user_fields:
+        # Update base User fields
+        for field in ['first_name', 'last_name', 'phone', 'location', 'bio', 'linkedin_url', 'website_url', 'profile_image']:
             if field in data:
                 setattr(user, field, data[field])
-        
-        user.updated_at = datetime.utcnow()
-        
-        # Update profile fields based on user type
-        if user.user_type == 'investor' and user.investor_profile:
+
+        # Update investor profile
+        if user.role == 'investor' and user.investor_profile:
             profile = user.investor_profile
-            profile_fields = [
-                'investment_range_min', 'investment_range_max', 'risk_tolerance',
-                'investor_type', 'accredited_status', 'net_worth', 'annual_income',
-                'investment_experience', 'portfolio_size', 'advisory_availability',
-                'board_experience', 'communication_frequency', 'meeting_preference'
-            ]
-            
-            for field in profile_fields:
+            for field in [
+                'industries', 'investment_stages', 'geographic_focus',
+                'investment_range_min', 'investment_range_max',
+                'accredited_status', 'investor_type', 'risk_tolerance',
+                'portfolio_size', 'advisory_availability',
+                'communication_frequency', 'meeting_preference'
+            ]:
                 if field in data:
                     setattr(profile, field, data[field])
-            
-            # Handle JSON fields
-            if 'investment_stages' in data:
-                profile.set_investment_stages(data['investment_stages'])
-            if 'industries' in data:
-                profile.set_industries(data['industries'])
-            if 'geographic_focus' in data:
-                profile.set_geographic_focus(data['geographic_focus'])
-            if 'expertise_areas' in data:
-                profile.set_expertise_areas(data['expertise_areas'])
-            
-            profile.updated_at = datetime.utcnow()
-        
-        elif user.user_type == 'entrepreneur' and user.entrepreneur_profile:
-            profile = user.entrepreneur_profile
-            profile_fields = [
-                'company_name', 'company_description', 'industry', 'business_model',
-                'stage', 'founded_date', 'employee_count', 'location', 'funding_stage',
-                'funding_amount_seeking', 'funding_amount_raised', 'use_of_funds',
-                'monthly_revenue', 'monthly_growth_rate', 'gross_margin', 'burn_rate',
-                'runway_months', 'team_size', 'target_market', 'market_size',
-                'competitors', 'competitive_advantage', 'looking_for_strategic_value',
-                'is_actively_fundraising', 'pitch_deck_url', 'demo_url'
-            ]
-            
-            for field in profile_fields:
+
+        # Update entrepreneur profile
+        elif user.role == 'entrepreneur' and user.enterprises:
+            enterprise = user.enterprises[0]
+            for field in [
+                'name', 'industry', 'stage', 'business_model',
+                'team_size', 'pitch_deck_url', 'demo_url',
+                'is_actively_fundraising', 'financials', 'target_market'
+            ]:
                 if field in data:
-                    if field == 'founded_date' and data[field]:
-                        # Convert date string to date object
-                        from datetime import datetime
-                        setattr(profile, field, datetime.strptime(data[field], '%Y-%m-%d').date())
-                    else:
-                        setattr(profile, field, data[field])
-            
-            # Handle JSON fields
-            if 'previous_funding_rounds' in data:
-                profile.set_previous_funding_rounds(data['previous_funding_rounds'])
-            if 'key_team_members' in data:
-                profile.set_key_team_members(data['key_team_members'])
-            if 'advisors' in data:
-                profile.set_advisors(data['advisors'])
-            if 'preferred_investor_types' in data:
-                profile.set_preferred_investor_types(data['preferred_investor_types'])
-            if 'geographic_investor_preference' in data:
-                profile.set_geographic_investor_preference(data['geographic_investor_preference'])
-            
-            profile.updated_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        # Return updated user data
-        user_data = user.to_dict()
-        if user.user_type == 'investor' and user.investor_profile:
-            user_data['profile'] = user.investor_profile.to_dict()
-        elif user.user_type == 'entrepreneur' and user.entrepreneur_profile:
-            user_data['profile'] = user.entrepreneur_profile.to_dict()
-        
-        return jsonify({
-            'message': 'Profile updated successfully',
-            'user': user_data
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+                    setattr(enterprise, field, data[field])
 
-@auth_bp.route('/change-password', methods=['POST'])
-def change_password():
-    try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        data = request.json
-        
-        if not data.get('current_password') or not data.get('new_password'):
-            return jsonify({'error': 'Current password and new password are required'}), 400
-        
-        if not user.check_password(data['current_password']):
-            return jsonify({'error': 'Current password is incorrect'}), 401
-        
-        if not validate_password(data['new_password']):
-            return jsonify({'error': 'New password must be at least 8 characters with uppercase, lowercase, and number'}), 400
-        
-        user.set_password(data['new_password'])
-        user.updated_at = datetime.utcnow()
         db.session.commit()
-        
-        return jsonify({'message': 'Password changed successfully'}), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
 
-@auth_bp.route('/subscription', methods=['PUT'])
-def update_subscription():
-    try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        data = request.json
-        
-        if 'subscription_tier' not in data:
-            return jsonify({'error': 'Subscription tier is required'}), 400
-        
-        valid_tiers = ['free', 'basic', 'premium', 'vip', 'enterprise']
-        if data['subscription_tier'] not in valid_tiers:
-            return jsonify({'error': 'Invalid subscription tier'}), 400
-        
-        user.subscription_tier = data['subscription_tier']
-        user.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Subscription updated successfully',
-            'subscription_tier': user.subscription_tier
-        }), 200
-        
+        updated = user.to_dict()
+        if user.role == 'investor' and user.investor_profile:
+            updated['profile'] = user.investor_profile.to_dict()
+        elif user.role == 'entrepreneur' and user.enterprises:
+            updated['profile'] = user.enterprises[0].to_dict()
+
+        return jsonify({'message': 'Profile updated', 'user': updated}), 200
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @auth_bp.route('/enterprise/<int:enterprise_id>/likes', methods=['POST', 'GET'])
 def handle_likes(enterprise_id):
-
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({'error': 'Not authenticated'}), 401
 
     user = User.query.get(user_id)
-    if not user or user.user_type != 'investor':
+    if not user or user.role != 'investor':
         return jsonify({'error': 'Only investors can perform this action'}), 403
-
-    investor_profile = user.investor_profile
-    if not investor_profile:
-        return jsonify({'error': 'Investor profile not found'}), 404
 
     enterprise = Enterprise.query.get(enterprise_id)
     if not enterprise:
         return jsonify({'error': 'Enterprise not found'}), 404
 
     if request.method == 'POST':
-        # Check if already liked
-        existing_like = Like.query.filter_by(investor_id=user.id, enterprise_id=enterprise_id).first()
+        existing_like = Like.query.filter_by(user_id=user.id, enterprise_id=enterprise_id).first()
         if existing_like:
             return jsonify({'message': 'Already liked'}), 200
 
-        like = Like(investor_id=user.id, enterprise_id=enterprise_id)
+        like = Like(user_id=user.id, enterprise_id=enterprise_id)
         db.session.add(like)
         db.session.commit()
         return jsonify({'message': 'Enterprise liked'}), 201
 
     elif request.method == 'GET':
-        likes = enterprise.likes_received
-        tier = investor_profile.subscription_tier
+        likes = Like.query.filter_by(enterprise_id=enterprise_id).all()
+        tier = user.investor_profile.portfolio_size if user.investor_profile else 0
 
-        if tier == 'tier_3':
+        if tier >= 1000000:
             return jsonify({
-                'likes': [like.investor.to_summary() for like in likes],
+                'likes': [like.user.to_dict(include_profile=True) for like in likes],
                 'count': len(likes)
-            })
-        elif tier == 'tier_2':
-            return jsonify({'count': len(likes)})
+            }), 200
+        elif tier > 0:
+            return jsonify({'count': len(likes)}), 200
         else:
             return jsonify({'message': 'Upgrade to view likes'}), 403

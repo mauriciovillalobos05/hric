@@ -1,5 +1,5 @@
 import React from "react";
-import InvestorCard from "./InvestorCard";
+import InvestorCard from "./InvestorCard.jsx";
 
 function InvestorMatches({ matches, onToggleFavorite }) {
   return (

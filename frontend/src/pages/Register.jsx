@@ -69,7 +69,6 @@ export default function Register() {
         lastName,
         phone,
         role,
-        plan,
       })
     );
     navigate("/onboarding");

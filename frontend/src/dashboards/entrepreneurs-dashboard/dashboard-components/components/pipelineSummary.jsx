@@ -32,11 +32,10 @@ function PipelineSummary({ data }) {
 
   return (
     <>
-      {/* Title OUTSIDE of the card */}
-      <h2 className="text-lg font-semibold mb-2">Investor Pipeline Summary</h2>
-
-      {/* Card with content */}
       <section className="bg-white rounded-lg shadow-sm p-6 mt-0">
+        <h1 className="text-lg font-semibold mb-2">
+          Investor Pipeline Summary
+        </h1>
         <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
           {stages.map((stage) => (
             <div key={stage.label} className="flex items-center space-x-3">

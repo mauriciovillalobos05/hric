@@ -50,9 +50,6 @@ function Login() {
 
     const role = userProfile.user_type;
 
-    // You can optionally store this in localStorage or handle session state
-    // localStorage.setItem("user_role", role);
-
     // Navigate based on role
     if (role === "investor") {
       navigate("/dashboard/investor");

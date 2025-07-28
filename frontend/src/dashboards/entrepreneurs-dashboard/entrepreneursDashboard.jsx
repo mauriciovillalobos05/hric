@@ -19,6 +19,7 @@ const supabase = createClient(
 function EntrepreneurDashboard() {
   const [entrepreneurName, setEntrepreneurName] = useState("Founder");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [userRole, setUserRole] = useState(""); // optional: store user role
   const [notifications, setNotifications] = useState([]);
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -44,28 +45,23 @@ function EntrepreneurDashboard() {
         if (!session?.user) return;
         const userId = session.user.id;
 
-        // Fetch user details
+        // ✅ Updated user fetch with email and role
         const { data: user, error: userErr } = await supabase
           .from("user")
-          .select("first_name, last_name, profile_image")
+          .select("first_name, last_name, profile_image, email, role")
           .eq("id", userId)
           .single();
 
         if (userErr) throw userErr;
 
         setEntrepreneurName(`${user.first_name} ${user.last_name}`);
+        setUserRole(user.role); // you can now use this for role-based logic
 
-        if (user.profile_image) {
-          const { data: publicUrlData } = supabase.storage
-            .from("profile-images")
-            .getPublicUrl(user.profile_image);
-
-          setAvatarUrl(
-            publicUrlData?.publicUrl || "./src/assets/default_user_image.png"
-          );
-        } else {
-          setAvatarUrl("./src/assets/default_user_image.png");
-        }
+        setAvatarUrl(
+          user.profile_image
+            ? supabase.storage.from("profile-images").getPublicUrl(user.profile_image).data?.publicUrl
+            : "./src/assets/default_user_image.png"
+        );
 
         // Fetch messages
         const { data: msgData } = await supabase
@@ -84,7 +80,7 @@ function EntrepreneurDashboard() {
 
         setMessages(formattedMessages);
 
-        // Fetch investor matches
+        // Fetch matches
         const { data: matchData } = await supabase
           .from("match")
           .select(
@@ -128,7 +124,6 @@ function EntrepreneurDashboard() {
 
         setEvents(eventsData || []);
 
-        // Placeholder notifications
         setNotifications([
           {
             title: "You have a new investor match",
@@ -137,7 +132,6 @@ function EntrepreneurDashboard() {
           },
         ]);
 
-        // Static pipeline data (replace with real queries if available)
         setPipelineData({
           contacted: 3,
           interested: 2,
@@ -166,68 +160,6 @@ function EntrepreneurDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
-  // MOCK DATA FOR MATEO
-  const formattedMessages = [
-    {
-      sender: "Sender user_0",
-      preview: "This is a test message from user_0.",
-      time: "9:06 PM",
-      read: false,
-    },
-    {
-      sender: "Sender user_1",
-      preview: "This is a test message from user_1.",
-      time: "6:06 PM",
-      read: true,
-    },
-    {
-      sender: "Sender user_2",
-      preview: "This is a test message from user_2.",
-      time: "3:06 PM",
-      read: false,
-    },
-  ];
-
-  const formattedMatches = [
-    {
-      founder: "InvestorCo 0",
-      company_name: "InvestorCo 0",
-      description: "Invests in Fintech",
-      location: "San Francisco, CA",
-      profile_image: "https://i.pravatar.cc/150?img=10",
-      match_score: 94,
-      match_reasons: ["Industry match", "Stage fit"],
-      funding_stage: "Seed",
-      industry: "Fintech",
-    },
-    {
-      founder: "InvestorCo 1",
-      company_name: "InvestorCo 1",
-      description: "Invests in Fintech",
-      location: "San Francisco, CA",
-      profile_image: "https://i.pravatar.cc/150?img=11",
-      match_score: 77,
-      match_reasons: ["Industry match", "Stage fit"],
-      funding_stage: "Seed",
-      industry: "Fintech",
-    },
-  ];
-
-  const mockEvents = [
-    {
-      title: "Pitch Event 0",
-      date: "2025-07-24T21:06:33Z",
-      type: "Pitch Showcase",
-      registration_status: "not_registered",
-    },
-    {
-      title: "Pitch Event 1",
-      date: "2025-07-29T21:06:33Z",
-      type: "Pitch Showcase",
-      registration_status: "registered",
-    },
-  ];
-
   return (
     <>
       <HeaderBar
@@ -246,19 +178,17 @@ function EntrepreneurDashboard() {
         onUpdateClick={() => navigate("/dashboard/user")}
       />
 
-      <InvestorMatches matches={formattedMatches} onToggleFavorite={() => {}} />
+      <InvestorMatches matches={matches} onToggleFavorite={() => {}} />
 
-      <EventShowcaseAccess events={mockEvents} />
+      <EventShowcaseAccess events={events} />
 
       <DocumentStatus initialDocuments={[]} />
 
-      <MessagesPreview messages={formattedMessages} onOpenChat={handleOpenChat} />
+      <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
 
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
 
-      {/* TO BE DONE IN A NEAR FUTURE */}
-      {/* analytics & trends */}
-      <InsightsPanel />
+      <InsightsPanel role={userRole} /> {/* Optional */}
     </>
   );
 }

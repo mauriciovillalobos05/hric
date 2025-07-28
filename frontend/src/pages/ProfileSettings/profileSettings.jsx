@@ -1,5 +1,3 @@
-// src/dashboards/investors-dashboard/dashboard-components/components/headerBarComponents/components/profileSettings.jsx
-
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
@@ -16,37 +14,33 @@ const supabase = createClient(
 
 export default function ProfileSettings() {
   const [profile, setProfile] = useState({
-    full_name: "",
+    first_name: "",
+    last_name: "",
     email: "",
-    bio: "",
     location: "",
-    investment_stage: "",
-    industries: "",
+    bio: "",
+    plan: "",
+    role: "",
     profile_image: "",
   });
 
-  const [editMode, setEditMode] = useState({
-    full_name: false,
-    email: false,
-    location: false,
-    bio: false,
-    investment_stage: false,
-    industries: false,
-  });
-
+  const [editMode, setEditMode] = useState({});
   const [avatarFile, setAvatarFile] = useState(null);
   const [message, setMessage] = useState("");
   const [previewUrl, setPreviewUrl] = useState(null);
   const navigate = useNavigate();
 
-  const defaultAvatar = "./src/assets/default_user_image.png";
+  const defaultAvatar = "/default_user_image.png";
 
-  // Fetch user profile on mount
   useEffect(() => {
     const fetchProfile = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data, error } = await supabase
-        .from("profiles")
+        .from("user")
         .select("*")
+        .eq("id", user.id)
         .single();
 
       if (error) {
@@ -55,6 +49,7 @@ export default function ProfileSettings() {
         setProfile(data);
       }
     };
+
     fetchProfile();
   }, []);
 
@@ -65,30 +60,45 @@ export default function ProfileSettings() {
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     const { error } = await supabase
-      .from("profiles")
+      .from("user")
       .update(profile)
       .eq("id", profile.id);
-    setMessage(
-      error ? "Failed to update profile." : "Profile updated successfully."
-    );
+
+    setMessage(error ? "Failed to update profile." : "Profile updated successfully.");
   };
 
   const handleAvatarUpload = async () => {
-    if (!avatarFile) return;
+    if (!avatarFile || !profile.id) return;
 
-    const { data, error } = await supabase.storage
-      .from("avatars")
-      .upload(`user-${profile.id}`, avatarFile, { upsert: true });
+    const ext = avatarFile.name.split(".").pop();
+    const filePath = `${profile.id}/profile.${ext}`;
 
-    if (!error) {
-      const url = supabase.storage
-        .from("avatars")
-        .getPublicUrl(`user-${profile.id}`).data.publicUrl;
-      await supabase
-        .from("profiles")
-        .update({ profile_image: url })
-        .eq("id", profile.id);
-      setProfile((prev) => ({ ...prev, profile_image: url }));
+    const { error: uploadError } = await supabase.storage
+      .from("profile-images")
+      .upload(filePath, avatarFile, { upsert: true });
+
+    if (uploadError) {
+      console.error("Upload failed:", uploadError.message);
+      setMessage("Avatar upload failed.");
+      return;
+    }
+
+    const { data: { publicUrl } } = supabase
+      .storage
+      .from("profile-images")
+      .getPublicUrl(filePath);
+
+    const { error: updateError } = await supabase
+      .from("user")
+      .update({ profile_image: filePath })
+      .eq("id", profile.id);
+
+    if (!updateError) {
+      setProfile((prev) => ({ ...prev, profile_image: filePath }));
+      setMessage("Avatar updated.");
+    } else {
+      console.error(updateError);
+      setMessage("Failed to update avatar reference.");
     }
   };
 
@@ -99,9 +109,7 @@ export default function ProfileSettings() {
         <button
           type="button"
           className="text-sm text-blue-600 hover:underline"
-          onClick={() =>
-            setEditMode((prev) => ({ ...prev, [name]: !prev[name] }))
-          }
+          onClick={() => setEditMode((prev) => ({ ...prev, [name]: !prev[name] }))}
         >
           {editMode[name] ? "Cancel" : "Edit"}
         </button>
@@ -109,7 +117,7 @@ export default function ProfileSettings() {
       <Input
         name={name}
         type={type}
-        value={profile[name]}
+        value={profile[name] || ""}
         onChange={handleChange}
         readOnly={!editMode[name]}
         className={!editMode[name] ? "bg-gray-100 cursor-not-allowed" : ""}
@@ -121,6 +129,10 @@ export default function ProfileSettings() {
     await supabase.auth.signOut();
     navigate("/");
   };
+
+  const publicAvatarUrl = profile.profile_image
+    ? supabase.storage.from("profile-images").getPublicUrl(profile.profile_image).data.publicUrl
+    : defaultAvatar;
 
   return (
     <div className="max-w-2xl mx-auto py-10 px-6">
@@ -137,26 +149,21 @@ export default function ProfileSettings() {
             <Label className="text-sm font-medium text-gray-700">
               Profile Image
             </Label>
-
             <div className="flex items-center gap-6">
-              {/* Circular avatar preview */}
               <div className="relative">
                 <img
-                  src={previewUrl || profile.profile_image || defaultAvatar}
-                  alt=""
-                  className="h-20 w-20 rounded-full object-cover border border-gray-300 shadow-sm font-semibold"
+                  src={previewUrl || publicAvatarUrl}
+                  alt="avatar"
+                  className="h-20 w-20 rounded-full object-cover border border-gray-300 shadow-sm"
                 />
               </div>
-
               <div className="flex flex-col space-y-2">
                 <Input
                   type="file"
                   accept="image/*"
-                  className="cursor-pointer file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-blue-50 file:text-sm file:text-blue-700 hover:file:bg-blue-100"
                   onChange={(e) => {
                     const file = e.target.files[0];
                     setAvatarFile(file);
-
                     if (file) {
                       const reader = new FileReader();
                       reader.onloadend = () => {
@@ -166,33 +173,33 @@ export default function ProfileSettings() {
                     }
                   }}
                 />
-                <Button
-                  onClick={handleAvatarUpload}
-                  className="w-fit bg-blue-600 text-white hover:bg-blue-700 transition"
-                >
+                <Button onClick={handleAvatarUpload} className="w-fit bg-blue-600 text-white">
                   Upload Avatar
                 </Button>
               </div>
             </div>
           </div>
 
-          {/* Editable Profile Info */}
+          {/* Editable Profile Fields */}
           <form onSubmit={handleProfileUpdate} className="space-y-4">
-            <EditField label="Full Name" name="full_name" />
+            <EditField label="First Name" name="first_name" />
+            <EditField label="Last Name" name="last_name" />
             <EditField label="Email" name="email" type="email" />
             <EditField label="Location" name="location" />
             <EditField label="Short Bio" name="bio" />
-            <EditField label="Investment Stage" name="investment_stage" />
-            <EditField label="Industries" name="industries" />
+            <EditField label="Plan" name="plan" />
+            <EditField label="Role" name="role" />
+            <Button type="submit" className="bg-blue-600 text-white">
+              Save Changes
+            </Button>
           </form>
 
           <Separator />
 
-          {/* Subscription Info + Actions */}
           <div className="space-y-3">
             <h2 className="text-md font-semibold">Subscription Plan</h2>
             <p className="text-sm text-gray-600">
-              Current: <strong>Premium</strong>
+              Current: <strong>{profile.plan || "None"}</strong>
             </p>
             <Button onClick={() => navigate("/subscription")} variant="outline">
               Upgrade Subscription
@@ -201,7 +208,6 @@ export default function ProfileSettings() {
 
           <Separator />
 
-          {/* Logout */}
           <Button variant="destructive" onClick={handleLogout}>
             Log Out
           </Button>

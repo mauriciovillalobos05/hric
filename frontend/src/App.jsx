@@ -5,10 +5,12 @@ import MainUserDashboard from "./dashboards/MainUserDashboard";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";
 import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard";
 import ProfileSettings from "./pages/ProfileSettings/profileSettings";
-import ProtectedRoute from "./auth/protectedRoute";
+import ProtectedRoute from "./auth/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
+import ConfirmEmail from "./pages/emailConfirmation";
+// import Subscription from "./pages/Subscription"; // assuming you have this actual component
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -18,6 +20,7 @@ const supabase = createClient(
 
 function App() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const getUserSession = async () => {
@@ -28,76 +31,82 @@ function App() {
       if (session?.user) {
         const { data: userProfile, error } = await supabase
           .from("user")
-          .select("user_type")
+          .select("role")
           .eq("id", session.user.id)
           .single();
 
-        if (error) {
-          console.error("User profile fetch error:", error);
-          return;
+        if (!error && userProfile) {
+          setUser({
+            ...session.user,
+            role: userProfile.role,
+          });
         }
-
-        setUser({
-          ...session.user,
-          role: userProfile.user_type,
-        });
       }
+      setLoading(false);
     };
 
     getUserSession();
   }, []);
 
-  useEffect(() => {
-    console.log("Updated user:", user);
-  }, [user]);
+  if (loading) return null; // or a spinner/loading screen
 
-  // MOCK USER DATA
-  const [ user1 ]  = useState({
-    id: '123',
-    name: 'John Doe',
-    role: 'entrepreneur', // or 'investor'
-
-  })
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      <Route path="/onboarding" element={<Onboarding />} />
-      <Route path="/profile-settings" element={<ProfileSettings />} />
-      {/* <Route path="/subscription" element={<SubscriptionPage />} /> */}
+      <Route path="/confirm-email" element={<ConfirmEmail />} />
 
-      {/* Generic authenticated dashboard */}
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <Onboarding />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/profile-settings"
+        element={
+          <ProtectedRoute>
+            <ProfileSettings />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* FOR LATER once we have the subscription page */}
+      {/* <Route
+        path="/subscription"
+        element={
+          <ProtectedRoute>
+            <Subscription />
+          </ProtectedRoute>
+        }
+      /> */}
+
       <Route
         path="/dashboard/user"
         element={
-          <ProtectedRoute isAllowed={!!user} redirectPath="/login">
+          <ProtectedRoute>
             <MainUserDashboard role={user?.role || ""} />
           </ProtectedRoute>
         }
       />
 
-      {/* Investor dashboard route */}
       <Route
         path="/dashboard/investor"
         element={
-          <ProtectedRoute
-            isAllowed={!!user && user.role === "investor"}
-            redirectPath="/login"
-          >
+          <ProtectedRoute isAllowed={user?.role === "investor"}>
             <InvestorsDashboard />
           </ProtectedRoute>
         }
       />
 
-      {/* Entrepreneur dashboard route */}
       <Route
         path="/dashboard/entrepreneur"
         element={
-          <ProtectedRoute
-            isAllowed={!!user1 && user1.role === "entrepreneur"}
-            redirectPath="/login"
-          >
+          <ProtectedRoute isAllowed={user?.role === "entrepreneur"}>
             <EntrepreneurDashboard />
           </ProtectedRoute>
         }

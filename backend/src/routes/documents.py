@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, session, send_file
 from werkzeug.utils import secure_filename
-from src.models.user import db, User, Document, DocumentAccess
+from src.models.user import db, Users, Document, DocumentAccess
 from datetime import datetime, timedelta
 import os
 import uuid
@@ -27,13 +27,13 @@ documents_bp = Blueprint('documents', __name__)
 # ---- Utility Functions ----
 
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    return Users, None, None
 
 def send_email(to, subject, body):
     print(f"[EMAIL] To: {to} | Subject: {subject} | Body: {body}")
@@ -57,7 +57,7 @@ s3_client = boto3.client(
 
 @documents_bp.route('/upload', methods=['POST'])
 def upload_document():
-    user, error_response, status = require_auth()
+    Users, error_response, status = require_auth()
     if error_response:
         return error_response, status
 
@@ -77,7 +77,7 @@ def upload_document():
         file_path = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
 
         document = Document(
-            owner_id=user.id,
+            owner_id=Users.id,
             filename=filename,
             file_path=file_path,
             tags=tags,
@@ -93,7 +93,7 @@ def upload_document():
 
 @documents_bp.route('/bulk-upload', methods=['POST'])
 def bulk_upload():
-    user, error_response, status = require_auth()
+    Users, error_response, status = require_auth()
     if error_response:
         return error_response, status
 
@@ -109,7 +109,7 @@ def bulk_upload():
             file_path = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
 
             document = Document(
-                owner_id=user.id,
+                owner_id=Users.id,
                 filename=filename,
                 file_path=file_path,
                 access_level='private'
@@ -124,12 +124,12 @@ def bulk_upload():
 
 @documents_bp.route('/bulk-download', methods=['POST'])
 def bulk_download():
-    user, error_response, status = require_auth()
+    Users, error_response, status = require_auth()
     if error_response:
         return error_response, status
 
     ids = request.json.get('document_ids', [])
-    docs = Document.query.filter(Document.id.in_(ids), Document.owner_id == user.id).all()
+    docs = Document.query.filter(Document.id.in_(ids), Document.owner_id == Users.id).all()
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zipf:
@@ -145,55 +145,55 @@ def bulk_download():
 
 @documents_bp.route('/grant-access/<int:doc_id>', methods=['POST'])
 def grant_document_access(doc_id):
-    user, error_response, status = require_auth()
+    Users, error_response, status = require_auth()
     if error_response:
         return error_response, status
 
     document = Document.query.get(doc_id)
-    if not document or document.owner_id != user.id:
+    if not document or document.owner_id != Users.id:
         return jsonify({'error': 'Unauthorized or document not found'}), 403
 
     data = request.json
-    target_user_id = data.get('user_id')
+    target_Users_id = data.get('Users_id')
     access_type = data.get('access_type', 'view')
     expires_in = data.get('expires_in_minutes')
 
-    if not target_user_id:
-        return jsonify({'error': 'Target user required'}), 400
+    if not target_Users_id:
+        return jsonify({'error': 'Target Users required'}), 400
 
     expiration_time = datetime.utcnow() + timedelta(minutes=expires_in) if expires_in else None
 
     access = DocumentAccess(
         document_id=doc_id,
-        user_id=target_user_id,
+        Users_id=target_Users_id,
         access_type=access_type,
         expires_at=expiration_time
     )
     db.session.add(access)
     db.session.commit()
 
-    target_user = User.query.get(target_user_id)
-    if target_user:
+    target_Users = Users.query.get(target_Users_id)
+    if target_Users:
         send_email(
-            to=target_user.email,
+            to=target_Users.email,
             subject="You've been granted document access",
             body=f"You now have {access_type} access to document '{document.filename}'."
         )
 
     return jsonify({'message': 'Access granted'}), 200
 
-@documents_bp.route('/revoke-access/<int:doc_id>/<uuid:target_user_id>', methods=['DELETE'])
-def revoke_access(doc_id, target_user_id):
-    user, error_response, status = require_auth()
+@documents_bp.route('/revoke-access/<int:doc_id>/<uuid:target_Users_id>', methods=['DELETE'])
+def revoke_access(doc_id, target_Users_id):
+    Users, error_response, status = require_auth()
     if error_response:
         return error_response, status
 
-    access = DocumentAccess.query.filter_by(document_id=doc_id, user_id=target_user_id).first()
+    access = DocumentAccess.query.filter_by(document_id=doc_id, Users_id=target_Users_id).first()
     if not access:
         return jsonify({'error': 'Access not found'}), 404
 
     document = Document.query.get(doc_id)
-    if document.owner_id != user.id:
+    if document.owner_id != Users.id:
         return jsonify({'error': 'Not authorized'}), 403
 
     db.session.delete(access)
@@ -202,17 +202,17 @@ def revoke_access(doc_id, target_user_id):
 
 @documents_bp.route('/admin/shared-documents', methods=['GET'])
 def admin_shared_documents():
-    user, error_response, status = require_auth()
+    Users, error_response, status = require_auth()
     if error_response:
         return error_response, status
 
-    if user.role != 'admin':
+    if Users.role != 'admin':
         return jsonify({'error': 'Admin access required'}), 403
 
     shared = DocumentAccess.query.all()
     data = [{
         'document': access.document.to_dict(),
-        'granted_to': access.user.to_summary(),
+        'granted_to': access.Users.to_summary(),
         'access_type': access.access_type,
         'granted_at': access.granted_at.isoformat(),
         'expires_at': access.expires_at.isoformat() if access.expires_at else None

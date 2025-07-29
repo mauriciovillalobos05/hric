@@ -1,14 +1,151 @@
-import React from "react";
-import { useState, useEffect } from "react";
-import HeaderBar from "./dashboard-components/components/headerBar.jsx";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
 import InvestorMatches from "./dashboard-components/components/matchComponents/investorMatches.jsx";
 import PipelineSummary from "./dashboard-components/components/pipelineSummary.jsx";
+import ProfileStatusCard from "./dashboard-components/components/profileStatusComponents/profileStatusCard.jsx";
+import EventShowcaseAccess from "./dashboard-components/components/eventShowcaseComponents/eventShowcaseAccess.jsx";
+import DocumentStatus from "./dashboard-components/components/documentStatus.jsx";
+import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 function EntrepreneurDashboard() {
+  const [entrepreneurName, setEntrepreneurName] = useState("Founder");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [userRole, setUserRole] = useState(""); // optional: store user role
+  const [notifications, setNotifications] = useState([]);
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [pipelineData, setPipelineData] = useState({
+    contacted: 0,
+    interested: 0,
+    scheduled: 0,
+    diligence: 0,
+    termSheet: 0,
+  });
+
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.user) return;
+        const userId = session.user.id;
+
+        // ✅ Updated user fetch with email and role
+        const { data: user, error: userErr } = await supabase
+          .from("user")
+          .select("first_name, last_name, profile_image, email, role")
+          .eq("id", userId)
+          .single();
+
+        if (userErr) throw userErr;
+
+        setEntrepreneurName(`${user.first_name} ${user.last_name}`);
+        setUserRole(user.role); // you can now use this for role-based logic
+
+        setAvatarUrl(
+          user.profile_image
+            ? supabase.storage.from("profile-images").getPublicUrl(user.profile_image).data?.publicUrl
+            : "./src/assets/default_user_image.png"
+        );
+
+        // Fetch messages
+        const { data: msgData } = await supabase
+          .from("message")
+          .select("content, sender_id, created_at, is_read")
+          .eq("recipient_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        const formattedMessages = (msgData || []).map((msg) => ({
+          sender: `Sender ${msg.sender_id.slice(0, 6)}`,
+          preview: msg.content.slice(0, 60),
+          time: new Date(msg.created_at).toLocaleTimeString(),
+          read: msg.is_read,
+        }));
+
+        setMessages(formattedMessages);
+
+        // Fetch matches
+        const { data: matchData } = await supabase
+          .from("match")
+          .select(
+            `
+            id,
+            compatibility_score,
+            match_reasons,
+            investor:investor_id (
+              company_name,
+              location,
+              industry,
+              funding_stage,
+              profile_image
+            )
+          `
+          )
+          .eq("enterprise_id", userId)
+          .order("compatibility_score", { ascending: false });
+
+        const formattedMatches = (matchData || []).map((m) => ({
+          founder: m.investor.company_name,
+          company_name: m.investor.company_name,
+          description: `Invests in ${m.investor.industry}`,
+          location: m.investor.location,
+          profile_image: m.investor.profile_image,
+          match_score: m.compatibility_score,
+          match_reasons: m.match_reasons ? m.match_reasons.split(",") : [],
+          funding_stage: m.investor.funding_stage,
+          industry: m.investor.industry,
+        }));
+
+        setMatches(formattedMatches);
+
+        // Fetch events
+        const { data: eventsData } = await supabase
+          .from("event")
+          .select("*")
+          .gte("date", new Date().toISOString())
+          .order("date", { ascending: true })
+          .limit(5);
+
+        setEvents(eventsData || []);
+
+        setNotifications([
+          {
+            title: "You have a new investor match",
+            time: "Just now",
+            read: false,
+          },
+        ]);
+
+        setPipelineData({
+          contacted: 3,
+          interested: 2,
+          scheduled: 1,
+          diligence: 0,
+          termSheet: 0,
+        });
+      } catch (err) {
+        console.error("Entrepreneur dashboard fetch error:", err);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const handleOpenChat = (msg) => {
     setOpenChats((prev) => {
@@ -23,126 +160,35 @@ function EntrepreneurDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
-  const testNotifications = [
-    {
-      title: "New investor match: Angel Partners",
-      time: "Just now",
-      read: false,
-    },
-    {
-      title: "Pitch event tomorrow at 4pm",
-      time: "3h ago",
-      read: false,
-    },
-    {
-      title: "Investor Smith viewed your deck",
-      time: "Yesterday",
-      read: true,
-    },
-  ];
-
-  const pipelineData = {
-    contacted: 4,
-    interested: 3,
-    scheduled: 2,
-    diligence: 1,
-    termSheet: 0
-  };
-
-  const mockInvestorMatches = [
-    {
-      founder: "Jane Capital",
-      company_name: "Capital Group Ventures",
-      description: "Invests in early-stage health and fintech startups.",
-      location: "New York, NY",
-      profile_image: "https://i.pravatar.cc/150?img=12",
-      match_score: 92,
-      match_reasons: ["HealthTech", "Pre-seed fit", "Mentorship available"],
-      funding_stage: "Pre-seed",
-      industry: "HealthTech",
-      isFavorite: false,
-    },
-    {
-      founder: "Tom Bridges",
-      company_name: "Bridge Equity",
-      description: "Focused on scalable SaaS companies.",
-      location: "San Francisco, CA",
-      profile_image: "https://i.pravatar.cc/150?img=7",
-      match_score: 85,
-      match_reasons: ["SaaS focus", "Prior investment in similar space"],
-      funding_stage: "Seed",
-      industry: "SaaS",
-      isFavorite: true,
-    },
-  ];
-
-  const handleMetricsLoaded = () => {
-    const mockMessages = [
-      {
-        sender: "Mateo (Investor)",
-        preview: "Let's connect about the pitch session...",
-        time: "2h ago",
-        read: false,
-      },
-      {
-        sender: "Sophia (VC Bridge Fund)",
-        preview: "I liked your deck, can we talk Monday?",
-        time: "6h ago",
-        read: false,
-      },
-      {
-        sender: "Alice (Startup X)",
-        preview: "Thanks for your interest!",
-        time: "1d ago",
-        read: true,
-      },
-    ];
-    setMessages(mockMessages);
-  };
-
-  useEffect(() => {
-    handleMetricsLoaded();
-  }, []);
-
-  const profileImage = "https://i.pravatar.cc/150?img=7"; // Placeholder image URL
   return (
     <>
-      {/* greeting, notifications, avatar menu */}
       <HeaderBar
-        entrepreneurName={"Michael"}
-        notifications={testNotifications}
-        profileImage={profileImage}
+        entrepreneurName={entrepreneurName}
+        notifications={notifications}
+        profileImage={avatarUrl}
         messages={messages}
         onOpenChat={handleOpenChat}
       />
 
-      {/* show interest stages (contacted, scheduled, etc.) */}
       <PipelineSummary data={pipelineData} />
 
-      {/* show completion %, CTA to update profile */}
-      {/* <ProfileStatusCard /> */}
-
-      {/* AI-generated investor cards */}
-      <InvestorMatches
-        matches={mockInvestorMatches}
-        onToggleFavorite={(data) => console.log("Favorite toggled:", data)}
+      <ProfileStatusCard
+        completion={60}
+        missingSections={["Company Pitch", "Financials", "Team Info"]}
+        onUpdateClick={() => navigate("/dashboard/user")}
       />
 
-      {/* pitch event CTA or registration card */}
-      {/* <EventShowcaseAccess /> */}
+      <InvestorMatches matches={matches} onToggleFavorite={() => {}} />
 
-      {/* uploaded docs & access log */}
-      {/* <DocumentStatus /> */}
+      <EventShowcaseAccess events={events} />
 
-      {/* preview or open recent chats */}
+      <DocumentStatus initialDocuments={[]} />
+
       <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
 
-      {/* chat dock for ongoing conversations */}
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
 
-      {/* THIS WILL BE A PREMIUM OPTION */}
-      {/* who viewed, when, and how often */}
-      {/* <EngagementAnalytics />  */}
+      <InsightsPanel role={userRole} /> {/* Optional */}
     </>
   );
 }

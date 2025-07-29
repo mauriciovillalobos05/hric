@@ -30,25 +30,33 @@ function Login() {
 
     if (error) {
       setError(error.message);
-    } else {
-      // Track login on your Flask backend
-      try {
-        await fetch("http://localhost:8000/api/auth/track-login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(data.session?.access_token && {
-              Authorization: `Bearer ${data.session.access_token}`,
-            }),
-          },
-          body: JSON.stringify({ email }),
-        });
-      } catch (err) {
-        console.error("Tracking login failed", err);
-        // Optional: log silently or display to user
-      }
+      return;
+    }
 
-      navigate("/dashboard");
+    const sessionUser = data.user;
+
+    // Now fetch from your custom 'user' table
+    const { data: userProfile, error: profileError } = await supabase
+      .from("user")
+      .select("user_type")
+      .eq("id", sessionUser.id)
+      .single();
+
+    if (profileError) {
+      console.error("Failed to fetch user_type", profileError);
+      setError("Could not retrieve user type.");
+      return;
+    }
+
+    const role = userProfile.user_type;
+
+    // Navigate based on role
+    if (role === "investor") {
+      navigate("/dashboard/investor");
+    } else if (role === "entrepreneur") {
+      navigate("/dashboard/entrepreneur");
+    } else {
+      navigate("/dashboard/user");
     }
   };
 

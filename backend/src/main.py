@@ -10,7 +10,7 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 
 from src.models.user import db
-from src.routes.user import user_bp
+from src.routes.user import users_bp
 from src.routes.auth import auth_bp
 from src.routes.investor import investor_bp
 from src.routes.enterprise import enterprise_bp
@@ -19,6 +19,7 @@ from src.routes.events import events_bp
 from src.routes.documents import documents_bp
 from src.routes.messaging import messages_bp
 from src.routes.analytics import analytics_bp
+from src.routes.subscriptions import subscriptions_bp
 from src.socketio import socketio
 from src.websockets import messages_ws  # Assuming you use this in socketio setup
 
@@ -50,7 +51,7 @@ migrate = Migrate(app, db)
 socketio.init_app(app)
 
 # Register Blueprints
-app.register_blueprint(user_bp, url_prefix='/api')
+app.register_blueprint(users_bp, url_prefix='/api')
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(investor_bp, url_prefix='/api/investors')
 app.register_blueprint(enterprise_bp, url_prefix='/api/enterprise')
@@ -59,6 +60,7 @@ app.register_blueprint(events_bp, url_prefix='/api/events')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')
 app.register_blueprint(messages_bp, url_prefix='/api/messaging')
 app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
+app.register_blueprint(subscriptions_bp, url_prefix='/subscriptions')
 
 # Static file serving (for SPA frontend)
 @app.route('/', defaults={'path': ''})

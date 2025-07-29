@@ -1,34 +1,72 @@
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify
 from datetime import datetime
-from src.models.user import db, User, Subscription
+from src.models.user import db, Users, Subscription
 import stripe
 import os
+import requests
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
 
-def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
-        return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
-
-# Stripe setup
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
-# Available plans (you should sync these with Stripe)
-PLAN_CONFIG = {
-    "free": {"name": "Free", "price_id": None},
-    "starter": {"name": "Starter", "price_id": os.getenv("STRIPE_PRICE_STARTER")},
-    "pro": {"name": "Pro", "price_id": os.getenv("STRIPE_PRICE_PRO")},
-    "enterprise": {"name": "Enterprise", "price_id": os.getenv("STRIPE_PRICE_ENTERPRISE")}
-}
+# Supabase JWT auth
+def require_auth():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, jsonify({"error": "Missing or invalid Authorization header"}), 401
 
-# -----------------------------------------
-# ROUTES
-# -----------------------------------------
+    token = auth_header.split(" ")[1]
+
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_ANON_KEY,
+            },
+        )
+        if resp.status_code != 200:
+            return None, jsonify({"error": "Invalid or expired token"}), 401
+
+        supabase_user = resp.json()
+        user_id = supabase_user["id"]
+    except Exception as e:
+        return None, jsonify({"error": f"Token verification failed: {str(e)}"}), 500
+
+    user = Users.query.get(user_id)
+    if not user:
+        return None, jsonify({"error": "User not found in database"}), 404
+
+    return user, None, None
+
+PLAN_CONFIG = {
+    "investor_basic": {
+        "name": "Investor Basic",
+        "price_id": os.getenv("STRIPE_PRICE_INVESTOR_BASIC"),
+    },
+    "investor_premium": {
+        "name": "Investor Premium",
+        "price_id": os.getenv("STRIPE_PRICE_INVESTOR_PREMIUM"),
+    },
+    "investor_vip": {
+        "name": "Investor VIP",
+        "price_id": os.getenv("STRIPE_PRICE_INVESTOR_VIP"),
+    },
+    "entrepreneur_free": {
+        "name": "Entrepreneur Free",
+        "price_id": None,
+    },
+    "entrepreneur_premium": {
+        "name": "Entrepreneur Premium",
+        "price_id": os.getenv("STRIPE_PRICE_ENTREPRENEUR_PREMIUM"),
+    },
+    "entrepreneur_enterprise": {
+        "name": "Entrepreneur Enterprise",
+        "price_id": os.getenv("STRIPE_PRICE_ENTREPRENEUR_ENTERPRISE"),
+    },
+}
 
 @subscriptions_bp.route('/plans', methods=['GET'])
 def get_plans():
@@ -41,31 +79,32 @@ def get_plans():
 
 @subscriptions_bp.route('/checkout', methods=['POST'])
 def create_checkout_session():
-    user, error, status = require_auth()
-    if error: return error, status
-
-    data = request.json
-    plan_key = data.get("plan")
-
-    if not plan_key or plan_key not in PLAN_CONFIG:
-        return jsonify({'error': 'Invalid plan'}), 400
-
-    price_id = PLAN_CONFIG[plan_key]["price_id"]
-    if not price_id:
-        return jsonify({'error': 'This plan does not require checkout'}), 400
-
     try:
-        session = stripe.checkout.Session.create(
+        user, error, status = require_auth()
+        if error: return error, status
+
+        data = request.json
+        plan_key = data.get("plan")
+        if not plan_key or plan_key not in PLAN_CONFIG:
+            return jsonify({'error': 'Invalid plan'}), 400
+
+        price_id = PLAN_CONFIG[plan_key]["price_id"]
+        if not price_id:
+            return jsonify({'error': 'This plan does not require checkout'}), 400
+
+        stripe_session = stripe.checkout.Session.create(
             success_url=os.getenv("FRONTEND_URL") + "/subscription/success",
             cancel_url=os.getenv("FRONTEND_URL") + "/subscription/cancel",
             payment_method_types=["card"],
             mode="subscription",
             customer_email=user.email,
             line_items=[{"price": price_id, "quantity": 1}],
-            metadata={"user_id": str(user.id)}
+            metadata={"user_id": str(user.id), "price_id": price_id}
         )
-        return jsonify({'checkout_url': session.url}), 200
+        return jsonify({'checkout_url': stripe_session.url}), 200
+
     except Exception as e:
+        print("Stripe checkout error:", e)
         return jsonify({'error': str(e)}), 500
 
 @subscriptions_bp.route('/current', methods=['GET'])
@@ -74,10 +113,9 @@ def get_user_subscription():
     if error: return error, status
 
     if not user.subscription:
-        return jsonify({'plan': 'free'}), 200
+        return jsonify({'tier': 'free'}), 200
 
-    sub = user.subscription.to_dict()
-    return jsonify({'subscription': sub}), 200
+    return jsonify({'subscription': user.subscription.to_dict()}), 200
 
 @subscriptions_bp.route('/change', methods=['POST'])
 def change_plan():
@@ -85,23 +123,25 @@ def change_plan():
     if error: return error, status
 
     data = request.json
-    new_plan = data.get("plan")
-
-    if new_plan not in PLAN_CONFIG:
+    new_tier = data.get("plan")
+    if new_tier not in PLAN_CONFIG:
         return jsonify({'error': 'Invalid plan selected'}), 400
 
-    # If using Stripe subscription objects, you'd modify them here.
+    enterprise_id = user.enterprises[0].id if user.role == "entrepreneur" and user.enterprises else None
+
     if user.subscription:
-        user.subscription.plan = new_plan
-        user.subscription.updated_at = datetime.utcnow()
+        user.subscription.tier = new_tier
+        user.subscription.status = 'active'
+        user.subscription.started_at = datetime.utcnow()
     else:
-        sub = Subscription(
+        new_sub = Subscription(
             user_id=user.id,
-            plan=new_plan,
-            active=True,
-            created_at=datetime.utcnow()
+            enterprise_id=enterprise_id,
+            tier=new_tier,
+            status='active',
+            started_at=datetime.utcnow()
         )
-        db.session.add(sub)
+        db.session.add(new_sub)
 
     db.session.commit()
     return jsonify({'message': 'Plan updated successfully'}), 200
@@ -112,13 +152,12 @@ def cancel_subscription():
     if error: return error, status
 
     if user.subscription:
-        user.subscription.active = False
+        user.subscription.status = 'cancelled'
         user.subscription.canceled_at = datetime.utcnow()
         db.session.commit()
 
     return jsonify({'message': 'Subscription cancelled'}), 200
 
-# Stripe webhook (this should be exposed publicly to handle events like payment_success)
 @subscriptions_bp.route('/stripe/webhook', methods=['POST'])
 def stripe_webhook():
     payload = request.data
@@ -134,19 +173,71 @@ def stripe_webhook():
         session_data = event['data']['object']
         metadata = session_data.get("metadata", {})
         user_id = metadata.get("user_id")
+        price_id = metadata.get("price_id")
 
-        user = User.query.get(user_id)
-        if user:
-            plan = next((key for key, cfg in PLAN_CONFIG.items() if cfg["price_id"] == session_data["display_items"][0]["price"]["id"]), "pro")
-            sub = Subscription(
+        user = Users.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        tier = next((key for key, cfg in PLAN_CONFIG.items() if cfg["price_id"] == price_id), None)
+        if not tier:
+            return jsonify({'error': 'Invalid price_id'}), 400
+
+        stripe_subscription_id = session_data.get("subscription")
+        stripe_customer_id = session_data.get("customer")
+
+        try:
+            stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+        except Exception as e:
+            return jsonify({'error': f'Stripe subscription retrieval failed: {str(e)}'}), 400
+
+        enterprise_id = user.enterprises[0].id if user.role == "entrepreneur" and user.enterprises else None
+
+        existing = Subscription.query.filter_by(
+            user_id=user.id,
+            stripe_subscription_id=stripe_subscription_id
+        ).first()
+
+        if not existing:
+            new_sub = Subscription(
                 user_id=user.id,
-                plan=plan,
-                active=True,
-                stripe_customer_id=session_data["customer"],
-                stripe_subscription_id=session_data["subscription"],
-                created_at=datetime.utcnow()
+                enterprise_id=enterprise_id,
+                tier=tier,
+                status=stripe_sub.status,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=stripe_subscription_id,
+                started_at=datetime.utcfromtimestamp(stripe_sub.current_period_start),
+                ended_at=datetime.utcfromtimestamp(stripe_sub.current_period_end)
             )
-            db.session.add(sub)
+            db.session.add(new_sub)
+            db.session.commit()
+
+    elif event['type'] == 'customer.subscription.updated':
+        sub_data = event['data']['object']
+        stripe_subscription_id = sub_data['id']
+        new_status = sub_data['status']
+        new_start = datetime.utcfromtimestamp(sub_data['current_period_start'])
+        new_end = datetime.utcfromtimestamp(sub_data['current_period_end'])
+        new_price_id = sub_data['items']['data'][0]['price']['id']
+
+        tier = next((key for key, cfg in PLAN_CONFIG.items() if cfg["price_id"] == new_price_id), None)
+
+        subscription = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
+        if subscription:
+            subscription.status = new_status
+            subscription.tier = tier
+            subscription.started_at = new_start
+            subscription.ended_at = new_end
+            db.session.commit()
+
+    elif event['type'] == 'customer.subscription.deleted':
+        sub_data = event['data']['object']
+        stripe_subscription_id = sub_data['id']
+
+        subscription = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
+        if subscription:
+            subscription.status = 'cancelled'
+            subscription.ended_at = datetime.utcnow()
             db.session.commit()
 
     return jsonify({'received': True}), 200

@@ -1,50 +1,50 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, Enterprise, InvestorProfile, Like, MatchRecommendation, db
+from src.models.user import Users, Enterprise, InvestorProfile, Like, MatchRecommendation, db
 from datetime import datetime
 
 investor_bp = Blueprint('investor', __name__)
 
 # ---------- AUTH HELPERS ----------
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    return Users, None, None
 
 def require_investor_auth():
-    user, err, status = require_auth()
+    Users, err, status = require_auth()
     if err:
         return None, err, status
-    if user.role != 'investor':
+    if Users.role != 'investor':
         return None, jsonify({'error': 'Investor access required'}), 403
-    return user, None, None
+    return Users, None, None
 
 # ---------- PROFILE ----------
 @investor_bp.route('/me', methods=['GET'])
 def get_investor_profile():
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
-    profile = user.investor_profile
-    data = user.to_dict()
+    profile = Users.investor_profile
+    data = Users.to_dict()
     if profile:
         data['profile'] = profile.to_dict()
 
-    return jsonify({'user': data}), 200
+    return jsonify({'Users': data}), 200
 
 @investor_bp.route('/me', methods=['PUT'])
 def update_investor_profile():
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
-    profile = user.investor_profile
+    profile = Users.investor_profile
     if not profile:
-        profile = InvestorProfile(user_id=user.id)
+        profile = InvestorProfile(Users_id=Users.id)
         db.session.add(profile)
 
     data = request.json
@@ -64,7 +64,7 @@ def update_investor_profile():
 # ---------- STARTUP BROWSING ----------
 @investor_bp.route('/startups', methods=['GET'])
 def browse_startups():
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
@@ -96,12 +96,12 @@ def browse_startups():
 # ---------- MATCH RECOMMENDATIONS ----------
 @investor_bp.route('/matches', methods=['GET'])
 def get_match_recommendations():
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
     matches = MatchRecommendation.query \
-        .filter_by(user_id=user.id, status='pending') \
+        .filter_by(Users_id=Users.id, status='pending') \
         .order_by(MatchRecommendation.score.desc()) \
         .all()
 
@@ -122,7 +122,7 @@ def get_match_recommendations():
 # ---------- LIKE STARTUPS ----------
 @investor_bp.route('/startups/<int:enterprise_id>/like', methods=['POST'])
 def like_startup(enterprise_id):
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
@@ -130,10 +130,10 @@ def like_startup(enterprise_id):
     if not enterprise:
         return jsonify({'error': 'Startup not found'}), 404
 
-    if Like.query.filter_by(user_id=user.id, enterprise_id=enterprise_id).first():
+    if Like.query.filter_by(Users_id=Users.id, enterprise_id=enterprise_id).first():
         return jsonify({'message': 'Already liked'}), 200
 
-    like = Like(user_id=user.id, enterprise_id=enterprise_id)
+    like = Like(Users_id=Users.id, enterprise_id=enterprise_id)
     db.session.add(like)
     db.session.commit()
 
@@ -141,11 +141,11 @@ def like_startup(enterprise_id):
 
 @investor_bp.route('/startups/<int:enterprise_id>/unlike', methods=['DELETE'])
 def unlike_startup(enterprise_id):
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
-    like = Like.query.filter_by(user_id=user.id, enterprise_id=enterprise_id).first()
+    like = Like.query.filter_by(Users_id=Users.id, enterprise_id=enterprise_id).first()
     if not like:
         return jsonify({'message': 'Not previously liked'}), 404
 
@@ -157,12 +157,12 @@ def unlike_startup(enterprise_id):
 # ---------- INTEREST/DECISION ----------
 @investor_bp.route('/matches/<int:match_id>/interest', methods=['POST'])
 def express_interest_in_startup(match_id):
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
     match = MatchRecommendation.query.get(match_id)
-    if not match or match.user_id != user.id:
+    if not match or match.Users_id != Users.id:
         return jsonify({'error': 'Match not found or unauthorized'}), 404
 
     data = request.json
@@ -178,14 +178,14 @@ def express_interest_in_startup(match_id):
 # ---------- DASHBOARD ANALYTICS ----------
 @investor_bp.route('/dashboard/stats', methods=['GET'])
 def investor_dashboard():
-    user, err, status = require_investor_auth()
+    Users, err, status = require_investor_auth()
     if err:
         return err, status
 
-    total_matches = MatchRecommendation.query.filter_by(user_id=user.id).count()
-    accepted = MatchRecommendation.query.filter_by(user_id=user.id, status='accepted').count()
-    declined = MatchRecommendation.query.filter_by(user_id=user.id, status='declined').count()
-    likes = Like.query.filter_by(user_id=user.id).count()
+    total_matches = MatchRecommendation.query.filter_by(Users_id=Users.id).count()
+    accepted = MatchRecommendation.query.filter_by(Users_id=Users.id, status='accepted').count()
+    declined = MatchRecommendation.query.filter_by(Users_id=Users.id, status='declined').count()
+    likes = Like.query.filter_by(Users_id=Users.id).count()
 
     return jsonify({
         'stats': {

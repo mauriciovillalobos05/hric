@@ -1,26 +1,26 @@
 from flask import Blueprint, request, jsonify, session
 from datetime import datetime
-from src.models.user import User, Event, EventRegistration, EventPayment, db
+from src.models.user import Users, Event, EventRegistration, EventPayment, db
 
 events_bp = Blueprint('event', __name__)
 
 # ---------- AUTH HELPERS ----------
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    return Users, None, None
 
 def require_admin_auth():
-    user, err, status = require_auth()
+    Users, err, status = require_auth()
     if err:
         return None, err, status
-    if user.role != 'admin':
+    if Users.role != 'admin':
         return None, jsonify({'error': 'Admin access required'}), 403
-    return user, None, None
+    return Users, None, None
 
 # ---------- EVENTS ----------
 @events_bp.route('/events', methods=['GET'])
@@ -68,7 +68,7 @@ def create_event():
 # ---------- EVENT REGISTRATION ----------
 @events_bp.route('/events/<int:event_id>/register', methods=['POST'])
 def register_for_event(event_id):
-    user, err, status = require_auth()
+    Users, err, status = require_auth()
     if err:
         return err, status
 
@@ -77,12 +77,12 @@ def register_for_event(event_id):
         if not event:
             return jsonify({'error': 'Event not found'}), 404
 
-        if EventRegistration.query.filter_by(event_id=event_id, user_id=user.id).first():
+        if EventRegistration.query.filter_by(event_id=event_id, Users_id=Users.id).first():
             return jsonify({'message': 'Already registered'}), 200
 
         registration = EventRegistration(
             event_id=event_id,
-            user_id=user.id,
+            Users_id=Users.id,
             answers=request.json.get('answers', {}),
             registration_status='registered'
         )
@@ -108,7 +108,7 @@ def get_event_attendees(event_id):
 
         attendees = [
             {
-                'user': reg.user.to_summary(),
+                'Users': reg.Users.to_summary(),
                 'answers': reg.answers,
                 'status': reg.registration_status,
                 'registered_at': reg.registration_date.isoformat()
@@ -134,7 +134,7 @@ def e_to_dict(event):
 
 @events_bp.route('/events/<int:event_id>/pay', methods=['POST'])
 def pay_for_event(event_id):
-    user, err, status = require_auth()
+    Users, err, status = require_auth()
     if err:
         return err, status
 
@@ -152,7 +152,7 @@ def pay_for_event(event_id):
 
         # Record payment
         payment = EventPayment(
-            user_id=user.id,
+            Users_id=Users.id,
             event_id=event.id,
             stripe_payment_id=stripe_payment_id,
             amount=amount,
@@ -161,11 +161,11 @@ def pay_for_event(event_id):
         db.session.add(payment)
 
         # Mark as registered (if not already)
-        registration = EventRegistration.query.filter_by(event_id=event_id, user_id=user.id).first()
+        registration = EventRegistration.query.filter_by(event_id=event_id, Users_id=Users.id).first()
         if not registration:
             registration = EventRegistration(
                 event_id=event_id,
-                user_id=user.id,
+                Users_id=Users.id,
                 answers={},
                 registration_status='paid'
             )
@@ -180,14 +180,14 @@ def pay_for_event(event_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@events_bp.route('/admin/events/<int:event_id>/attendees/<uuid:user_id>/status', methods=['PUT'])
-def update_attendee_status(event_id, user_id):
+@events_bp.route('/admin/events/<int:event_id>/attendees/<uuid:Users_id>/status', methods=['PUT'])
+def update_attendee_status(event_id, Users_id):
     admin, err, status = require_admin_auth()
     if err:
         return err, status
 
     try:
-        reg = EventRegistration.query.filter_by(event_id=event_id, user_id=user_id).first()
+        reg = EventRegistration.query.filter_by(event_id=event_id, Users_id=Users_id).first()
         if not reg:
             return jsonify({'error': 'Registration not found'}), 404
 
@@ -205,13 +205,13 @@ def update_attendee_status(event_id, user_id):
         return jsonify({'error': str(e)}), 500
 
 @events_bp.route('/events/<int:event_id>/check-in', methods=['POST'])
-def check_in_user(event_id):
-    user, err, status = require_auth()
+def check_in_Users(event_id):
+    Users, err, status = require_auth()
     if err:
         return err, status
 
     try:
-        reg = EventRegistration.query.filter_by(event_id=event_id, user_id=user.id).first()
+        reg = EventRegistration.query.filter_by(event_id=event_id, Users_id=Users.id).first()
         if not reg:
             return jsonify({'error': 'Not registered for this event'}), 404
 

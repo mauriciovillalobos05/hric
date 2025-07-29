@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, Enterprise, Like,db
+from src.models.user import Users, InvestorProfile, Enterprise, Like,db
 from datetime import datetime
 import re
 
@@ -14,11 +14,11 @@ def register_complete():
             if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
 
-        if User.query.filter_by(id=data['supabase_id']).first():
-            return jsonify({'error': 'User already exists'}), 409
+        if Users.query.filter_by(id=data['supabase_id']).first():
+            return jsonify({'error': 'Users already exists'}), 409
 
-        # Create base user
-        user = User(
+        # Create base Users
+        Users = Users(
             id=data['supabase_id'],
             email=data['email'],
             phone=data.get('phone'),
@@ -32,13 +32,13 @@ def register_complete():
             website_url=data.get('website_url'),
             onboarding_status='pending_review'
         )
-        db.session.add(user)
-        db.session.flush()  # assign user.id
+        db.session.add(Users)
+        db.session.flush()  # assign Users.id
 
         # Role-based profile creation
-        if user.role == 'investor':
+        if Users.role == 'investor':
             profile = InvestorProfile(
-                user_id=user.id,
+                Users_id=Users.id,
                 industries=data.get('industries', []),
                 investment_stages=data.get('investment_stages', []),
                 geographic_focus=data.get('geographic_focus', []),
@@ -54,9 +54,9 @@ def register_complete():
             )
             db.session.add(profile)
 
-        elif user.role == 'entrepreneur':
+        elif Users.role == 'entrepreneur':
             enterprise = Enterprise(
-                user_id=user.id,
+                Users_id=Users.id,
                 name=data.get('company_name', ''),
                 industry=data.get('industry'),
                 stage=data.get('stage'),
@@ -71,7 +71,7 @@ def register_complete():
             db.session.add(enterprise)
 
         db.session.commit()
-        return jsonify({'message': 'User onboarding complete', 'user': user.to_dict()}), 201
+        return jsonify({'message': 'Users onboarding complete', 'Users': Users.to_dict()}), 201
 
     except Exception as e:
         db.session.rollback()
@@ -81,12 +81,12 @@ def register_complete():
 def track_login():
     try:
         email = request.json.get('email')
-        user = User.query.filter_by(email=email).first()
-        if user:
-            user.last_login = datetime.utcnow()
+        Users = Users.query.filter_by(email=email).first()
+        if Users:
+            Users.last_login = datetime.utcnow()
             db.session.commit()
             return jsonify({'message': 'Login tracked'}), 200
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'error': 'Users not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -96,47 +96,47 @@ def logout():
     return jsonify({'message': 'Logout successful'}), 200
 
 @auth_bp.route('/me', methods=['GET'])
-def get_current_user():
+def get_current_Users():
     try:
-        user_id = session.get('user_id')
-        if not user_id:
+        Users_id = session.get('Users_id')
+        if not Users_id:
             return jsonify({'error': 'Not authenticated'}), 401
 
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
+        Users = Users.query.get(Users_id)
+        if not Users:
+            return jsonify({'error': 'Users not found'}), 404
 
-        user_data = user.to_dict()
+        Users_data = Users.to_dict()
 
-        if user.role == 'investor' and user.investor_profile:
-            user_data['profile'] = user.investor_profile.to_dict()
-        elif user.role == 'entrepreneur' and user.enterprises:
-            user_data['profile'] = user.enterprises[0].to_dict()
+        if Users.role == 'investor' and Users.investor_profile:
+            Users_data['profile'] = Users.investor_profile.to_dict()
+        elif Users.role == 'entrepreneur' and Users.enterprises:
+            Users_data['profile'] = Users.enterprises[0].to_dict()
 
-        return jsonify({'user': user_data}), 200
+        return jsonify({'Users': Users_data}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @auth_bp.route('/profile', methods=['PUT'])
 def update_profile():
     try:
-        user_id = session.get('user_id')
-        if not user_id:
+        Users_id = session.get('Users_id')
+        if not Users_id:
             return jsonify({'error': 'Not authenticated'}), 401
 
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
+        Users = Users.query.get(Users_id)
+        if not Users:
+            return jsonify({'error': 'Users not found'}), 404
 
         data = request.json
-        # Update base User fields
+        # Update base Users fields
         for field in ['first_name', 'last_name', 'phone', 'location', 'bio', 'linkedin_url', 'website_url', 'profile_image']:
             if field in data:
-                setattr(user, field, data[field])
+                setattr(Users, field, data[field])
 
         # Update investor profile
-        if user.role == 'investor' and user.investor_profile:
-            profile = user.investor_profile
+        if Users.role == 'investor' and Users.investor_profile:
+            profile = Users.investor_profile
             for field in [
                 'industries', 'investment_stages', 'geographic_focus',
                 'investment_range_min', 'investment_range_max',
@@ -148,8 +148,8 @@ def update_profile():
                     setattr(profile, field, data[field])
 
         # Update entrepreneur profile
-        elif user.role == 'entrepreneur' and user.enterprises:
-            enterprise = user.enterprises[0]
+        elif Users.role == 'entrepreneur' and Users.enterprises:
+            enterprise = Users.enterprises[0]
             for field in [
                 'name', 'industry', 'stage', 'business_model',
                 'team_size', 'pitch_deck_url', 'demo_url',
@@ -160,13 +160,13 @@ def update_profile():
 
         db.session.commit()
 
-        updated = user.to_dict()
-        if user.role == 'investor' and user.investor_profile:
-            updated['profile'] = user.investor_profile.to_dict()
-        elif user.role == 'entrepreneur' and user.enterprises:
-            updated['profile'] = user.enterprises[0].to_dict()
+        updated = Users.to_dict()
+        if Users.role == 'investor' and Users.investor_profile:
+            updated['profile'] = Users.investor_profile.to_dict()
+        elif Users.role == 'entrepreneur' and Users.enterprises:
+            updated['profile'] = Users.enterprises[0].to_dict()
 
-        return jsonify({'message': 'Profile updated', 'user': updated}), 200
+        return jsonify({'message': 'Profile updated', 'Users': updated}), 200
 
     except Exception as e:
         db.session.rollback()
@@ -174,12 +174,12 @@ def update_profile():
 
 @auth_bp.route('/enterprise/<int:enterprise_id>/likes', methods=['POST', 'GET'])
 def handle_likes(enterprise_id):
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return jsonify({'error': 'Not authenticated'}), 401
 
-    user = User.query.get(user_id)
-    if not user or user.role != 'investor':
+    Users = Users.query.get(Users_id)
+    if not Users or Users.role != 'investor':
         return jsonify({'error': 'Only investors can perform this action'}), 403
 
     enterprise = Enterprise.query.get(enterprise_id)
@@ -187,22 +187,22 @@ def handle_likes(enterprise_id):
         return jsonify({'error': 'Enterprise not found'}), 404
 
     if request.method == 'POST':
-        existing_like = Like.query.filter_by(user_id=user.id, enterprise_id=enterprise_id).first()
+        existing_like = Like.query.filter_by(Users_id=Users.id, enterprise_id=enterprise_id).first()
         if existing_like:
             return jsonify({'message': 'Already liked'}), 200
 
-        like = Like(user_id=user.id, enterprise_id=enterprise_id)
+        like = Like(Users_id=Users.id, enterprise_id=enterprise_id)
         db.session.add(like)
         db.session.commit()
         return jsonify({'message': 'Enterprise liked'}), 201
 
     elif request.method == 'GET':
         likes = Like.query.filter_by(enterprise_id=enterprise_id).all()
-        tier = user.investor_profile.portfolio_size if user.investor_profile else 0
+        tier = Users.investor_profile.portfolio_size if Users.investor_profile else 0
 
         if tier >= 1000000:
             return jsonify({
-                'likes': [like.user.to_dict(include_profile=True) for like in likes],
+                'likes': [like.Users.to_dict(include_profile=True) for like in likes],
                 'count': len(likes)
             }), 200
         elif tier > 0:

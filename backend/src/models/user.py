@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 db = SQLAlchemy()
 
 # -------------------- User & Onboarding --------------------
-class User(db.Model):
+class Users(db.Model):
     __tablename__ = 'user'
     id = db.Column(UUID(as_uuid=True), primary_key=True)  # Supabase Auth ID
     email = db.Column(db.String(120), nullable=False, unique=True)
@@ -30,7 +30,7 @@ class User(db.Model):
     enterprises = db.relationship('Enterprise', backref='owner', cascade='all, delete-orphan')
     subscriptions = db.relationship('Subscription', backref='user', cascade='all, delete-orphan')
     documents = db.relationship('Document', backref='owner', cascade='all, delete-orphan')
-    likes = db.relationship('Like', backref='user', cascade='all, delete-orphan')
+    likes = db.relationship('Like', back_populates='user', cascade='all, delete-orphan')
     messages_sent = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender')
     messages_received = db.relationship('Message', foreign_keys='Message.recipient_id', backref='recipient')
     meetings = db.relationship('Meeting', backref='user', cascade='all, delete-orphan')
@@ -120,7 +120,7 @@ class Enterprise(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     subscriptions = db.relationship('Subscription', backref='enterprise', cascade='all, delete-orphan')
-    likes = db.relationship('Like', backref='enterprise', cascade='all, delete-orphan')
+    likes = db.relationship('Like', back_populates='enterprise', cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
@@ -190,8 +190,8 @@ class Like(db.Model):
     enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user = db.relationship('User', backref='likes_given')
-    enterprise = db.relationship('Enterprise', backref='likes_received')
+    user = db.relationship('Users', back_populates='likes')
+    enterprise = db.relationship('Enterprise', back_populates='likes')
 
     __table_args__ = (db.UniqueConstraint('user_id', 'enterprise_id', name='unique_like'),)
 
@@ -219,7 +219,7 @@ class MatchRecommendation(db.Model):
     status = db.Column(db.String(20), default='pending')  # 'pending', 'accepted', 'declined'
     generated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user = db.relationship('User', backref='match_recommendations')
+    user = db.relationship('Users', backref='match_recommendations')
     enterprise = db.relationship('Enterprise', backref='match_recommendations')
 
     def to_dict(self):

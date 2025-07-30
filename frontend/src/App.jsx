@@ -9,7 +9,6 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
-import ConfirmEmail from "./pages/emailConfirmation";
 // import Subscription from "./pages/Subscription"; // assuming you have this actual component
 import { createClient } from "@supabase/supabase-js";
 
@@ -55,16 +54,7 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route
-          path="/confirm-email"
-          element={
-            <ProtectedRoute>
-              <ConfirmEmail />
-            </ProtectedRoute>
-          }
-        />
-
+        <Route path="/register" element={<Register />} />    
         <Route
           path="/onboarding"
           element={

@@ -29,14 +29,18 @@ export default function HashSessionHandler() {
       }
 
       // Manually set session using tokens
-      supabase.auth.setSession({ access_token, refresh_token })
+      supabase.auth
+        .setSession({ access_token, refresh_token })
         .then(async ({ error }) => {
           if (error) {
             console.error("Failed to set session:", error.message);
             return;
           }
 
-          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser();
           if (userError || !user) {
             console.error("Failed to fetch user:", userError?.message);
             return;
@@ -54,13 +58,19 @@ export default function HashSessionHandler() {
               console.log("Email synced to DB.");
             }
 
-            navigate("/profile-settings");
+            navigate("/profile-settings", {
+              state: { emailChangeSuccess: true },
+            });
           } else {
             navigate("/dashboard/user");
           }
 
           // Clean up the hash
-          window.history.replaceState({}, document.title, window.location.pathname);
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
         });
     }
   }, [navigate]);

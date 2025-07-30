@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Loader2 } from "lucide-react";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -30,6 +31,7 @@ export default function ProfileSettings() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const defaultAvatar = "/default_user_image.png";
 
@@ -63,7 +65,21 @@ export default function ProfileSettings() {
       }
     };
 
-    fetchProfile();
+    const initialize = async () => {
+      setLoading(true);
+      await fetchProfile();
+
+      // Show success message if redirected from email change
+      if (location.state?.emailChangeSuccess) {
+        setMessage("Your email was successfully updated!.");
+
+        // Optional: clear the location state after use to prevent repeated messages
+        window.history.replaceState({}, document.title);
+      }
+      setLoading(false);
+    };
+
+    initialize();
   }, []);
 
   const handleProfileUpdate = async (e) => {
@@ -191,7 +207,14 @@ export default function ProfileSettings() {
         .getPublicUrl(profile.profile_image).data.publicUrl
     : defaultAvatar;
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-600">
+        <Loader2 className="h-10 w-10 animate-spin mb-4 text-gray-800" />
+        <p className="text-sm">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto py-10 px-6">

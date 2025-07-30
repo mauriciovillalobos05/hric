@@ -1,387 +1,198 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, Enterprise, Match, db
-from sqlalchemy import and_, or_
-from uuid import UUID
-from datetime import datetime, timedelta
+from src.models.user import User, Enterprise, InvestorProfile, Like, MatchRecommendation, db
+from datetime import datetime
 
 investor_bp = Blueprint('investor', __name__)
 
+# ---------- AUTH HELPERS ----------
 def require_auth():
     user_id = session.get('user_id')
     if not user_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-
     user = User.query.get(user_id)
     if not user:
         return None, jsonify({'error': 'User not found'}), 404
-
     return user, None, None
 
 def require_investor_auth():
-    user, error_response, status_code = require_auth()
-    if error_response:
-        return user, error_response, status_code
-
-    if user.user_type != 'investor':
+    user, err, status = require_auth()
+    if err:
+        return None, err, status
+    if user.role != 'investor':
         return None, jsonify({'error': 'Investor access required'}), 403
-
     return user, None, None
 
-@investor_bp.route('/profile', methods=['GET'])
+# ---------- PROFILE ----------
+@investor_bp.route('/me', methods=['GET'])
 def get_investor_profile():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-        if not user.investor_profile:
-            return jsonify({'error': 'Investor profile not found'}), 404
+    profile = user.investor_profile
+    data = user.to_dict()
+    if profile:
+        data['profile'] = profile.to_dict()
 
-        profile_data = user.investor_profile.to_dict()
-        profile_data['user'] = user.to_dict()
+    return jsonify({'user': data}), 200
 
-        return jsonify({'profile': profile_data}), 200
+@investor_bp.route('/me', methods=['PUT'])
+def update_investor_profile():
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    profile = user.investor_profile
+    if not profile:
+        profile = InvestorProfile(user_id=user.id)
+        db.session.add(profile)
 
-@investor_bp.route('/entrepreneurs', methods=['GET'])
-def browse_entrepreneurs():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
+    data = request.json
+    allowed = [
+        'industries', 'investment_stages', 'geographic_focus',
+        'investment_range_min', 'investment_range_max', 'accredited_status',
+        'investor_type', 'risk_tolerance', 'portfolio_size',
+        'advisory_availability', 'communication_frequency', 'meeting_preference'
+    ]
+    for field in allowed:
+        if field in data:
+            setattr(profile, field, data[field])
 
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
-        industry = request.args.get('industry')
-        stage = request.args.get('stage')
-        funding_stage = request.args.get('funding_stage')
-        location = request.args.get('location')
-        min_funding = request.args.get('min_funding', type=int)
-        max_funding = request.args.get('max_funding', type=int)
-        actively_fundraising = request.args.get('actively_fundraising', type=bool)
+    db.session.commit()
+    return jsonify({'message': 'Profile updated', 'profile': profile.to_dict()}), 200
 
-        query = db.session.query(User).join(Enterprise).filter(
-            User.user_type == 'entrepreneur',
-            User.is_active == True
-        )
+# ---------- STARTUP BROWSING ----------
+@investor_bp.route('/startups', methods=['GET'])
+def browse_startups():
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-        if industry:
-            query = query.filter(Enterprise.industry == industry)
-        if stage:
-            query = query.filter(Enterprise.stage == stage)
-        if funding_stage:
-            query = query.filter(Enterprise.funding_stage == funding_stage)
-        if location:
-            query = query.filter(Enterprise.location.ilike(f'%{location}%'))
-        if min_funding:
-            query = query.filter(Enterprise.funding_amount_seeking >= min_funding)
-        if max_funding:
-            query = query.filter(Enterprise.funding_amount_seeking <= max_funding)
-        if actively_fundraising is not None:
-            query = query.filter(Enterprise.is_actively_fundraising == actively_fundraising)
+    industry = request.args.get('industry')
+    stage = request.args.get('stage')
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
 
-        entrepreneurs = query.paginate(page=page, per_page=per_page, error_out=False)
+    query = Enterprise.query.filter_by(is_actively_fundraising=True)
+    if industry:
+        query = query.filter(Enterprise.industry.ilike(f'%{industry}%'))
+    if stage:
+        query = query.filter(Enterprise.stage == stage)
 
-        result = []
-        for entrepreneur in entrepreneurs.items:
-            entrepreneur_data = entrepreneur.to_dict()
-            if entrepreneur.enterprise:
-                entrepreneur_data['profile'] = entrepreneur.enterprise.to_dict()
-            result.append(entrepreneur_data)
+    pagination = query.order_by(Enterprise.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
 
-        return jsonify({
-            'entrepreneurs': result,
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': entrepreneurs.total,
-                'pages': entrepreneurs.pages,
-                'has_next': entrepreneurs.has_next,
-                'has_prev': entrepreneurs.has_prev
-            }
-        }), 200
+    results = [e.to_dict() for e in pagination.items]
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'startups': results,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': pagination.total,
+            'pages': pagination.pages
+        }
+    }), 200
 
-@investor_bp.route('/entrepreneurs/<uuid:entrepreneur_id>', methods=['GET'])
-def get_entrepreneur_details(entrepreneur_id):
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
-
-        entrepreneur = User.query.filter_by(
-            id=entrepreneur_id,
-            user_type='entrepreneur',
-            is_active=True
-        ).first()
-
-        if not entrepreneur:
-            return jsonify({'error': 'Entrepreneur not found'}), 404
-
-        entrepreneur_data = entrepreneur.to_dict()
-        # Expect a single enterprise record (as per one-to-many relationship)
-        enterprise = entrepreneur.enterprises[0] if entrepreneur.enterprises else None
-        if enterprise:
-            entrepreneur_data['profile'] = enterprise.to_dict()
-
-        # Match.enterprise_id refers to Enterprise.id (int), not User.id (uuid)
-        # So we need to query differently
-        existing_match = Match.query.filter_by(
-            investor_id=user.id,
-            enterprise_id=enterprise.id if enterprise else None
-        ).first()
-
-        if existing_match:
-            entrepreneur_data['match'] = existing_match.to_dict()
-
-        return jsonify({'entrepreneur': entrepreneur_data}), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+# ---------- MATCH RECOMMENDATIONS ----------
 @investor_bp.route('/matches', methods=['GET'])
-def get_matches():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
+def get_match_recommendations():
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
-        status_filter = request.args.get('status')
+    matches = MatchRecommendation.query \
+        .filter_by(user_id=user.id, status='pending') \
+        .order_by(MatchRecommendation.score.desc()) \
+        .all()
 
-        query = Match.query.filter_by(investor_id=user.id)
+    results = []
+    for match in matches:
+        enterprise = match.enterprise
+        data = enterprise.to_dict()
+        data['funding_goal'] = enterprise.financials.get('funding_goal') if enterprise.financials else None
+        results.append({
+            'enterprise': data,
+            'compatibility_score': match.score,
+            'reasons': match.reasons,
+            'match_id': match.id
+        })
 
-        if status_filter:
-            query = query.filter_by(status=status_filter)
+    return jsonify({'matches': results}), 200
 
-        matches = query.order_by(Match.compatibility_score.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
+# ---------- LIKE STARTUPS ----------
+@investor_bp.route('/startups/<int:enterprise_id>/like', methods=['POST'])
+def like_startup(enterprise_id):
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-        result = [match.to_dict() for match in matches.items]
+    enterprise = Enterprise.query.get(enterprise_id)
+    if not enterprise:
+        return jsonify({'error': 'Startup not found'}), 404
 
-        return jsonify({
-            'matches': result,
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': matches.total,
-                'pages': matches.pages,
-                'has_next': matches.has_next,
-                'has_prev': matches.has_prev
-            }
-        }), 200
+    if Like.query.filter_by(user_id=user.id, enterprise_id=enterprise_id).first():
+        return jsonify({'message': 'Already liked'}), 200
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    like = Like(user_id=user.id, enterprise_id=enterprise_id)
+    db.session.add(like)
+    db.session.commit()
 
+    return jsonify({'message': 'Startup liked'}), 201
+
+@investor_bp.route('/startups/<int:enterprise_id>/unlike', methods=['DELETE'])
+def unlike_startup(enterprise_id):
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
+
+    like = Like.query.filter_by(user_id=user.id, enterprise_id=enterprise_id).first()
+    if not like:
+        return jsonify({'message': 'Not previously liked'}), 404
+
+    db.session.delete(like)
+    db.session.commit()
+
+    return jsonify({'message': 'Startup unliked'}), 200
+
+# ---------- INTEREST/DECISION ----------
 @investor_bp.route('/matches/<int:match_id>/interest', methods=['POST'])
-def express_interest(match_id):
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
+def express_interest_in_startup(match_id):
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-        match = Match.query.filter_by(
-            id=match_id,
-            investor_id=user.id
-        ).first()
+    match = MatchRecommendation.query.get(match_id)
+    if not match or match.user_id != user.id:
+        return jsonify({'error': 'Match not found or unauthorized'}), 404
 
-        if not match:
-            return jsonify({'error': 'Match not found'}), 404
+    data = request.json
+    decision = data.get('interest')  # 'interested', 'not_interested'
+    if decision not in ['interested', 'not_interested']:
+        return jsonify({'error': 'Invalid interest value'}), 400
 
-        data = request.json
-        interest_level = data.get('interest')  # 'interested', 'not_interested', 'maybe'
-        notes = data.get('notes', '')
+    match.status = 'accepted' if decision == 'interested' else 'declined'
+    db.session.commit()
 
-        if interest_level not in ['interested', 'not_interested', 'maybe']:
-            return jsonify({'error': 'Invalid interest level'}), 400
+    return jsonify({'message': 'Interest recorded', 'match': match.to_dict()}), 200
 
-        match.investor_interest = interest_level
-        match.notes = notes
+# ---------- DASHBOARD ANALYTICS ----------
+@investor_bp.route('/dashboard/stats', methods=['GET'])
+def investor_dashboard():
+    user, err, status = require_investor_auth()
+    if err:
+        return err, status
 
-        # Update match status based on mutual interest
-        if interest_level == 'interested' and match.enterprise_interest == 'interested':
-            match.status = 'accepted'
-        elif interest_level == 'not_interested' or match.enterprise_interest == 'not_interested':
-            match.status = 'declined'
+    total_matches = MatchRecommendation.query.filter_by(user_id=user.id).count()
+    accepted = MatchRecommendation.query.filter_by(user_id=user.id, status='accepted').count()
+    declined = MatchRecommendation.query.filter_by(user_id=user.id, status='declined').count()
+    likes = Like.query.filter_by(user_id=user.id).count()
 
-        db.session.commit()
-
-        return jsonify({
-            'message': 'Interest updated successfully',
-            'match': match.to_dict()
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@investor_bp.route('/portfolio', methods=['GET'])
-def get_portfolio():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
-
-        portfolio_matches = Match.query.filter(
-            Match.investor_id == user.id,
-            Match.investor_interest == 'interested',
-            Match.status.in_(['accepted', 'meeting_scheduled', 'invested'])
-        ).all()
-
-        portfolio = [match.to_dict() for match in portfolio_matches]
-
-        total_matches = len(portfolio)
-        invested_count = len([m for m in portfolio if m['status'] == 'invested'])
-        meeting_count = len([m for m in portfolio if m['status'] == 'meeting_scheduled'])
-
-        stats = {
+    return jsonify({
+        'stats': {
             'total_matches': total_matches,
-            'invested_count': invested_count,
-            'meeting_count': meeting_count,
-            'conversion_rate': (invested_count / total_matches * 100) if total_matches > 0 else 0
+            'accepted_matches': accepted,
+            'declined_matches': declined,
+            'liked_startups': likes,
+            'accept_rate': (accepted / total_matches * 100) if total_matches else 0
         }
-
-        return jsonify({
-            'portfolio': portfolio,
-            'stats': stats
-        }), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@investor_bp.route('/preferences', methods=['GET'])
-def get_preferences():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
-
-        if not user.investor_profile:
-            return jsonify({'error': 'Investor profile not found'}), 404
-
-        preferences = {
-            'investment_stages': user.investor_profile.get_investment_stages(),
-            'industries': user.investor_profile.get_industries(),
-            'geographic_focus': user.investor_profile.get_geographic_focus(),
-            'investment_range_min': user.investor_profile.investment_range_min,
-            'investment_range_max': user.investor_profile.investment_range_max,
-            'risk_tolerance': user.investor_profile.risk_tolerance,
-            'investor_type': user.investor_profile.investor_type,
-            'expertise_areas': user.investor_profile.get_expertise_areas(),
-            'advisory_availability': user.investor_profile.advisory_availability,
-            'communication_frequency': user.investor_profile.communication_frequency,
-            'meeting_preference': user.investor_profile.meeting_preference
-        }
-
-        return jsonify({'preferences': preferences}), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@investor_bp.route('/preferences', methods=['PUT'])
-def update_preferences():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
-
-        if not user.investor_profile:
-            return jsonify({'error': 'Investor profile not found'}), 404
-
-        data = request.json
-        profile = user.investor_profile
-
-        if 'investment_stages' in data:
-            profile.set_investment_stages(data['investment_stages'])
-
-        if 'industries' in data:
-            profile.set_industries(data['industries'])
-
-        if 'geographic_focus' in data:
-            profile.set_geographic_focus(data['geographic_focus'])
-
-        if 'investment_range_min' in data:
-            profile.investment_range_min = data['investment_range_min']
-
-        if 'investment_range_max' in data:
-            profile.investment_range_max = data['investment_range_max']
-
-        if 'risk_tolerance' in data:
-            profile.risk_tolerance = data['risk_tolerance']
-
-        if 'investor_type' in data:
-            profile.investor_type = data['investor_type']
-
-        if 'expertise_areas' in data:
-            profile.set_expertise_areas(data['expertise_areas'])
-
-        if 'advisory_availability' in data:
-            profile.advisory_availability = data['advisory_availability']
-
-        if 'communication_frequency' in data:
-            profile.communication_frequency = data['communication_frequency']
-
-        if 'meeting_preference' in data:
-            profile.meeting_preference = data['meeting_preference']
-
-        profile.updated_at = datetime.utcnow()
-        db.session.commit()
-
-        return jsonify({
-            'message': 'Preferences updated successfully',
-            'preferences': get_preferences()[0].json
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@investor_bp.route('/stats', methods=['GET'])
-def get_investor_stats():
-    try:
-        user, error_response, status_code = require_investor_auth()
-        if error_response:
-            return error_response, status_code
-
-        total_matches = Match.query.filter_by(investor_id=user.id).count()
-        interested_matches = Match.query.filter_by(
-            investor_id=user.id,
-            investor_interest='interested'
-        ).count()
-        accepted_matches = Match.query.filter_by(
-            investor_id=user.id,
-            status='accepted'
-        ).count()
-        invested_matches = Match.query.filter_by(
-            investor_id=user.id,
-            status='invested'
-        ).count()
-
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        recent_matches = Match.query.filter(
-            Match.investor_id == user.id,
-            Match.created_at >= thirty_days_ago
-        ).count()
-
-        stats = {
-            'total_matches': total_matches,
-            'interested_matches': interested_matches,
-            'accepted_matches': accepted_matches,
-            'invested_matches': invested_matches,
-            'recent_matches': recent_matches,
-            'interest_rate': (interested_matches / total_matches * 100) if total_matches > 0 else 0,
-            'conversion_rate': (invested_matches / interested_matches * 100) if interested_matches > 0 else 0
-        }
-
-        return jsonify({'stats': stats}), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+    }), 200

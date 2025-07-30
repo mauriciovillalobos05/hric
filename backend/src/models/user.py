@@ -1,616 +1,413 @@
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
-import json
-from sqlalchemy.dialects.postgresql import UUID
+# import and setup unchanged
 import uuid
+from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 
 db = SQLAlchemy()
 
+# -------------------- User & Onboarding --------------------
 class User(db.Model):
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=None)  # set manually from Supabase
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    user_type = db.Column(db.String(20), nullable=False)  # 'investor' or 'entrepreneur'
-    first_name = db.Column(db.String(50), nullable=False)
-    last_name = db.Column(db.String(50), nullable=False)
+    __tablename__ = 'user'
+    id = db.Column(UUID(as_uuid=True), primary_key=True)  # Supabase Auth ID
+    email = db.Column(db.String(120), nullable=False, unique=True)
     phone = db.Column(db.String(20))
+    role = db.Column(db.String(20), nullable=False)  # 'investor' or 'entrepreneur'
+    first_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
     location = db.Column(db.String(100))
-    profile_image = db.Column(db.String(255))
     bio = db.Column(db.Text)
+    profile_image = db.Column(db.String(255))
     linkedin_url = db.Column(db.String(255))
     website_url = db.Column(db.String(255))
-    is_verified = db.Column(db.Boolean, default=False)
+    onboarding_status = db.Column(db.String(20), default='incomplete')  # 'incomplete', 'pending_review', 'complete'
+    last_login = db.Column(db.DateTime)
     is_active = db.Column(db.Boolean, default=True)
-    subscription_tier = db.Column(db.String(20), default='free')  # free, basic, premium, vip, enterprise
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_login = db.Column(db.DateTime)
 
-    # Relationships
     investor_profile = db.relationship('InvestorProfile', backref='user', uselist=False, cascade='all, delete-orphan')
-    enterprises = db.relationship('Enterprise', backref='user', cascade='all, delete-orphan')
+    enterprises = db.relationship('Enterprise', backref='owner', cascade='all, delete-orphan')
+    subscriptions = db.relationship('Subscription', backref='user', cascade='all, delete-orphan')
     documents = db.relationship('Document', backref='owner', cascade='all, delete-orphan')
+    likes = db.relationship('Like', backref='user', cascade='all, delete-orphan')
+    messages_sent = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender')
+    messages_received = db.relationship('Message', foreign_keys='Message.recipient_id', backref='recipient')
+    meetings = db.relationship('Meeting', backref='user', cascade='all, delete-orphan')
+    notifications = db.relationship('Notification', backref='user', cascade='all, delete-orphan')
+    audit_logs = db.relationship('AuditLog', backref='user', cascade='all, delete-orphan')
 
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-
-    def __repr__(self):
-        return f'<User {self.email}>'
-
-    def to_dict(self, include_sensitive=False):
-        data = {
-            'id': self.id,
+    def to_dict(self):
+        return {
+            'id': str(self.id),
             'email': self.email,
-            'user_type': self.user_type,
+            'phone': self.phone,
+            'role': self.role,
             'first_name': self.first_name,
             'last_name': self.last_name,
-            'phone': self.phone,
             'location': self.location,
-            'profile_image': self.profile_image,
             'bio': self.bio,
+            'profile_image': self.profile_image,
             'linkedin_url': self.linkedin_url,
             'website_url': self.website_url,
-            'is_verified': self.is_verified,
-            'is_active': self.is_active,
-            'subscription_tier': self.subscription_tier,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'last_login': self.last_login.isoformat() if self.last_login else None
+            'onboarding_status': self.onboarding_status,
+            'last_login': self.last_login.isoformat() if self.last_login else None,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
         }
-        
-        if include_sensitive:
-            data['password_hash'] = self.password_hash
-            
-        return data
     
     def to_summary(self):
         return {
-            'id': self.id,
-            'email': self.email,
+            'id': str(self.id),
             'first_name': self.first_name,
             'last_name': self.last_name,
-            'user_type': self.user_type,
             'profile_image': self.profile_image
         }
 
+# -------------------- Investor Profile --------------------
 class InvestorProfile(db.Model):
+    __tablename__ = 'investor_profile'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    
-    # New: Optional headline for display
-    headline = db.Column(db.String(150))
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), unique=True, nullable=False)
 
-    # Investment preferences
-    investment_stages = db.Column(db.Text)  # JSON array
-    industries = db.Column(db.Text)         # JSON array
-    geographic_focus = db.Column(db.Text)   # JSON array
+    industries = db.Column(ARRAY(db.String))
+    investment_stages = db.Column(ARRAY(db.String))
+    geographic_focus = db.Column(ARRAY(db.String))
     investment_range_min = db.Column(db.Integer)
     investment_range_max = db.Column(db.Integer)
-    risk_tolerance = db.Column(db.String(20))
-
-    # Investor details
-    investor_type = db.Column(db.String(50))
     accredited_status = db.Column(db.Boolean, default=False)
-    net_worth = db.Column(db.Integer)
-    annual_income = db.Column(db.Integer)
-    investment_experience = db.Column(db.String(20))
+    investor_type = db.Column(db.String(50))
+    risk_tolerance = db.Column(db.String(20))
     portfolio_size = db.Column(db.Integer)
-
-    # Advisory capabilities
-    expertise_areas = db.Column(db.Text)  # JSON array
     advisory_availability = db.Column(db.Boolean, default=False)
-    board_experience = db.Column(db.Boolean, default=False)
-
-    # Preferences
-    communication_frequency = db.Column(db.String(20), default='monthly')
-    meeting_preference = db.Column(db.String(20), default='virtual')
-
+    communication_frequency = db.Column(db.String(20))
+    meeting_preference = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # In InvestorProfile
-    subscription_tier = db.Column(db.String(20), default='tier_1')  # tier_1, tier_2, tier_3
-
-    # JSON helpers
-    def get_investment_stages(self):
-        return json.loads(self.investment_stages) if self.investment_stages else []
-
-    def set_investment_stages(self, stages):
-        self.investment_stages = json.dumps(stages)
-
-    def get_industries(self):
-        return json.loads(self.industries) if self.industries else []
-
-    def set_industries(self, industries):
-        self.industries = json.dumps(industries)
-
-    def get_geographic_focus(self):
-        return json.loads(self.geographic_focus) if self.geographic_focus else []
-
-    def set_geographic_focus(self, locations):
-        self.geographic_focus = json.dumps(locations)
-
-    def get_expertise_areas(self):
-        return json.loads(self.expertise_areas) if self.expertise_areas else []
-
-    def set_expertise_areas(self, areas):
-        self.expertise_areas = json.dumps(areas)
 
     def to_dict(self):
         return {
-            'id': self.id,
-            'user_id': self.user_id,
-            'headline': self.headline,
-            'investment_stages': self.get_investment_stages(),
-            'industries': self.get_industries(),
-            'geographic_focus': self.get_geographic_focus(),
+            'industries': self.industries,
+            'investment_stages': self.investment_stages,
+            'geographic_focus': self.geographic_focus,
             'investment_range_min': self.investment_range_min,
             'investment_range_max': self.investment_range_max,
-            'risk_tolerance': self.risk_tolerance,
-            'investor_type': self.investor_type,
             'accredited_status': self.accredited_status,
-            'net_worth': self.net_worth,
-            'annual_income': self.annual_income,
-            'investment_experience': self.investment_experience,
+            'investor_type': self.investor_type,
+            'risk_tolerance': self.risk_tolerance,
             'portfolio_size': self.portfolio_size,
-            'expertise_areas': self.get_expertise_areas(),
             'advisory_availability': self.advisory_availability,
-            'board_experience': self.board_experience,
             'communication_frequency': self.communication_frequency,
             'meeting_preference': self.meeting_preference,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'created_at': self.created_at.isoformat()
         }
 
+# -------------------- Enterprise --------------------
 class Enterprise(db.Model):
+    __tablename__ = 'enterprise'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
 
-    # NEW: One-liner description
-    headline = db.Column(db.String(150))
-
-    # Company information
-    company_name = db.Column(db.String(100), nullable=False)
-    company_description = db.Column(db.Text)
+    name = db.Column(db.String(100), nullable=False)
     industry = db.Column(db.String(50))
-    business_model = db.Column(db.String(50))  # e.g., 'b2b', 'saas'
-    stage = db.Column(db.String(20))  # 'idea', 'mvp', etc.
-    founded_date = db.Column(db.Date)
-    employee_count = db.Column(db.Integer)
-    location = db.Column(db.String(100))
-
-    # Funding
-    funding_stage = db.Column(db.String(20))  # 'seed', 'series_a', etc.
-    funding_amount_seeking = db.Column(db.Integer)
-    funding_amount_raised = db.Column(db.Integer)
-    previous_funding_rounds = db.Column(db.Text)  # JSON array
-    use_of_funds = db.Column(db.Text)
-
-    # Financials
-    monthly_revenue = db.Column(db.Integer)
-    monthly_growth_rate = db.Column(db.Float)
-    gross_margin = db.Column(db.Float)
-    burn_rate = db.Column(db.Integer)
-    runway_months = db.Column(db.Integer)
-
-    # Team
+    stage = db.Column(db.String(20))
+    business_model = db.Column(db.String(50))
     team_size = db.Column(db.Integer)
-    key_team_members = db.Column(db.Text)  # JSON array
-    advisors = db.Column(db.Text)  # JSON array
-
-    # Market
-    target_market = db.Column(db.Text)
-    market_size = db.Column(db.String(100))
-    competitors = db.Column(db.Text)
-    competitive_advantage = db.Column(db.Text)
-
-    # Investor fit
-    preferred_investor_types = db.Column(db.Text)  # JSON array
-    geographic_investor_preference = db.Column(db.Text)  # JSON array
-    looking_for_strategic_value = db.Column(db.Boolean, default=True)
-
-    # Status
-    is_actively_fundraising = db.Column(db.Boolean, default=True)
     pitch_deck_url = db.Column(db.String(255))
     demo_url = db.Column(db.String(255))
-
+    is_actively_fundraising = db.Column(db.Boolean, default=True)
+    financials = db.Column(JSONB)
+    target_market = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    subscription_tier = db.Column(db.String(20), default='free')  # free, growth, visibility
-
-    # JSON helpers
-    def get_previous_funding_rounds(self):
-        return json.loads(self.previous_funding_rounds) if self.previous_funding_rounds else []
-
-    def set_previous_funding_rounds(self, rounds):
-        self.previous_funding_rounds = json.dumps(rounds)
-
-    def get_key_team_members(self):
-        return json.loads(self.key_team_members) if self.key_team_members else []
-
-    def set_key_team_members(self, members):
-        self.key_team_members = json.dumps(members)
-
-    def get_advisors(self):
-        return json.loads(self.advisors) if self.advisors else []
-
-    def set_advisors(self, advisors):
-        self.advisors = json.dumps(advisors)
-
-    def get_preferred_investor_types(self):
-        return json.loads(self.preferred_investor_types) if self.preferred_investor_types else []
-
-    def set_preferred_investor_types(self, types):
-        self.preferred_investor_types = json.dumps(types)
-
-    def get_geographic_investor_preference(self):
-        return json.loads(self.geographic_investor_preference) if self.geographic_investor_preference else []
-
-    def set_geographic_investor_preference(self, locations):
-        self.geographic_investor_preference = json.dumps(locations)
+    subscriptions = db.relationship('Subscription', backref='enterprise', cascade='all, delete-orphan')
+    likes = db.relationship('Like', backref='enterprise', cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
             'id': self.id,
-            'user_id': self.user_id,
-            'headline': self.headline,
-            'company_name': self.company_name,
-            'company_description': self.company_description,
+            'name': self.name,
             'industry': self.industry,
-            'business_model': self.business_model,
             'stage': self.stage,
-            'founded_date': self.founded_date.isoformat() if self.founded_date else None,
-            'employee_count': self.employee_count,
-            'location': self.location,
-            'funding_stage': self.funding_stage,
-            'funding_amount_seeking': self.funding_amount_seeking,
-            'funding_amount_raised': self.funding_amount_raised,
-            'previous_funding_rounds': self.get_previous_funding_rounds(),
-            'use_of_funds': self.use_of_funds,
-            'monthly_revenue': self.monthly_revenue,
-            'monthly_growth_rate': self.monthly_growth_rate,
-            'gross_margin': self.gross_margin,
-            'burn_rate': self.burn_rate,
-            'runway_months': self.runway_months,
+            'business_model': self.business_model,
             'team_size': self.team_size,
-            'key_team_members': self.get_key_team_members(),
-            'advisors': self.get_advisors(),
-            'target_market': self.target_market,
-            'market_size': self.market_size,
-            'competitors': self.competitors,
-            'competitive_advantage': self.competitive_advantage,
-            'preferred_investor_types': self.get_preferred_investor_types(),
-            'geographic_investor_preference': self.get_geographic_investor_preference(),
-            'looking_for_strategic_value': self.looking_for_strategic_value,
-            'is_actively_fundraising': self.is_actively_fundraising,
             'pitch_deck_url': self.pitch_deck_url,
             'demo_url': self.demo_url,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'is_actively_fundraising': self.is_actively_fundraising,
+            'financials': self.financials,
+            'target_market': self.target_market,
+            'created_at': self.created_at.isoformat()
         }
 
-class Match(db.Model):
+# -------------------- Subscription --------------------
+class TierPlan(db.Model):
+    __tablename__ = 'tier_plan'
     id = db.Column(db.Integer, primary_key=True)
-    investor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    enterprise_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-
-    compatibility_score = db.Column(db.Float, nullable=False)
-    match_reasons = db.Column(db.Text)  # JSON array of string reasons
-
-    # Future-proofing fields
-    match_algorithm_version = db.Column(db.String(20))  # E.g., "v1.0", "ml-v2"
-    match_score_breakdown = db.Column(db.Text)  # JSON object with detailed scores
-
-    # Status and interest
-    status = db.Column(db.String(20), default='pending')  # 'pending', 'accepted', etc.
-    investor_interest = db.Column(db.String(20))  # 'interested', 'not_interested', 'maybe'
-    enterprise_interest = db.Column(db.String(20))  # same
-
-    notes = db.Column(db.Text)
-    is_hidden = db.Column(db.Boolean, default=False)  # Soft hide from frontend
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    investor = db.relationship('User', foreign_keys=[investor_id])
-    enterprise = db.relationship('User', foreign_keys=[enterprise_id])
-
-    def get_match_reasons(self):
-        return json.loads(self.match_reasons) if self.match_reasons else []
-
-    def set_match_reasons(self, reasons):
-        self.match_reasons = json.dumps(reasons)
-
-    def get_match_score_breakdown(self):
-        return json.loads(self.match_score_breakdown) if self.match_score_breakdown else {}
-
-    def set_match_score_breakdown(self, breakdown):
-        self.match_score_breakdown = json.dumps(breakdown)
+    name = db.Column(db.String(50), nullable=False)
+    features = db.Column(ARRAY(db.String))
+    price = db.Column(db.Numeric)
+    stripe_plan_id = db.Column(db.String(120), unique=True)
 
     def to_dict(self):
         return {
             'id': self.id,
-            'investor_id': self.investor_id,
-            'enterprise_id': self.enterprise_id,
-            'compatibility_score': self.compatibility_score,
-            'match_reasons': self.get_match_reasons(),
-            'match_algorithm_version': self.match_algorithm_version,
-            'match_score_breakdown': self.get_match_score_breakdown(),
-            'status': self.status,
-            'investor_interest': self.investor_interest,
-            'enterprise_interest': self.enterprise_interest,
-            'notes': self.notes,
-            'is_hidden': self.is_hidden,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'investor': self.investor.to_summary() if self.investor else None,
-            'enterprise': self.enterprise.to_summary() if self.enterprise else None,
+            'name': self.name,
+            'features': self.features,
+            'price': float(self.price) if self.price else 0,
+            'stripe_plan_id': self.stripe_plan_id
         }
 
-class Event(db.Model):
+
+class Subscription(db.Model):
+    __tablename__ = 'subscription'
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
+    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
+    tier = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(20), default='active')
+    stripe_customer_id = db.Column(db.String(120))
+    stripe_subscription_id = db.Column(db.String(120))
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    ended_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            'id': str(self.id),
+            'user_id': str(self.user_id),
+            'enterprise_id': self.enterprise_id,
+            'tier': self.tier,
+            'status': self.status,
+            'stripe_customer_id': self.stripe_customer_id,
+            'stripe_subscription_id': self.stripe_subscription_id,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'ended_at': self.ended_at.isoformat() if self.ended_at else None
+        }
+
+# -------------------- Likes & Matching --------------------
+class Like(db.Model):
+    __tablename__ = 'like'
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    summary = db.Column(db.String(300))  # Optional short summary or headline
-    description = db.Column(db.Text)
-
-    event_type = db.Column(db.String(50), nullable=False)  # e.g. 'monthly_meeting', 'showcase'
-    date = db.Column(db.DateTime, nullable=False)
-    location = db.Column(db.String(200))
-    capacity = db.Column(db.Integer)
-
-    # Ticketing & access
-    price = db.Column(db.Float, default=0.0)
-    is_members_only = db.Column(db.Boolean, default=False)
-
-    # Status tracking
-    status = db.Column(db.String(20), default='upcoming')  # 'upcoming', 'ongoing', 'completed', 'cancelled'
-
-    # Structured details
-    agenda = db.Column(db.Text)      # JSON array of dicts: [{time, topic, speaker}]
-    presenters = db.Column(db.Text)  # JSON array of dicts: [{name, bio, title, company}]
-
-    # Timestamps
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
+    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Utility methods
-    def get_agenda(self):
-        return json.loads(self.agenda) if self.agenda else []
+    user = db.relationship('User', backref='likes_given')
+    enterprise = db.relationship('Enterprise', backref='likes_received')
 
-    def set_agenda(self, agenda_items):
-        self.agenda = json.dumps(agenda_items)
+    __table_args__ = (db.UniqueConstraint('user_id', 'enterprise_id', name='unique_like'),)
 
-    def get_presenters(self):
-        return json.loads(self.presenters) if self.presenters else []
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': str(self.user_id),
+            'enterprise_id': self.enterprise_id,
+            'created_at': self.created_at.isoformat(),
+            'user': self.user.to_summary() if self.user else None,
+            'enterprise': self.enterprise.to_dict() if self.enterprise else None
+        }
 
-    def set_presenters(self, presenter_list):
-        self.presenters = json.dumps(presenter_list)
+
+class MatchRecommendation(db.Model):
+    __tablename__ = 'match_recommendation'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)  # investor
+    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
+    
+    score = db.Column(db.Float, nullable=False)
+    reasons = db.Column(ARRAY(db.String))  # List of reasons (e.g. ["Industry match", ...])
+    
+    status = db.Column(db.String(20), default='pending')  # 'pending', 'accepted', 'declined'
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='match_recommendations')
+    enterprise = db.relationship('Enterprise', backref='match_recommendations')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': str(self.user_id),
+            'enterprise_id': self.enterprise_id,
+            'score': self.score,
+            'reasons': self.reasons,
+            'status': self.status,
+            'generated_at': self.generated_at.isoformat()
+        }
+
+
+class InteractionHistory(db.Model):
+    __tablename__ = 'interaction_history'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
+    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
+    interaction_type = db.Column(db.String(50))  # 'view', 'message', 'like'
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+# -------------------- Events --------------------
+class Event(db.Model):
+    __tablename__ = 'event'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200))
+    date = db.Column(db.DateTime, nullable=False)
+    description = db.Column(db.Text)
+    agenda = db.Column(JSONB)
+    presenters = db.Column(JSONB)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    registrations = db.relationship('EventRegistration', backref='event', cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
             'id': self.id,
             'title': self.title,
-            'summary': self.summary,
-            'description': self.description,
-            'event_type': self.event_type,
             'date': self.date.isoformat() if self.date else None,
-            'location': self.location,
-            'capacity': self.capacity,
-            'price': self.price,
-            'is_members_only': self.is_members_only,
-            'status': self.status,
-            'agenda': self.get_agenda(),
-            'presenters': self.get_presenters(),
-            'registration_count': len(self.registrations),
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'description': self.description,
+            'agenda': self.agenda,
+            'presenters': self.presenters,
+            'created_at': self.created_at.isoformat()
         }
 
+
 class EventRegistration(db.Model):
+    __tablename__ = 'event_registration'
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.Integer, db.ForeignKey('event.id'), nullable=False)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-
-    role = db.Column(db.String(20), nullable=False)  # 'entrepreneur' or 'investor'
-    answers = db.Column(db.JSON, nullable=True)  # Stores role-specific form responses
-    
-    registration_status = db.Column(db.String(20), nullable=True)  # pending, approved, rejected (only for entrepreneurs)
-    reviewer_email = db.Column(db.String(120))  # typically Mateo’s email
-    reviewed_at = db.Column(db.DateTime)
-
-    meeting_preference = db.Column(db.String(20), default='on_site')  # 'digital', 'on_site'
-
-    # Metadata
+    answers = db.Column(JSONB)
+    registration_status = db.Column(db.String(20))
     registration_date = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    user = db.relationship('User', backref='event_registrations')
-    event = db.relationship('Event', backref=db.backref('registrations', cascade='all, delete-orphan'))
 
     def to_dict(self):
         return {
             'id': self.id,
             'event_id': self.event_id,
-            'user_id': self.user_id,
-            'role': self.role,
+            'user_id': str(self.user_id),
             'answers': self.answers,
             'registration_status': self.registration_status,
-            'reviewer_email': self.reviewer_email,
-            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
-            'meeting_preference': self.meeting_preference,
-            'registration_date': self.registration_date.isoformat() if self.registration_date else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'registration_date': self.registration_date.isoformat() if self.registration_date else None
         }
 
-class Document(db.Model):
+class EventPayment(db.Model):
+    __tablename__ = 'event_payment'
     id = db.Column(db.Integer, primary_key=True)
-    owner_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-
-    # File info
-    filename = db.Column(db.String(255), nullable=False)  # Saved filename
-    original_filename = db.Column(db.String(255), nullable=False)  # Original uploaded name
-    file_path = db.Column(db.String(500), nullable=False)
-    file_size = db.Column(db.Integer)
-    file_type = db.Column(db.String(50))  # e.g. 'pdf', 'png'
-    mime_type = db.Column(db.String(100))  # e.g. 'application/pdf', 'image/png'
-
-    # Classification and metadata
-    document_type = db.Column(db.String(50))  # 'pitch_deck', 'financial_statement', 'legal_document', etc.
-    description = db.Column(db.Text)
-    tags = db.Column(db.Text)  # JSON array as string (e.g., ["confidential", "financials"])
-
-    # Permissions and visibility
-    is_public = db.Column(db.Boolean, default=False)
-    access_level = db.Column(db.String(20), default='private')  # 'private', 'members', 'public'
-    download_count = db.Column(db.Integer, default=0)
-
-    # Lifecycle
-    is_deleted = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    access_grants = db.relationship('DocumentAccess', backref='document', cascade='all, delete-orphan')
-
-    def get_tags(self):
-        return json.loads(self.tags) if self.tags else []
-
-    def set_tags(self, tags):
-        self.tags = json.dumps(tags)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    event_id = db.Column(db.Integer, db.ForeignKey('event.id'))
+    stripe_payment_id = db.Column(db.String(255))
+    amount = db.Column(db.Numeric)
+    paid_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {
             'id': self.id,
-            'owner_id': self.owner_id,
-            'filename': self.filename,
-            'original_filename': self.original_filename,
-            'file_path': self.file_path,
-            'file_size': self.file_size,
-            'file_type': self.file_type,
-            'mime_type': self.mime_type,
-            'document_type': self.document_type,
-            'description': self.description,
-            'tags': self.get_tags(),
-            'is_public': self.is_public,
-            'access_level': self.access_level,
-            'download_count': self.download_count,
-            'is_deleted': self.is_deleted,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'user_id': str(self.user_id),
+            'event_id': self.event_id,
+            'stripe_payment_id': self.stripe_payment_id,
+            'amount': float(self.amount) if self.amount else 0,
+            'paid_at': self.paid_at.isoformat() if self.paid_at else None
         }
 
-class DocumentAccess(db.Model):
+
+# -------------------- Document Access --------------------
+class Document(db.Model):
+    __tablename__ = 'document'
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('document.id'), nullable=False)
-    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)  # The receiver of the access
-    granted_by = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)  # The user who granted access
+    owner_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    file_path = db.Column(db.String(255), nullable=False)
+    filename = db.Column(db.String(255))
+    tags = db.Column(ARRAY(db.String))
+    access_level = db.Column(db.String(20), default='private')  # 'private', 'tiered', 'public'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Permissions and status
-    access_type = db.Column(db.String(20), default='view')  # 'view', 'download', 'edit'
-    is_active = db.Column(db.Boolean, default=True)
+    access_grants = db.relationship('DocumentAccess', backref='document', cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'owner_id': str(self.owner_id),
+            'file_path': self.file_path,
+            'filename': self.filename,
+            'tags': self.tags,
+            'access_level': self.access_level,
+            'created_at': self.created_at.isoformat()
+        }
+
+
+class DocumentAccess(db.Model):
+    __tablename__ = 'document_access'
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey('document.id'))
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    access_type = db.Column(db.String(20), default='view')
     granted_at = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime)  # Optional expiration date for temporary access
-
-    # Soft delete and audit
-    revoked_at = db.Column(db.DateTime)  # Nullable timestamp to indicate when access was revoked (if any)
-    notes = db.Column(db.Text)  # Optional notes (e.g. reason for granting or revoking)
-
-    # Relationships
-    user = db.relationship('User', foreign_keys=[user_id], backref='document_access')
-    granter = db.relationship('User', foreign_keys=[granted_by], backref='granted_access')
 
     def to_dict(self):
         return {
             'id': self.id,
             'document_id': self.document_id,
-            'user_id': self.user_id,
+            'user_id': str(self.user_id),
             'access_type': self.access_type,
-            'granted_by': self.granted_by,
-            'granted_at': self.granted_at.isoformat() if self.granted_at else None,
-            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
-            'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
-            'is_active': self.is_active,
-            'notes': self.notes
+            'granted_at': self.granted_at.isoformat()
         }
 
+
+# -------------------- Messaging & Meetings --------------------
 class Message(db.Model):
+    __tablename__ = 'message'
     id = db.Column(db.Integer, primary_key=True)
-
-    # Sender and recipient
-    sender_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    recipient_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-
-    # Content
-    subject = db.Column(db.String(200))
+    sender_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    recipient_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
     content = db.Column(db.Text, nullable=False)
-    message_type = db.Column(db.String(20), default='direct')  # 'direct', 'match_introduction', 'event_related'
-    
-    # Metadata
-    thread_id = db.Column(db.String(100))  # Used to group messages in a conversation
-    attachments = db.Column(db.Text)  # JSON array of filenames/metadata
-
-    # Read/Delivery Status
+    message_type = db.Column(db.String(20), default='direct')
+    thread_id = db.Column(db.String(100))
+    attachments = db.Column(ARRAY(db.String))
     is_read = db.Column(db.Boolean, default=False)
     read_at = db.Column(db.DateTime)
-
-    # Lifecycle
     is_archived = db.Column(db.Boolean, default=False)
-    is_deleted = db.Column(db.Boolean, default=False)  # Soft delete
+    is_deleted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    # Relationships
-    # Message model
-    sender = db.relationship('User', foreign_keys=[sender_id], backref='messages_sent')
-    recipient = db.relationship('User', foreign_keys=[recipient_id], backref='messages_received')
-
-
-    def get_attachments(self):
-        return json.loads(self.attachments) if self.attachments else []
-
-    def set_attachments(self, attachment_list):
-        self.attachments = json.dumps(attachment_list)
 
     def to_dict(self):
         return {
             'id': self.id,
-            'sender_id': self.sender_id,
-            'recipient_id': self.recipient_id,
-            'subject': self.subject,
+            'sender_id': str(self.sender_id),
+            'recipient_id': str(self.recipient_id),
             'content': self.content,
-            'message_type': self.message_type,
             'thread_id': self.thread_id,
-            'attachments': self.get_attachments(),
+            'attachments': self.attachments,
             'is_read': self.is_read,
-            'read_at': self.read_at.isoformat() if self.read_at else None,
-            'is_archived': self.is_archived,
-            'is_deleted': self.is_deleted,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'sender': self.sender.to_summary() if self.sender else None,
-            'recipient': self.recipient.to_summary() if self.recipient else None
+            'created_at': self.created_at.isoformat()
         }
-    
-class Like(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    
-    investor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
-    
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Relationships
-    investor = db.relationship('User', backref='likes_sent', foreign_keys=[investor_id])
-    enterprise = db.relationship('Enterprise', backref='likes_received', foreign_keys=[enterprise_id])
+
+class Meeting(db.Model):
+    __tablename__ = 'meeting'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    meeting_url = db.Column(db.String(255))
+    scheduled_at = db.Column(db.DateTime)
+    meeting_metadata = db.Column(JSONB)
 
     def to_dict(self):
         return {
             'id': self.id,
-            'investor_id': self.investor_id,
-            'enterprise_id': self.enterprise_id,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'user_id': str(self.user_id),
+            'meeting_url': self.meeting_url,
+            'scheduled_at': self.scheduled_at.isoformat() if self.scheduled_at else None,
+            'metadata': self.metadata
         }
+
+# -------------------- System --------------------
+class Notification(db.Model):
+    __tablename__ = 'notification'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    message = db.Column(db.String(255))
+    read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_log'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    action = db.Column(db.String(100))
+    details = db.Column(JSONB)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)

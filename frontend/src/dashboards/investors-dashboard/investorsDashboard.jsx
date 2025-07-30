@@ -7,6 +7,13 @@ import EventHighlight from "./dashboard-components/components/eventHighlight.jsx
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
 import PortfolioSummary from "./dashboard-components/components/portfolioSummary.jsx";
+import { Loader2 } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 function InvestorsDashboard() {
   const [matches, setMatches] = useState([]);
@@ -17,35 +24,70 @@ function InvestorsDashboard() {
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const profile = JSON.parse(sessionStorage.getItem("profile"));
-    if (profile) {
-      setInvestorName(`${profile.first_name} ${profile.last_name}`);
-      setAvatarUrl(profile.profile_image || "./default-profile.png");
-    } else {
-      setInvestorName("Investor");
-      setAvatarUrl("./default-profile.png");
-    }
+    const fetchData = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
 
-    setMatches(testMatches);
-    setFilteredMatches(testMatches);
-    setEvents(sampleEvents);
-    setMessages([
-      {
-        sender: "Mateo",
-        preview: "Let's connect about the event...",
-        time: "2h ago",
-        read: false,
-      },
-      {
-        sender: "Alice (Startup X)",
-        preview: "Thanks for your interest!",
-        time: "1d ago",
-        read: true,
-      },
-    ]);
-    setNotifications(testNotifications);
+        const { data: profile, error: profileError } = await supabase
+          .from("user")
+          .select("first_name, last_name, profile_image")
+          .eq("id", user.id)
+          .single();
+
+        if (profile && !profileError) {
+          let profileImg = "/default_user_image.png";
+          if (profile.profile_image) {
+            const { data } = supabase.storage
+              .from("profile-images")
+              .getPublicUrl(profile.profile_image);
+            profileImg = data?.publicUrl || profileImg;
+          }
+          setInvestorName(`${profile.first_name} ${profile.last_name}`);
+          setAvatarUrl(profileImg);
+        }
+
+        const [
+          { data: matchesData },
+          { data: eventsData },
+          { data: notificationsData },
+          { data: messagesData },
+        ] = await Promise.all([
+          supabase.from("matches").select("*").eq("investor_id", user.id),
+          supabase
+            .from("events")
+            .select("*")
+            .order("date", { ascending: true }),
+          supabase
+            .from("notifications")
+            .select("title, time, read")
+            .eq("user_id", user.id)
+            .order("time", { ascending: false }),
+          supabase
+            .from("messages")
+            .select("sender, preview, time, read")
+            .eq("receiver_id", user.id)
+            .order("time", { ascending: false }),
+        ]);
+
+        setMatches(matchesData || []);
+        setFilteredMatches(matchesData || []);
+        setEvents(eventsData || []);
+        setNotifications(notificationsData || []);
+        setMessages(messagesData || []);
+      } catch (error) {
+        console.error("Dashboard data load failed:", error);
+      } finally {
+        setLoading(false); 
+      }
+    };
+
+    fetchData();
   }, []);
 
   const handleSearchClick = ({ industry, stage }) => {
@@ -64,7 +106,9 @@ function InvestorsDashboard() {
   const handleOpenChat = (msg) => {
     setOpenChats((prev) => {
       const alreadyOpen = prev.some((chat) => chat.sender === msg.sender);
-      return alreadyOpen ? prev : [...prev, { sender: msg.sender, history: [msg] }];
+      return alreadyOpen
+        ? prev
+        : [...prev, { sender: msg.sender, history: [msg] }];
     });
   };
 
@@ -72,43 +116,14 @@ function InvestorsDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
-  const testNotifications = [
-    { title: "New startup match: GreenTech AI", time: "2 hours ago", read: false },
-    { title: "You have an upcoming pitch event", time: "1 day ago", read: true },
-    { title: "Investor Insights Weekly Report is ready", time: "3 days ago", read: true },
-  ];
-
-  const testMatches = [
-    {
-      founder: "Maria López",
-      company_name: "GreenTech AI",
-      description: "AI-powered grid optimization for LATAM utility companies.",
-      location: "Guadalajara, MX",
-      profile_image: "https://i.pravatar.cc/150?img=32",
-      match_score: 92,
-      match_reasons: ["Industry match", "Geographic focus", "Stage alignment"],
-      funding_stage: "Seed",
-      industry: "CleanTech",
-    },
-    {
-      founder: "Carlos Rivera",
-      company_name: "BioLogix",
-      description: "Biotech SaaS platform for clinical trial automation.",
-      location: "CDMX, MX",
-      profile_image: "https://i.pravatar.cc/150?img=45",
-      match_score: 88,
-      match_reasons: ["Sector experience", "High alignment"],
-      funding_stage: "Series A",
-      industry: "HealthTech",
-    },
-  ];
-
-  const sampleEvents = [
-    { id: 1, title: "AI Startup Pitch Night", type: "showcase", date: "2025-08-10T18:00:00Z", location: "San Francisco, CA", registration_status: "approved" },
-    { id: 2, title: "Monthly Investor Roundtable", type: "monthly_meeting", date: "2025-08-15T16:00:00Z", location: "Virtual", registration_status: null },
-    { id: 3, title: "Biotech Startup Showcase", type: "showcase", date: "2025-08-25T14:00:00Z", location: "New York, NY", registration_status: "pending" },
-  ];
-
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-600">
+        <Loader2 className="h-10 w-10 animate-spin mb-4 text-gray-800" />
+        <p className="text-sm">Loading your dashboard...</p>
+      </div>
+    );
+  }
   return (
     <>
       <HeaderBar
@@ -122,7 +137,6 @@ function InvestorsDashboard() {
       <InvestorOverview onMetricsLoaded={() => {}} />
       <PortfolioSummary />
 
-      {/* Updated to use filteredMatches */}
       <MatchFeed matches={filteredMatches} />
 
       <InvestorTools
@@ -131,7 +145,7 @@ function InvestorsDashboard() {
         onSavedClick={() => alert("Watchlist coming soon")}
       />
 
-      <EventHighlight Events={sampleEvents} />
+      <EventHighlight Events={events} />
 
       <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />

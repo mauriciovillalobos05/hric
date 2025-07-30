@@ -64,19 +64,14 @@ def create_enterprise_profile():
         target_market=data.get('target_market')
     )
     db.session.add(enterprise)
-    db.session.flush()  # to get enterprise.id
-
-    subscription = Subscription(
-        user_id=user.id,
-        enterprise_id=enterprise.id,  
-        tier=data.get('tier'),
-        status='active',  # Defaulting to active unless you want to handle via Stripe webhooks
-        stripe_customer_id=data.get('stripe_customer_id'),
-        stripe_subscription_id=data.get('stripe_subscription_id'),
-        started_at=datetime.utcnow(),  # Now; Stripe start time can be synced later if needed
-        ended_at=None  # Will be updated via webhook if needed
-    )
-    db.session.add(subscription)
     db.session.commit()
+
+    try:
+        subscription = Subscription.query.filter_by(user_id=user.id).order_by(Subscription.started_at.desc()).first()
+        if subscription:
+            subscription.enterprise_id = enterprise.id
+            db.session.commit()
+    except Exception as e:
+        return jsonify({'error': f'Enterprise created but failed to link subscription: {str(e)}'}), 500
 
     return jsonify({'message': 'Enterprise profile and subscription created successfully'}), 201

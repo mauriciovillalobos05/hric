@@ -10,7 +10,8 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
 import ConfirmEmail from "./pages/emailConfirmation";
-// import Subscription from "./pages/Subscription"; // assuming you have this actual component
+import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
+import InvestorProfile from "./pages/complete-profile/InvestorProfile";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -64,6 +65,18 @@ function App() {
             <Onboarding />
           </ProtectedRoute>
         }
+      />
+
+      <Route path="/complete-profile/investor" element={
+        <ProtectedRoute>
+          <InvestorProfile />
+        </ProtectedRoute>} 
+      />
+      
+      <Route path="/complete-profile/entrepreneur" element={
+        <ProtectedRoute>
+          <EntrepreneurProfile />
+        </ProtectedRoute>} 
       />
 
       <Route

@@ -114,6 +114,9 @@ class Enterprise(db.Model):
     team_size = db.Column(db.Integer)
     pitch_deck_url = db.Column(db.String(255))
     demo_url = db.Column(db.String(255))
+    location = db.Column(db.String(100)) 
+    funding_needed = db.Column(db.Numeric(precision=12, scale=2))  
+
     is_actively_fundraising = db.Column(db.Boolean, default=True)
     financials = db.Column(JSONB)
     target_market = db.Column(db.Text)
@@ -132,6 +135,8 @@ class Enterprise(db.Model):
             'team_size': self.team_size,
             'pitch_deck_url': self.pitch_deck_url,
             'demo_url': self.demo_url,
+            'location': self.location,  
+            'funding_needed': float(self.funding_needed) if self.funding_needed else None,
             'is_actively_fundraising': self.is_actively_fundraising,
             'financials': self.financials,
             'target_market': self.target_market,
@@ -161,7 +166,7 @@ class Subscription(db.Model):
     __tablename__ = 'subscription'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'), nullable=False)
-    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=False)
+    enterprise_id = db.Column(db.Integer, db.ForeignKey('enterprise.id'), nullable=True)
     tier = db.Column(db.String(50), nullable=False)
     status = db.Column(db.String(20), default='active')
     stripe_customer_id = db.Column(db.String(120))

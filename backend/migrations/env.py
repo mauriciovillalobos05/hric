@@ -2,7 +2,9 @@ import logging
 from logging.config import fileConfig
 from alembic import context
 from flask import current_app
-from src.main import app 
+from src.main import create_app
+
+app = create_app()
 
 # Alembic Config
 config = context.config

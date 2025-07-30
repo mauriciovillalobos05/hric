@@ -81,26 +81,50 @@ def get_plans():
 def create_checkout_session():
     try:
         user, error, status = require_auth()
-        if error: return error, status
+        if error:
+            return error, status
 
         data = request.json
         plan_key = data.get("plan")
         if not plan_key or plan_key not in PLAN_CONFIG:
-            return jsonify({'error': 'Invalid plan'}), 400
+            return jsonify({'error': 'Invalid plan key'}), 400
+
+        frontend_url = os.getenv("FRONTEND_URL")
+        if not frontend_url:
+            return jsonify({'error': 'FRONTEND_URL not set in environment'}), 500
 
         price_id = PLAN_CONFIG[plan_key]["price_id"]
+
         if not price_id:
-            return jsonify({'error': 'This plan does not require checkout'}), 400
+            # Handle free plans (e.g., Entrepreneur Free)
+            if plan_key == "entrepreneur_free":
+                success_path = "complete-profile/entrepreneur"
+                return jsonify({'redirect_url': frontend_url + success_path}), 200
+            else:
+                return jsonify({'error': 'This plan does not require checkout'}), 400
+
+        # Determine success path by role
+        if user.role == 'investor':
+            success_path = "complete-profile/investor"
+        elif user.role == 'entrepreneur':
+            success_path = "complete-profile/entrepreneur"
+        else:
+            return jsonify({'error': 'Unsupported user role'}), 400
 
         stripe_session = stripe.checkout.Session.create(
-            success_url=os.getenv("FRONTEND_URL") + "/subscription/success",
-            cancel_url=os.getenv("FRONTEND_URL") + "/subscription/cancel",
+            success_url=frontend_url + success_path,
+            cancel_url=frontend_url + "/subscription/cancel",
             payment_method_types=["card"],
             mode="subscription",
             customer_email=user.email,
             line_items=[{"price": price_id, "quantity": 1}],
-            metadata={"user_id": str(user.id), "price_id": price_id}
+            metadata={
+                "user_id": str(user.id),
+                "price_id": price_id,
+                "plan_key": plan_key
+            }
         )
+
         return jsonify({'checkout_url': stripe_session.url}), 200
 
     except Exception as e:

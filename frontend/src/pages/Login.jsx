@@ -38,7 +38,7 @@ function Login() {
     // Now fetch from your custom 'user' table
     const { data: userProfile, error: profileError } = await supabase
       .from("user")
-      .select("user_type")
+      .select("role")
       .eq("id", sessionUser.id)
       .single();
 

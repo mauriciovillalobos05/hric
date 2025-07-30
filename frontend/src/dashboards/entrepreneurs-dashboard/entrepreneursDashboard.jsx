@@ -9,6 +9,7 @@ import ProfileStatusCard from "./dashboard-components/components/profileStatusCo
 import EventShowcaseAccess from "./dashboard-components/components/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import DocumentStatus from "./dashboard-components/components/documentStatus.jsx";
 import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -32,6 +33,7 @@ function EntrepreneurDashboard() {
     diligence: 0,
     termSheet: 0,
   });
+  const [loading, setLoading] = useState(true);
 
   const navigate = useNavigate();
 
@@ -59,7 +61,9 @@ function EntrepreneurDashboard() {
 
         setAvatarUrl(
           user.profile_image
-            ? supabase.storage.from("profile-images").getPublicUrl(user.profile_image).data?.publicUrl
+            ? supabase.storage
+                .from("profile-images")
+                .getPublicUrl(user.profile_image).data?.publicUrl
             : "./src/assets/default_user_image.png"
         );
 
@@ -141,6 +145,8 @@ function EntrepreneurDashboard() {
         });
       } catch (err) {
         console.error("Entrepreneur dashboard fetch error:", err);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -160,6 +166,15 @@ function EntrepreneurDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-600">
+        <Loader2 className="h-10 w-10 animate-spin mb-4 text-gray-800" />
+        <p className="text-sm">Loading your dashboard...</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <HeaderBar
@@ -169,25 +184,17 @@ function EntrepreneurDashboard() {
         messages={messages}
         onOpenChat={handleOpenChat}
       />
-
       <PipelineSummary data={pipelineData} />
-
       <ProfileStatusCard
         completion={60}
         missingSections={["Company Pitch", "Financials", "Team Info"]}
         onUpdateClick={() => navigate("/dashboard/user")}
       />
-
       <InvestorMatches matches={matches} onToggleFavorite={() => {}} />
-
       <EventShowcaseAccess events={events} />
-
       <DocumentStatus initialDocuments={[]} />
-
       <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
-
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
-
       <InsightsPanel role={userRole} /> {/* Optional */}
     </>
   );

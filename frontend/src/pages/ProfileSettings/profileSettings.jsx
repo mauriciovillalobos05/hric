@@ -24,17 +24,20 @@ export default function ProfileSettings() {
     profile_image: "",
   });
 
-  const [editMode, setEditMode] = useState({});
+  const [activeField, setActiveField] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
   const [message, setMessage] = useState("");
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   const defaultAvatar = "/default_user_image.png";
 
   useEffect(() => {
     const fetchProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
       const { data, error } = await supabase
@@ -46,25 +49,44 @@ export default function ProfileSettings() {
       if (error) {
         console.error("Error loading profile", error);
       } else {
+        // If emails are out of sync, update the custom user table
+        if (user.email !== data.email) {
+          await supabase
+            .from("user")
+            .update({ email: user.email })
+            .eq("id", user.id);
+          data.email = user.email; // update local copy
+        }
+
         setProfile(data);
+        setLoading(false);
       }
     };
 
     fetchProfile();
   }, []);
 
-  const handleChange = (e) => {
-    setProfile({ ...profile, [e.target.name]: e.target.value });
-  };
-
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
+    if (!profile.id) return;
+
     const { error } = await supabase
       .from("user")
-      .update(profile)
+      .update({
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        location: profile.location,
+        bio: profile.bio,
+      })
       .eq("id", profile.id);
 
-    setMessage(error ? "Failed to update profile." : "Profile updated successfully.");
+    if (error) {
+      console.error("Update failed:", error);
+      setMessage("Failed to update profile.");
+    } else {
+      setMessage("Profile updated successfully.");
+      setEditMode({});
+    }
   };
 
   const handleAvatarUpload = async () => {
@@ -83,10 +105,9 @@ export default function ProfileSettings() {
       return;
     }
 
-    const { data: { publicUrl } } = supabase
-      .storage
-      .from("profile-images")
-      .getPublicUrl(filePath);
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from("profile-images").getPublicUrl(filePath);
 
     const { error: updateError } = await supabase
       .from("user")
@@ -102,37 +123,75 @@ export default function ProfileSettings() {
     }
   };
 
-  const EditField = ({ label, name, type = "text" }) => (
-    <div>
-      <Label className="flex justify-between items-center">
-        {label}
-        <button
-          type="button"
-          className="text-sm text-blue-600 hover:underline"
-          onClick={() => setEditMode((prev) => ({ ...prev, [name]: !prev[name] }))}
-        >
-          {editMode[name] ? "Cancel" : "Edit"}
-        </button>
-      </Label>
-      <Input
-        name={name}
-        type={type}
-        value={profile[name] || ""}
-        onChange={handleChange}
-        readOnly={!editMode[name]}
-        className={!editMode[name] ? "bg-gray-100 cursor-not-allowed" : ""}
-      />
-    </div>
-  );
+  const EditField = ({ label, name, type = "text", disabled = false }) => {
+    const isEditing = activeField === name;
+
+    return (
+      <div>
+        <Label className="flex justify-between items-center">
+          {label}
+          {!disabled && (
+            <button
+              type="button"
+              className="text-sm text-blue-600 hover:underline"
+              onClick={() => {
+                if (isEditing) {
+                  setActiveField(null); // cancel editing
+                } else {
+                  setActiveField(name); // start editing
+                }
+              }}
+            >
+              {isEditing ? "Cancel" : "Edit"}
+            </button>
+          )}
+        </Label>
+        <Input
+          name={name}
+          type={type}
+          value={profile[name] || ""}
+          onChange={(e) => {
+            const value = e.target.value;
+            setProfile((prev) => ({ ...prev, [name]: value }));
+          }}
+          readOnly={!isEditing || disabled}
+          autoFocus={isEditing}
+          className={
+            !isEditing || disabled ? "bg-gray-100 cursor-not-allowed" : ""
+          }
+        />
+      </div>
+    );
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/");
   };
 
+  const requestEmailChange = async () => {
+    const newEmail = prompt("Enter your new email address:");
+    if (!newEmail || newEmail === profile.email) return;
+
+    const { error } = await supabase.auth.updateUser({
+      email: newEmail,
+    });
+
+    if (error) {
+      console.error("Email update error:", error.message);
+      setMessage("Failed to update email.");
+    } else {
+      setMessage("A confirmation email has been sent to your new address.");
+    }
+  };
+
   const publicAvatarUrl = profile.profile_image
-    ? supabase.storage.from("profile-images").getPublicUrl(profile.profile_image).data.publicUrl
+    ? supabase.storage
+        .from("profile-images")
+        .getPublicUrl(profile.profile_image).data.publicUrl
     : defaultAvatar;
+
+  if (loading) return null;
 
   return (
     <div className="max-w-2xl mx-auto py-10 px-6">
@@ -145,6 +204,7 @@ export default function ProfileSettings() {
         <CardContent className="space-y-6">
           {message && <p className="text-sm text-green-600">{message}</p>}
 
+          {/* Avatar Section */}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-gray-700">
               Profile Image
@@ -173,7 +233,10 @@ export default function ProfileSettings() {
                     }
                   }}
                 />
-                <Button onClick={handleAvatarUpload} className="w-fit bg-blue-600 text-white">
+                <Button
+                  onClick={handleAvatarUpload}
+                  className="w-fit bg-blue-600 text-white"
+                >
                   Upload Avatar
                 </Button>
               </div>
@@ -184,18 +247,35 @@ export default function ProfileSettings() {
           <form onSubmit={handleProfileUpdate} className="space-y-4">
             <EditField label="First Name" name="first_name" />
             <EditField label="Last Name" name="last_name" />
-            <EditField label="Email" name="email" type="email" />
             <EditField label="Location" name="location" />
             <EditField label="Short Bio" name="bio" />
-            <EditField label="Plan" name="plan" />
-            <EditField label="Role" name="role" />
+            <EditField label="Role" name="role" disabled />
             <Button type="submit" className="bg-blue-600 text-white">
               Save Changes
             </Button>
           </form>
 
+          {/* Email Handling */}
+          <div className="space-y-2">
+            <Label>Email</Label>
+            <Input
+              type="email"
+              value={profile.email}
+              readOnly
+              className="bg-gray-100 cursor-not-allowed"
+            />
+            <Button
+              variant="outline"
+              type="button"
+              onClick={requestEmailChange}
+            >
+              Request Email Change
+            </Button>
+          </div>
+
           <Separator />
 
+          {/* Subscription Plan */}
           <div className="space-y-3">
             <h2 className="text-md font-semibold">Subscription Plan</h2>
             <p className="text-sm text-gray-600">

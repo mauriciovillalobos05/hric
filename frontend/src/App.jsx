@@ -51,32 +51,40 @@ function App() {
   if (loading) return null; // or a spinner/loading screen
 
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/confirm-email" element={<ConfirmEmail />} />
+    <>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route
+          path="/confirm-email"
+          element={
+            <ProtectedRoute>
+              <ConfirmEmail />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/onboarding"
-        element={
-          <ProtectedRoute>
-            <Onboarding />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/onboarding"
+          element={
+            <ProtectedRoute>
+              <Onboarding />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/profile-settings"
-        element={
-          <ProtectedRoute>
-            <ProfileSettings />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/profile-settings"
+          element={
+            <ProtectedRoute>
+              <ProfileSettings />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* FOR LATER once we have the subscription page */}
-      {/* <Route
+        {/* FOR LATER once we have the subscription page */}
+        {/* <Route
         path="/subscription"
         element={
           <ProtectedRoute>
@@ -85,33 +93,34 @@ function App() {
         }
       /> */}
 
-      <Route
-        path="/dashboard/user"
-        element={
-          <ProtectedRoute>
-            <MainUserDashboard role={user?.role || ""} />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/dashboard/user"
+          element={
+            <ProtectedRoute>
+              <MainUserDashboard role={user?.role || ""} />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/dashboard/investor"
-        element={
-          <ProtectedRoute isAllowed={user?.role === "investor"}>
-            <InvestorsDashboard />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/dashboard/investor"
+          element={
+            <ProtectedRoute isAllowed={user?.role === "investor"}>
+              <InvestorsDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/dashboard/entrepreneur"
-        element={
-          <ProtectedRoute isAllowed={user?.role === "entrepreneur"}>
-            <EntrepreneurDashboard />
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+        <Route
+          path="/dashboard/entrepreneur"
+          element={
+            <ProtectedRoute isAllowed={user?.role === "entrepreneur"}>
+              <EntrepreneurDashboard />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </>
   );
 }
 

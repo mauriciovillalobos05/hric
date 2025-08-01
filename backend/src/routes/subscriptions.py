@@ -96,21 +96,21 @@ def create_checkout_session():
         price_id = PLAN_CONFIG[plan_key]["price_id"]
 
         if not price_id:
-            # Handle free plans (e.g., Entrepreneur Free)
-            if plan_key == "entrepreneur_free":
-                success_path = "complete-profile/entrepreneur"
-                return jsonify({'redirect_url': frontend_url + success_path}), 200
-            else:
-                return jsonify({'error': 'This plan does not require checkout'}), 400
+            # Handle free plan
+            success_path = "dashboard/entrepreneur" if user.role == "entrepreneur" else "dashboard/investor"
+            return jsonify({'redirect_url': frontend_url + success_path}), 200
 
-        # Determine success path by role
+        # Check if user already has a subscription (to adjust success path, not to update)
+        existing_sub = Subscription.query.filter_by(user_id=user.id).first()
+
         if user.role == 'investor':
-            success_path = "complete-profile/investor"
+            success_path = "dashboard/investor" if existing_sub else "complete-profile/investor"
         elif user.role == 'entrepreneur':
-            success_path = "complete-profile/entrepreneur"
+            success_path = "dashboard/entrepreneur" if existing_sub or user.enterprises else "complete-profile/entrepreneur"
         else:
             return jsonify({'error': 'Unsupported user role'}), 400
 
+        # Create new Stripe Checkout session (always)
         stripe_session = stripe.checkout.Session.create(
             success_url=frontend_url + success_path,
             cancel_url=frontend_url + "/subscription/cancel",

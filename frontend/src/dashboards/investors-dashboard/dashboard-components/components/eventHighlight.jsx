@@ -24,13 +24,15 @@ function EventCard({ title, type, date, location, registration_status }) {
     minute: "2-digit",
   });
 
+  const safeType = typeof type === "string" ? type.replace("_", " ") : "Unknown Type";
+
   return (
     <div className="border rounded-md p-4 flex items-center justify-between hover:shadow-md transition-shadow">
       <div>
         <h3 className="text-md font-semibold">{title}</h3>
         <p className="text-sm text-gray-600">
           <CalendarDays className="inline-block w-4 h-4 mr-1" />
-          {readableDate} • {type.replace("_", " ")} • {location}
+          {readableDate} • {safeType} • {location || "TBD"}
         </p>
       </div>
 

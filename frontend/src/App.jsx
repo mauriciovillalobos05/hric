@@ -13,6 +13,7 @@ import ConfirmEmail from "./pages/emailConfirmation";
 import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import InvestorProfile from "./pages/complete-profile/InvestorProfile";
 import { createClient } from "@supabase/supabase-js";
+import Subscription from "./dashboards/investors-dashboard/dashboard-components/components/headerBarComponents/components/Subscription.jsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -88,15 +89,16 @@ function App() {
         }
       />
 
+
       {/* FOR LATER once we have the subscription page */}
-      {/* <Route
+      <Route
         path="/subscription"
         element={
           <ProtectedRoute>
             <Subscription />
           </ProtectedRoute>
         }
-      /> */}
+      /> 
 
       <Route
         path="/dashboard/user"

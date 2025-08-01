@@ -23,40 +23,59 @@ def stripe_webhook():
     except stripe.error.SignatureVerificationError:
         return jsonify({"error": "Invalid signature"}), 400
 
+    # === Handle Checkout Completion ===
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        user_id = session["metadata"].get("user_id")
-        plan = session["metadata"].get("plan_key")
+        metadata = session.get("metadata", {})
 
-        if not user_id or not plan:
+        user_id = metadata.get("user_id")
+        plan_key = metadata.get("plan_key")
+
+        if not user_id or not plan_key:
             return jsonify({"error": "Missing metadata in session"}), 400
 
         user = Users.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        existing = Subscription.query.filter_by(
-            user_id=user.id,
-            stripe_subscription_id=session["subscription"]
-        ).first()
+        stripe_subscription_id = session.get("subscription")
+        stripe_customer_id = session.get("customer")
+
+        if not stripe_subscription_id:
+            return jsonify({"error": "Missing subscription ID"}), 400
+
+        # Check if this Stripe subscription already exists
+        existing = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
+
         if existing:
-            return jsonify({"message": "Subscription already exists"}), 200
+            # Update existing subscription
+            existing.tier = plan_key
+            existing.status = "active"
+            existing.started_at = datetime.utcnow()
+            existing.ended_at = None
+            db.session.commit()
+            return jsonify({"message": "Subscription updated"}), 200
+        else:
+            # Insert new subscription
+            enterprise_id = (
+                user.enterprises[0].id if user.role == "entrepreneur" and user.enterprises else None
+            )
 
-        sub = Subscription(
-            user_id=user.id,
-            enterprise_id = user.enterprises[0].id if user.role == "entrepreneur" and user.enterprises else None,
-            tier=plan,
-            status="active",
-            stripe_customer_id=session["customer"],
-            stripe_subscription_id=session["subscription"],
-            started_at=datetime.utcnow(),
-            ended_at=None
-        )
-        db.session.add(sub)
-        db.session.commit()
+            new_sub = Subscription(
+                user_id=user.id,
+                enterprise_id=enterprise_id,
+                tier=plan_key,
+                status="active",
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=stripe_subscription_id,
+                started_at=datetime.utcnow(),
+                ended_at=None
+            )
+            db.session.add(new_sub)
+            db.session.commit()
+            return jsonify({"message": "Subscription created"}), 201
 
-        return jsonify({"message": "Subscription created"}), 201
-
+    # === Handle Payment Failure ===
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
         subscription_id = invoice.get("subscription")
@@ -69,6 +88,7 @@ def stripe_webhook():
 
         return jsonify({"message": "Payment failure handled"}), 200
 
+    # === Handle Subscription Cancellation ===
     elif event["type"] == "customer.subscription.deleted":
         subscription = event["data"]["object"]
         subscription_id = subscription["id"]

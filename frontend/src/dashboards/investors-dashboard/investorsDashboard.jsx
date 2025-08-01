@@ -58,21 +58,21 @@ function InvestorsDashboard() {
           { data: notificationsData },
           { data: messagesData },
         ] = await Promise.all([
-          supabase.from("matches").select("*").eq("investor_id", user.id),
+          supabase.from("match_recommendation").select("*").eq("user_id", user.id),
           supabase
-            .from("events")
+            .from("event")
             .select("*")
             .order("date", { ascending: true }),
           supabase
-            .from("notifications")
-            .select("title, time, read")
+            .from("notification")
+            .select("title, created_at, read")
             .eq("user_id", user.id)
-            .order("time", { ascending: false }),
+            .order("created_at", { ascending: false }),
           supabase
-            .from("messages")
-            .select("sender, preview, time, read")
+            .from("message")
+            .select("sender_id, message_type, created_at, is_read")
             .eq("receiver_id", user.id)
-            .order("time", { ascending: false }),
+            .order("created_at", { ascending: false }),
         ]);
 
         setMatches(matchesData || []);

@@ -7,6 +7,8 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Loader2 } from "lucide-react";
+import Mailcheck from "mailcheck";
+import defaultAvatar from "../../assets/default_user_image.png"; 
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -27,13 +29,11 @@ export default function ProfileSettings() {
 
   const [activeField, setActiveField] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
-
-  const defaultAvatar = "/default_user_image.png";
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -55,7 +55,7 @@ export default function ProfileSettings() {
         if (user.email !== data.email) {
           await supabase
             .from("user")
-            .update({ email: user.email })
+            .update({ email: user.email, role: data.role })
             .eq("id", user.id);
           data.email = user.email; // update local copy
         }
@@ -189,15 +189,65 @@ export default function ProfileSettings() {
     const newEmail = prompt("Enter your new email address:");
     if (!newEmail || newEmail === profile.email) return;
 
-    const { error } = await supabase.auth.updateUser({
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail)) {
+      setMessage("Please enter a valid email address.");
+      return;
+    }
+
+    // Run Mailcheck
+    Mailcheck.run({
       email: newEmail,
+      domains: ["gmail.com", "hotmail.com", "outlook.com", "intelleges.com"],
+      topLevelDomains: ["com", "net", "org"],
+      suggested: async function (suggestion) {
+        const confirmSuggestion = window.confirm(
+          `Did you mean ${suggestion.full}?`
+        );
+        if (!confirmSuggestion) {
+          setMessage("Email update canceled. Please double-check your input.");
+          return;
+        }
+
+        // Proceed with suggested correction
+        await handleEmailUpdate(suggestion.full);
+      },
+      empty: async function () {
+        // No suggestion needed
+        await handleEmailUpdate(newEmail);
+      },
+    });
+  };
+
+  // Helper function for making the email update request
+  const handleEmailUpdate = async (emailToUpdate) => {
+    const { error } = await supabase.auth.updateUser({
+      email: emailToUpdate,
     });
 
     if (error) {
       console.error("Email update error:", error.message);
       setMessage("Failed to update email.");
     } else {
-      setMessage("A confirmation email has been sent to your new address.");
+      setMessage(
+        <div className="border-l-4 border-blue-500 bg-blue-50 p-4 rounded-md shadow-sm text-sm text-gray-800 space-y-2">
+          <p>
+            <strong>Email change initiated.</strong>
+          </p>
+          <p>
+            Confirmation links have been sent to both your{" "}
+            <strong>current</strong> and <strong>new</strong> email addresses.
+          </p>
+          <p className="text-blue-700 font-medium">
+            To complete the update, you must confirm the email sent to your{" "}
+            <u>current email address</u> first.
+          </p>
+          <p>
+            Once the first confirmation is received, you can then confirm the
+            new email link.
+          </p>
+        </div>
+      );
     }
   };
 

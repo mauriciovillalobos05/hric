@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import DefaultAvatar from "@/assets/default_user_image.png";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -37,6 +38,8 @@ function LocationAutocomplete({ value = "", onChange }) {
           {
             method: "GET",
             headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
               "X-RapidAPI-Key":
                 "965b5a8f84msh2cc329de9240607p1b4158jsn7bc2cea9220a",
               "X-RapidAPI-Host": "wft-geo-db.p.rapidapi.com",
@@ -90,6 +93,22 @@ function LocationAutocomplete({ value = "", onChange }) {
   );
 }
 
+function mapPlanToKey(role, planName) {
+  const normalized = planName.toLowerCase();
+
+  if (role === "investor") {
+    if (normalized === "basic") return "investor_basic";
+    if (normalized === "premium") return "investor_premium";
+    if (normalized === "vip") return "investor_vip";
+  } else if (role === "entrepreneur") {
+    if (normalized === "free") return "entrepreneur_free";
+    if (normalized === "premium") return "entrepreneur_premium";
+    if (normalized === "enterprise") return "entrepreneur_enterprise";
+  }
+
+  return null;
+}
+
 export default function Onboarding() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
@@ -118,8 +137,9 @@ export default function Onboarding() {
 
         if (!user) throw new Error("User not authenticated");
 
+        const metadata = user.user_metadata || {};
         const role =
-          user.user_metadata?.role ||
+          metadata.role ||
           sessionStorage.getItem("registrationRole") ||
           "entrepreneur";
 
@@ -127,7 +147,11 @@ export default function Onboarding() {
           ...prev,
           email: user.email,
           role,
+          first_name: metadata.first_name || "",
+          last_name: metadata.last_name || "",
+          phone: metadata.phone || "",
         }));
+
         sessionStorage.removeItem("registrationRole");
       } catch (err) {
         console.error(err);
@@ -172,7 +196,7 @@ export default function Onboarding() {
       const { error: metadataError } = await supabase.auth.updateUser({
         data: {
           role: form.role,
-          plan: form.plan,
+          plan: mapPlanToKey(form.role, form.plan),
         },
       });
       if (metadataError) throw metadataError;
@@ -180,8 +204,8 @@ export default function Onboarding() {
       // Upsert into your user table
       const { error: dbError } = await supabase.from("user").upsert({
         id: user.id,
-        email: user.email, 
-        role: form.role, 
+        email: user.email,
+        role: form.role,
         first_name: form.first_name,
         last_name: form.last_name,
         phone: form.phone,
@@ -193,6 +217,68 @@ export default function Onboarding() {
       });
 
       if (dbError) throw dbError;
+
+      // Request Stripe checkout session from your backend
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) throw new Error("User session expired");
+
+      const response = await fetch(
+        "http://127.0.0.1:8000/subscriptions/checkout",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            plan: mapPlanToKey(form.role, form.plan),
+          }),
+        }
+      );
+
+      // Handle response
+      const text = await response.text();
+      let parsedData = {};
+
+      try {
+        parsedData = text ? JSON.parse(text) : {};
+        if (!response.ok) {
+          throw new Error(
+            parsedData.error || "Failed to create Stripe session"
+          );
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            parsedData?.error || "Failed to create Stripe session"
+          );
+        }
+
+        if (parsedData.redirect_url) {
+          window.location.href = parsedData.redirect_url;
+        } else if (parsedData.checkout_url) {
+          window.location.href = parsedData.checkout_url;
+        } else {
+          console.log(
+            "Response OK, but no redirect/checkout URL. Skipping redirect."
+          );
+        }
+      } catch (parseErr) {
+        console.error("Could not parse backend response:", text);
+        throw new Error("Server error. Please check the console.");
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.checkout_url) {
+        throw new Error(data.error || "Failed to create Stripe session");
+      }
+
+      window.location.href = data.checkout_url;
 
       // Navigate to appropriate dashboard
       localStorage.setItem("user_role", form.role);
@@ -345,9 +431,7 @@ export default function Onboarding() {
                 />
                 <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-gray-300 group-hover:ring-2 group-hover:ring-blue-400 transition-all">
                   <img
-                    src={
-                      file ? URL.createObjectURL(file) : "/default-profile.png"
-                    }
+                    src={file ? URL.createObjectURL(file) : DefaultAvatar}
                     alt="Profile Preview"
                     className="w-full h-full object-cover"
                   />

@@ -1,38 +1,38 @@
 from flask import Blueprint, jsonify, request, session
 from datetime import datetime, timedelta
-from src.models.user import User, Enterprise, InvestorProfile, MatchRecommendation, db
+from src.models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
 
 enterprise_bp = Blueprint('entrepreneur', __name__)
 
 # --------------------- Admin Auth Helper ---------------------
 def require_admin_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    if user.role != 'admin':
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    if Users.role != 'admin':
         return None, jsonify({'error': 'Admin access required'}), 403
-    return user, None, None
+    return Users, None, None
 
 # --------------------- Auth Helpers ---------------------
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    return Users, None, None
 
 def require_entrepreneur_auth():
-    user, err, status = require_auth()
+    Users, err, status = require_auth()
     if err:
-        return user, err, status
-    if user.role != 'entrepreneur':
+        return Users, err, status
+    if Users.role != 'entrepreneur':
         return None, jsonify({'error': 'Entrepreneur access required'}), 403
-    return user, None, None
+    return Users, None, None
 
 # --------------------- Enterprise Listing ---------------------
 @enterprise_bp.route('/enterprises', methods=['GET'])
@@ -73,11 +73,11 @@ def get_enterprise_detail(enterprise_id):
 @enterprise_bp.route('/fundraising-status', methods=['PUT'])
 def update_fundraising_status():
     try:
-        user, err, status = require_entrepreneur_auth()
+        Users, err, status = require_entrepreneur_auth()
         if err:
             return err, status
 
-        enterprise = user.enterprises[0] if user.enterprises else None
+        enterprise = Users.enterprises[0] if Users.enterprises else None
         if not enterprise:
             return jsonify({'error': 'No enterprise found'}), 404
 
@@ -98,14 +98,14 @@ def update_fundraising_status():
 @enterprise_bp.route('/stats', methods=['GET'])
 def get_entrepreneur_stats():
     try:
-        user, err, status = require_entrepreneur_auth()
+        Users, err, status = require_entrepreneur_auth()
         if err:
             return err, status
 
-        if not user.enterprises:
+        if not Users.enterprises:
             return jsonify({'error': 'No enterprise found'}), 404
 
-        enterprise_id = user.enterprises[0].id
+        enterprise_id = Users.enterprises[0].id
         total_matches = MatchRecommendation.query.filter_by(enterprise_id=enterprise_id).count()
         accepted = MatchRecommendation.query.filter_by(enterprise_id=enterprise_id, status='accepted').count()
         declined = MatchRecommendation.query.filter_by(enterprise_id=enterprise_id, status='declined').count()
@@ -131,12 +131,12 @@ def get_entrepreneur_stats():
 @enterprise_bp.route('/enterprise/<int:enterprise_id>', methods=['PUT'])
 def update_enterprise_core_data(enterprise_id):
     try:
-        user, error_response, status_code = require_entrepreneur_auth()
+        Users, error_response, status_code = require_entrepreneur_auth()
         if error_response:
             return error_response, status_code
 
         enterprise = Enterprise.query.get(enterprise_id)
-        if not enterprise or enterprise.user_id != user.id:
+        if not enterprise or enterprise.Users_id != Users.id:
             return jsonify({'error': 'Enterprise not found or unauthorized'}), 404
 
         data = request.json
@@ -193,7 +193,7 @@ def list_enterprises():
 @enterprise_bp.route('/admin/enterprise-stats', methods=['GET'])
 def get_enterprise_analytics():
     try:
-        user, error_response, status_code = require_admin_auth()
+        Users, error_response, status_code = require_admin_auth()
         if error_response:
             return error_response, status_code
 

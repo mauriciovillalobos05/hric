@@ -1,27 +1,27 @@
 from flask import Blueprint, request, jsonify, session
-from src.models.user import db, User, Message
+from src.models.user import db, Users, Message
 from datetime import datetime
 import uuid
 
 messages_bp = Blueprint('messages', __name__)
 
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    return Users, None, None
 
 @messages_bp.route('/inbox', methods=['GET'])
 def get_inbox():
-    user, error, status = require_auth()
+    Users, error, status = require_auth()
     if error:
         return error, status
 
     threads = db.session.query(Message.thread_id) \
-        .filter((Message.sender_id == user.id) | (Message.recipient_id == user.id)) \
+        .filter((Message.sender_id == Users.id) | (Message.recipient_id == Users.id)) \
         .distinct().all()
     thread_ids = [t[0] for t in threads if t[0]]
 
@@ -31,14 +31,14 @@ def get_inbox():
             .filter_by(thread_id=thread_id) \
             .order_by(Message.created_at.desc()).first()
 
-        other_user = last_msg.sender if last_msg.sender_id != user.id else last_msg.recipient
+        other_Users = last_msg.sender if last_msg.sender_id != Users.id else last_msg.recipient
 
         inbox_data.append({
             'thread_id': thread_id,
             'last_message': last_msg.to_dict(),
-            'other_user': other_user.to_dict() if other_user else None,
+            'other_Users': other_Users.to_dict() if other_Users else None,
             'unread_count': Message.query.filter_by(
-                thread_id=thread_id, recipient_id=user.id, is_read=False
+                thread_id=thread_id, recipient_id=Users.id, is_read=False
             ).count()
         })
 
@@ -46,17 +46,17 @@ def get_inbox():
 
 @messages_bp.route('/thread/<string:thread_id>', methods=['GET'])
 def get_thread(thread_id):
-    user, error, status = require_auth()
+    Users, error, status = require_auth()
     if error:
         return error, status
 
     messages = Message.query.filter_by(thread_id=thread_id) \
-        .filter((Message.sender_id == user.id) | (Message.recipient_id == user.id)) \
+        .filter((Message.sender_id == Users.id) | (Message.recipient_id == Users.id)) \
         .order_by(Message.created_at.asc()).all()
 
     # Mark all as read
     for msg in messages:
-        if msg.recipient_id == user.id and not msg.is_read:
+        if msg.recipient_id == Users.id and not msg.is_read:
             msg.is_read = True
             msg.read_at = datetime.utcnow()
     db.session.commit()
@@ -65,7 +65,7 @@ def get_thread(thread_id):
 
 @messages_bp.route('/send', methods=['POST'])
 def send_message():
-    user, error, status = require_auth()
+    Users, error, status = require_auth()
     if error:
         return error, status
 
@@ -79,7 +79,7 @@ def send_message():
         return jsonify({'error': 'Recipient and content required'}), 400
 
     new_msg = Message(
-        sender_id=user.id,
+        sender_id=Users.id,
         recipient_id=recipient_id,
         content=content,
         thread_id=thread_id or str(uuid.uuid4()),
@@ -93,21 +93,21 @@ def send_message():
 
 @messages_bp.route('/unread-count', methods=['GET'])
 def unread_count():
-    user, error, status = require_auth()
+    Users, error, status = require_auth()
     if error:
         return error, status
 
-    count = Message.query.filter_by(recipient_id=user.id, is_read=False).count()
+    count = Message.query.filter_by(recipient_id=Users.id, is_read=False).count()
     return jsonify({'unread_count': count}), 200
 
 @messages_bp.route('/archive/<int:message_id>', methods=['PUT'])
 def archive_message(message_id):
-    user, error, status = require_auth()
+    Users, error, status = require_auth()
     if error:
         return error, status
 
     msg = Message.query.get(message_id)
-    if not msg or msg.recipient_id != user.id:
+    if not msg or msg.recipient_id != Users.id:
         return jsonify({'error': 'Message not found or unauthorized'}), 404
 
     msg.is_archived = True
@@ -116,12 +116,12 @@ def archive_message(message_id):
 
 @messages_bp.route('/delete/<int:message_id>', methods=['DELETE'])
 def delete_message(message_id):
-    user, error, status = require_auth()
+    Users, error, status = require_auth()
     if error:
         return error, status
 
     msg = Message.query.get(message_id)
-    if not msg or msg.sender_id != user.id:
+    if not msg or msg.sender_id != Users.id:
         return jsonify({'error': 'Unauthorized'}), 403
 
     msg.is_deleted = True

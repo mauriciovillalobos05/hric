@@ -1,39 +1,39 @@
 from flask import Blueprint, jsonify, request
-from src.models.user import User, db
+from src.models.user import Users, db
 
-user_bp = Blueprint('user', __name__)
+users_bp = Blueprint('Users', __name__)
 
-@user_bp.route('/users', methods=['GET'])
-def get_users():
-    users = User.query.all()
-    return jsonify([user.to_dict() for user in users])
+@users_bp.route('/users', methods=['GET'])
+def get_Userss():
+    Userss = Users.query.all()
+    return jsonify([Users.to_dict() for Users in Userss])
 
-@user_bp.route('/users', methods=['POST'])
-def create_user():
+@users_bp.route('/users', methods=['POST'])
+def create_Users():
     
     data = request.json
-    user = User(username=data['username'], email=data['email'])
-    db.session.add(user)
+    Users = Users(Usersname=data['Usersname'], email=data['email'])
+    db.session.add(Users)
     db.session.commit()
-    return jsonify(user.to_dict()), 201
+    return jsonify(Users.to_dict()), 201
 
-@user_bp.route('/users/<uuid:user_id>', methods=['GET'])
-def get_user(user_id):
-    user = User.query.get_or_404(user_id)
-    return jsonify(user.to_dict())
+@users_bp.route('/users/<uuid:Users_id>', methods=['GET'])
+def get_Users(users_id):
+    Users = Users.query.get_or_404(users_id)
+    return jsonify(Users.to_dict())
 
-@user_bp.route('/users/<uuid:user_id>', methods=['PUT'])
-def update_user(user_id):
-    user = User.query.get_or_404(user_id)
+@users_bp.route('/users/<uuid:Users_id>', methods=['PUT'])
+def update_Users(users_id):
+    Users = Users.query.get_or_404(users_id)
     data = request.json
-    user.username = data.get('username', user.username)
-    user.email = data.get('email', user.email)
+    Users.Usersname = data.get('Usersname', Users.Usersname)
+    Users.email = data.get('email', Users.email)
     db.session.commit()
-    return jsonify(user.to_dict())
+    return jsonify(Users.to_dict())
 
-@user_bp.route('/users/<uuid:user_id>', methods=['DELETE'])
-def delete_user(user_id):
-    user = User.query.get_or_404(user_id)
-    db.session.delete(user)
+@users_bp.route('/users/<uuid:Users_id>', methods=['DELETE'])
+def delete_users(users_id):
+    Users = Users.query.get_or_404(users_id)
+    db.session.delete(Users)
     db.session.commit()
     return '', 204

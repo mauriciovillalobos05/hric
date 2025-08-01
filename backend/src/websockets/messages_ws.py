@@ -2,12 +2,12 @@
 
 from flask_socketio import emit, join_room
 from src.socketio import socketio
-from src.models.user import db, Message, User
+from src.models.user import db, Message, Users
 from datetime import datetime
 import uuid
 import requests
 from jose import jwt
-from src.models.user import User
+from src.models.user import Users
 
 SUPABASE_JWKS_URL = "https://dtnvirvfisilixuqterg.supabase.co/auth/v1/keys"
 
@@ -44,7 +44,7 @@ def verify_token(token):
         if not user_id:
             return None
 
-        return User.query.get(user_id)
+        return Users.query.get(user_id)
 
     except Exception as e:
         print(f"Token verification failed: {e}")

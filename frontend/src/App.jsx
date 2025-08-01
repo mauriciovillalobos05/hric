@@ -9,6 +9,11 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
+import InvestorProfile from "./pages/complete-profile/InvestorProfile";
+import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
+import EmailPendingSecondary from "./pages/emailPendingSecondary";
+import EmailConfirmationSent from "./pages/emailConfirmationSent";
+
 // import Subscription from "./pages/Subscription"; // assuming you have this actual component
 import { createClient } from "@supabase/supabase-js";
 
@@ -52,14 +57,54 @@ function App() {
   return (
     <>
       <Routes>
+        {/* Public routes */}
+        {/* Home, Login and Register routes */}
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />    
+        <Route path="/register" element={<Register />} />
+
+        {/* Secondary Email pending confirmation route */}
+        <Route
+          path="/email-pending-secondary"
+          element={
+            <ProtectedRoute>
+              <EmailPendingSecondary />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Email confirmation route */}
+        <Route
+          path="/email-confirmation-sent"
+          element={<EmailConfirmationSent />}
+        />
+
+        {/* Onboarding and profile completion routes */}
         <Route
           path="/onboarding"
           element={
             <ProtectedRoute>
               <Onboarding />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Investor profile completion */}
+        <Route
+          path="/complete-profile/investor"
+          element={
+            <ProtectedRoute>
+              <InvestorProfile />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Entrepreneur profile completion */}
+        <Route
+          path="/complete-profile/entrepreneur"
+          element={
+            <ProtectedRoute>
+              <EntrepreneurProfile />
             </ProtectedRoute>
           }
         />

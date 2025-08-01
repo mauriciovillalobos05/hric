@@ -60,7 +60,7 @@ function InvestorsDashboard() {
         ] = await Promise.all([
           supabase.from("matches").select("*").eq("investor_id", user.id),
           supabase
-            .from("events")
+            .from("event")
             .select("*")
             .order("date", { ascending: true }),
           supabase

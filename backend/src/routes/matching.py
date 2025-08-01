@@ -1,18 +1,18 @@
 from flask import Blueprint, jsonify, session
-from src.models.user import User, Enterprise, InvestorProfile, MatchRecommendation, db
+from src.models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
 from datetime import datetime
 from sqlalchemy import func
 
 matching_bp = Blueprint('matching', __name__)
 
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
+    Users_id = session.get('Users_id')
+    if not Users_id:
         return None, jsonify({'error': 'Not authenticated'}), 401
-    user = User.query.get(user_id)
-    if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    return user, None, None
+    Users = Users.query.get(Users_id)
+    if not Users:
+        return None, jsonify({'error': 'Users not found'}), 404
+    return Users, None, None
 
 def calculate_compatibility_score(profile, enterprise):
     score = 0
@@ -77,11 +77,11 @@ def get_matches():
     profile = investor.investor_profile
 
     # Clear old match recommendations for fresh generation (optional, or use timestamp threshold)
-    MatchRecommendation.query.filter_by(user_id=investor.id).delete()
+    MatchRecommendation.query.filter_by(Users_id=investor.id).delete()
     db.session.commit()
 
     enterprises = Enterprise.query \
-        .join(User, User.id == Enterprise.user_id) \
+        .join(Users, Users.id == Enterprise.Users_id) \
         .filter(Enterprise.is_actively_fundraising == True) \
         .all()
 
@@ -91,7 +91,7 @@ def get_matches():
         if score >= 30:
             # Save to MatchRecommendation table
             recommendation = MatchRecommendation(
-                user_id=investor.id,
+                Users_id=investor.id,
                 enterprise_id=e.id,
                 score=score,
                 reasons=reasons,
@@ -116,15 +116,15 @@ def get_matches():
 
 @matching_bp.route('/matches/recommendations', methods=['GET'])
 def get_cached_matches():
-    user, err, status = require_auth()
+    Users, err, status = require_auth()
     if err:
         return err, status
 
-    if user.role != 'investor':
+    if Users.role != 'investor':
         return jsonify({'error': 'Only investors can view cached recommendations'}), 403
 
     cached = MatchRecommendation.query \
-        .filter_by(user_id=user.id, status='pending') \
+        .filter_by(Users_id=Users.id, status='pending') \
         .join(Enterprise, Enterprise.id == MatchRecommendation.enterprise_id) \
         .filter(Enterprise.is_actively_fundraising == True) \
         .order_by(MatchRecommendation.score.desc()) \

@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import Users, InvestorProfile, Enterprise, Like,db
+from ..models.user import Users, InvestorProfile, Enterprise, Like,db
 from datetime import datetime
 import re
 

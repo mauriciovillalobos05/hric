@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.models.user import db, Users, Subscription
+from ..models.user import db, Users, Subscription
 import stripe
 import os
 from datetime import datetime

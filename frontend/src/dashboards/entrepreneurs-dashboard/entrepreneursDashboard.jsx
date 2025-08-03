@@ -59,7 +59,9 @@ function EntrepreneurDashboard() {
 
         setAvatarUrl(
           user.profile_image
-            ? supabase.storage.from("profile-images").getPublicUrl(user.profile_image).data?.publicUrl
+            ? supabase.storage
+                .from("profile-images")
+                .getPublicUrl(user.profile_image).data?.publicUrl
             : "./src/assets/default_user_image.png"
         );
 
@@ -80,36 +82,54 @@ function EntrepreneurDashboard() {
 
         setMessages(formattedMessages);
 
-        // Fetch matches
-        const { data: matchData } = await supabase
-          .from("match")
+        // Fectch enterprise
+        const { data: enterpriseData, error: enterpriseError } = await supabase
+          .from("enterprise")
+          .select("id")
+          .eq("user_id", userId)
+          .single();
+
+        if (enterpriseError || !enterpriseData) {
+          console.error(
+            "❌ Failed to get enterprise ID:",
+            enterpriseError?.message
+          );
+          return;
+        }
+
+        const enterpriseId = enterpriseData.id;
+
+        // Fetch matches for an entrepreneur's enterprise
+        const { data: matchData, error } = await supabase
+          .from("match_recommendation")
           .select(
             `
-            id,
-            compatibility_score,
-            match_reasons,
-            investor:investor_id (
-              company_name,
-              location,
-              industry,
-              funding_stage,
-              profile_image
-            )
-          `
+              id,
+              score,
+              reasons,
+              user:user_id (
+                first_name,
+                last_name,
+                location,
+                profile_image
+              )
+            `
           )
-          .eq("enterprise_id", userId)
-          .order("compatibility_score", { ascending: false });
+          .eq("enterprise_id", enterpriseId)
+          .order("score", { ascending: false });
+
+        if (error) {
+          console.error("Error fetching matches:", error.message);
+        }
 
         const formattedMatches = (matchData || []).map((m) => ({
-          founder: m.investor.company_name,
-          company_name: m.investor.company_name,
-          description: `Invests in ${m.investor.industry}`,
-          location: m.investor.location,
-          profile_image: m.investor.profile_image,
-          match_score: m.compatibility_score,
-          match_reasons: m.match_reasons ? m.match_reasons.split(",") : [],
-          funding_stage: m.investor.funding_stage,
-          industry: m.investor.industry,
+          founder: `${m.user.first_name} ${m.user.last_name}`,
+          company_name: `${m.user.first_name}'s Portfolio`,
+          description: `Investor from ${m.user.location}`,
+          location: m.user.location,
+          profile_image: m.user.profile_image,
+          match_score: m.score,
+          match_reasons: m.reasons || [],
         }));
 
         setMatches(formattedMatches);
@@ -169,25 +189,17 @@ function EntrepreneurDashboard() {
         messages={messages}
         onOpenChat={handleOpenChat}
       />
-
       <PipelineSummary data={pipelineData} />
-
       <ProfileStatusCard
         completion={60}
         missingSections={["Company Pitch", "Financials", "Team Info"]}
         onUpdateClick={() => navigate("/dashboard/user")}
       />
-
       <InvestorMatches matches={matches} onToggleFavorite={() => {}} />
-
       <EventShowcaseAccess events={events} />
-
       <DocumentStatus initialDocuments={[]} />
-
       <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
-
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
-
       <InsightsPanel role={userRole} /> {/* Optional */}
     </>
   );

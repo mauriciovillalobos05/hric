@@ -38,7 +38,7 @@ function InvestorsDashboard() {
           .from("user")
           .select("first_name, last_name, profile_image")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
         if (profile && !profileError) {
           let profileImg = "/default_user_image.png";

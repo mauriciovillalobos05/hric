@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
+from ..models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
 from datetime import datetime
 from sqlalchemy import func
 import requests
@@ -67,13 +67,15 @@ def calculate_compatibility_score(profile: InvestorProfile, enterprise: Enterpri
             score += 20
             reasons.append(f"Funding goal in range: ${target:,.0f}")
 
-    # 4. Geographic focus match
-    if enterprise.owner and enterprise.owner.location and profile.geographic_focus:
-        for g in profile.geographic_focus:
-            if g.lower() in enterprise.owner.location.lower():
-                score += 10
-                reasons.append(f"Geographic match: {g}")
-                break
+    # 4. Geographic focus match (precise and correct match reason)
+    matched_geo = next(
+        (g for g in profile.geographic_focus if g.lower().strip() == (enterprise.owner.location or "").lower().strip()),
+        None
+    )
+    if matched_geo:
+        score += 10
+        reasons.append(f"Geographic match: {matched_geo}")
+
 
     # 5. Risk tolerance logic
     risk_map = {
@@ -94,79 +96,132 @@ def calculate_compatibility_score(profile: InvestorProfile, enterprise: Enterpri
 
 
 @matching_bp.route('/matches', methods=['GET'])
-def generate_matches():
+def generate_and_return_matches():
     user, err, status = require_auth()
     if err:
         return err, status
 
-    if user.role != 'investor' or not user.investor_profile:
-        return jsonify({'error': 'Only investors with completed profiles can access matches'}), 403
-
-    profile = user.investor_profile
-
-    # Optional: delete previous recommendations for regeneration
-    MatchRecommendation.query.filter_by(user_id=user.id).delete()
-    db.session.commit()
-
-    enterprises = Enterprise.query \
-        .join(Users, Users.id == Enterprise.user_id) \
-        .filter(Enterprise.is_actively_fundraising == True) \
-        .all()
-
     matches = []
-    for e in enterprises:
-        score, reasons = calculate_compatibility_score(profile, e)
-        if score >= 30:
-            recommendation = MatchRecommendation(
-                user_id=user.id,
-                enterprise_id=e.id,
-                score=score,
-                reasons=reasons,
-                generated_at=datetime.utcnow()
-            )
-            db.session.add(recommendation)
+    threshold = 30
 
-            e_data = e.to_dict(user=user)
-            e_data['funding_goal'] = e.financials.get('funding_goal') if e.financials else float(e.funding_needed or 0)
+    if user.role == 'investor' and user.investor_profile:
+        profile = user.investor_profile
+
+        enterprises = Enterprise.query \
+            .join(Users, Users.id == Enterprise.user_id) \
+            .filter(Enterprise.is_actively_fundraising == True) \
+            .all()
+
+        for e in enterprises:
+            score, reasons = calculate_compatibility_score(profile, e)
+            existing = MatchRecommendation.query.filter_by(
+                user_id=user.id,
+                enterprise_id=e.id
+            ).first()
+
+            if score >= threshold:
+                if not existing:
+                    rec = MatchRecommendation(
+                        user_id=user.id,
+                        enterprise_id=e.id,
+                        score=score,
+                        reasons=reasons,
+                        generated_at=datetime.utcnow()
+                    )
+                    db.session.add(rec)
+            elif existing:
+                db.session.delete(existing)
+
+        db.session.commit()
+
+        # Return current matches for this investor
+        cached = MatchRecommendation.query \
+            .filter_by(user_id=user.id, status='pending') \
+            .join(Enterprise, Enterprise.id == MatchRecommendation.enterprise_id) \
+            .filter(Enterprise.is_actively_fundraising == True) \
+            .order_by(MatchRecommendation.score.desc()) \
+            .all()
+
+        for rec in cached:
+            e = rec.enterprise
+            e_data = e.to_dict(include_founder=True)
+            e_data['funding_goal'] = (
+                e.financials.get('funding_goal') if e.financials else float(e.funding_needed or 0)
+            )
             matches.append({
                 'enterprise': e_data,
-                'compatibility_score': score,
-                'reasons': reasons
+                'compatibility_score': rec.score,
+                'reasons': rec.reasons,
+                'status': rec.status,
+                'generated_at': rec.generated_at.isoformat()
             })
 
-    db.session.commit()
-    matches.sort(key=lambda x: x['compatibility_score'], reverse=True)
-    return jsonify({'matches': matches}), 200
+    elif user.role == 'entrepreneur':
+        enterprise = Enterprise.query.filter_by(user_id=user.id).first()
+        if not enterprise:
+            return jsonify({'error': 'Entrepreneur must have an enterprise'}), 400
 
+        investors = Users.query \
+            .filter_by(role='investor') \
+            .join(InvestorProfile, Users.id == InvestorProfile.user_id) \
+            .all()
 
-@matching_bp.route('/matches/recommendations', methods=['GET'])
-def get_cached_matches():
-    user, err, status = require_auth()
-    if err:
-        return err, status
+        for investor in investors:
+            profile = investor.investor_profile
+            if not profile:
+                continue
 
-    if user.role != 'investor':
-        return jsonify({'error': 'Only investors can view cached recommendations'}), 403
+            score, reasons = calculate_compatibility_score(profile, enterprise)
+            existing = MatchRecommendation.query.filter_by(
+                user_id=investor.id,
+                enterprise_id=enterprise.id
+            ).first()
 
-    cached = MatchRecommendation.query \
-        .filter_by(user_id=user.id, status='pending') \
-        .join(Enterprise, Enterprise.id == MatchRecommendation.enterprise_id) \
-        .filter(Enterprise.is_actively_fundraising == True) \
-        .order_by(MatchRecommendation.score.desc()) \
-        .all()
+            if score >= threshold:
+                if not existing:
+                    rec = MatchRecommendation(
+                        user_id=investor.id,
+                        enterprise_id=enterprise.id,
+                        score=score,
+                        reasons=reasons,
+                        generated_at=datetime.utcnow()
+                    )
+                    db.session.add(rec)
+            elif existing:
+                db.session.delete(existing)
 
-    matches = []
-    for rec in cached:
-        e = rec.enterprise
-        e_data = e.to_dict(include_founder=True)
-        e_data['funding_goal'] = e.financials.get('funding_goal') if e.financials else float(e.funding_needed or 0)
+        db.session.commit()
 
-        matches.append({
-            'enterprise': e_data,
-            'compatibility_score': rec.score,
-            'reasons': rec.reasons,
-            'status': rec.status,
-            'generated_at': rec.generated_at.isoformat()
-        })
+        # Return current matches for this enterprise
+        cached = MatchRecommendation.query \
+            .join(Enterprise, Enterprise.id == MatchRecommendation.enterprise_id) \
+            .join(Users, Users.id == MatchRecommendation.user_id) \
+            .filter(
+                Enterprise.user_id == user.id,
+                MatchRecommendation.status == 'pending'
+            ) \
+            .order_by(MatchRecommendation.score.desc()) \
+            .all()
+
+        for rec in cached:
+            investor_user = Users.query.get(rec.user_id)
+            if not investor_user:
+                continue
+
+            matches.append({
+                'investor': {
+                    'first_name': investor_user.first_name or "Unnamed",
+                    'last_name': investor_user.last_name or "Investor",
+                    'location': investor_user.location or "Unknown",
+                    'profile_image': investor_user.profile_image
+                },
+                'compatibility_score': rec.score,
+                'reasons': rec.reasons,
+                'status': rec.status,
+                'generated_at': rec.generated_at.isoformat()
+            })
+
+    else:
+        return jsonify({'error': 'Only investors or entrepreneurs with valid profiles can access matches'}), 403
 
     return jsonify({'matches': matches}), 200

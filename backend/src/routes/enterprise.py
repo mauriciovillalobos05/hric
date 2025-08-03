@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, session
 from datetime import datetime, timedelta
-from src.models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
+from ..models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
 
 enterprise_bp = Blueprint('entrepreneur', __name__)
 

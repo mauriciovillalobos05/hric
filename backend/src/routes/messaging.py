@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, session
-from src.models.user import db, Users, Message
+from ..models.user import db, Users, Message
 from datetime import datetime
 import uuid
 

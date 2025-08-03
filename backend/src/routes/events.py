@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, session
 from datetime import datetime
-from src.models.user import Users, Event, EventRegistration, EventPayment, db
+from ..models.user import Users, Event, EventRegistration, EventPayment, db
 
 events_bp = Blueprint('event', __name__)
 

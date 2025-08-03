@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, session
-from src.models.user import Users, InvestorProfile, Enterprise, MatchRecommendation, Event, EventRegistration, Document, Message, db
+from ..models.user import Users, InvestorProfile, Enterprise, MatchRecommendation, Event, EventRegistration, Document, Message, db
 from datetime import datetime, timedelta
 from sqlalchemy import func, extract
 

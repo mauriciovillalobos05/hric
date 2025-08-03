@@ -1,7 +1,7 @@
 # src/routes/meeting_bp.py
 
 from flask import Blueprint, request, jsonify, session
-from src.models.user import db, Meeting, Users
+from ..models.user import db, Meeting, Users
 from datetime import datetime
 
 meeting_bp = Blueprint('meeting', __name__)

@@ -1,7 +1,7 @@
 # enterprise_profile.py
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-from src.models.user import db, Users, Enterprise, Subscription
+from ..models.user import db, Users, Enterprise, Subscription
 import stripe
 import os
 import requests

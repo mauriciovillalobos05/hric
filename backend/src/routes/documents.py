@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, session, send_file
 from werkzeug.utils import secure_filename
-from src.models.user import db, Users, Document, DocumentAccess
+from ..models.user import db, Users, Document, DocumentAccess
 from datetime import datetime, timedelta
 import os
 import uuid

@@ -125,8 +125,12 @@ class Enterprise(db.Model):
     subscriptions = db.relationship('Subscription', backref='enterprise', cascade='all, delete-orphan')
     likes = db.relationship('Like', back_populates='enterprise', cascade='all, delete-orphan')
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_founder=False, user=None):
+        # Auto-detect if founder info should be included
+        if user and user.role == 'investor':
+            include_founder = True
+
+        data = {
             'id': self.id,
             'name': self.name,
             'industry': self.industry,
@@ -135,13 +139,22 @@ class Enterprise(db.Model):
             'team_size': self.team_size,
             'pitch_deck_url': self.pitch_deck_url,
             'demo_url': self.demo_url,
-            'location': self.location,  
+            'location': self.location,
             'funding_needed': float(self.funding_needed) if self.funding_needed else None,
             'is_actively_fundraising': self.is_actively_fundraising,
             'financials': self.financials,
             'target_market': self.target_market,
             'created_at': self.created_at.isoformat()
         }
+
+        if include_founder and self.owner:
+            data['founder'] = {
+                'first_name': self.owner.first_name,
+                'last_name': self.owner.last_name,
+                'profile_image': self.owner.profile_image
+            }
+
+        return data
 
 # -------------------- Subscription --------------------
 class TierPlan(db.Model):
@@ -359,6 +372,7 @@ class Message(db.Model):
     __tablename__ = 'message'
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    receiver_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
     recipient_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
     content = db.Column(db.Text, nullable=False)
     message_type = db.Column(db.String(20), default='direct')
@@ -405,6 +419,7 @@ class Notification(db.Model):
     __tablename__ = 'notification'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('user.id'))
+    title = db.Column(db.String(255))
     message = db.Column(db.String(255))
     read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

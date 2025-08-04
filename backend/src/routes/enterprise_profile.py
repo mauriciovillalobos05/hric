@@ -41,7 +41,7 @@ def require_auth():
     return user, None, None
 
 @enterpriseprofile_bp.route('/profile', methods=['POST'])
-def create_enterprise_profile():
+def create_or_update_enterprise_profile():
     user, error_response, status = require_auth()
     if error_response:
         return error_response, status
@@ -51,32 +51,47 @@ def create_enterprise_profile():
     if user.role != 'entrepreneur':
         return jsonify({'error': 'Only entrepreneurs can create an enterprise profile'}), 403
 
-    enterprise = Enterprise(
-        user_id=user.id,
-        name=data['name'],
-        industry=data.get('industry'),
-        stage=data.get('stage'),
-        business_model=data.get('business_model'),
-        team_size=data.get('team_size'),
-        pitch_deck_url=data.get('pitch_deck_url'),
-        demo_url=data.get('demo_url'),
-        financials=data.get('financials'),
-        target_market=data.get('target_market')
-    )
-    db.session.add(enterprise)
-    db.session.flush()  # to get enterprise.id
+    # Check if an enterprise already exists for this user
+    enterprise = Enterprise.query.filter_by(user_id=user.id).first()
 
-    subscription = Subscription(
-        user_id=user.id,
-        enterprise_id=enterprise.id,  
-        tier=data.get('tier'),
-        status='active',  # Defaulting to active unless you want to handle via Stripe webhooks
-        stripe_customer_id=data.get('stripe_customer_id'),
-        stripe_subscription_id=data.get('stripe_subscription_id'),
-        started_at=datetime.utcnow(),  # Now; Stripe start time can be synced later if needed
-        ended_at=None  # Will be updated via webhook if needed
-    )
-    db.session.add(subscription)
+    if enterprise:
+        # Update existing enterprise
+        enterprise.name = data.get('name')
+        enterprise.industry = data.get('industry')
+        enterprise.stage = data.get('stage')
+        enterprise.business_model = data.get('business_model')
+        enterprise.team_size = data.get('team_size')
+        enterprise.pitch_deck_url = data.get('pitch_deck_url')
+        enterprise.demo_url = data.get('demo_url')
+        enterprise.financials = data.get('financials')
+        enterprise.target_market = data.get('target_market')
+        enterprise.is_actively_fundraising = data.get('is_actively_fundraising', True)
+    else:
+        # Create new enterprise
+        enterprise = Enterprise(
+            user_id=user.id,
+            name=data.get('name'),
+            industry=data.get('industry'),
+            stage=data.get('stage'),
+            business_model=data.get('business_model'),
+            team_size=data.get('team_size'),
+            pitch_deck_url=data.get('pitch_deck_url'),
+            demo_url=data.get('demo_url'),
+            financials=data.get('financials'),
+            target_market=data.get('target_market'),
+            is_actively_fundraising=data.get('is_actively_fundraising', True),
+        )
+        db.session.add(enterprise)
+
     db.session.commit()
 
-    return jsonify({'message': 'Enterprise profile and subscription created successfully'}), 201
+    # Link to most recent subscription if available
+    try:
+        subscription = Subscription.query.filter_by(user_id=user.id).order_by(Subscription.started_at.desc()).first()
+        if subscription:
+            subscription.enterprise_id = enterprise.id
+            db.session.commit()
+    except Exception as e:
+        return jsonify({'error': f'Enterprise saved but failed to link subscription: {str(e)}'}), 500
+
+    return jsonify({'message': 'Enterprise profile saved successfully'}), 200

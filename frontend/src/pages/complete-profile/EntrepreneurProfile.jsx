@@ -99,6 +99,12 @@ export default function EntrepreneurProfile() {
       } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("No session token found");
 
+      if (!form.name?.trim()) {
+        setError("Company name is required.");
+        setLoading(false);
+        return;
+      }
+
       const payload = { ...form };
 
       // Clean up all empty strings to null or valid types
@@ -112,6 +118,7 @@ export default function EntrepreneurProfile() {
       if (form.financials?.trim()) {
         try {
           payload.financials = JSON.parse(form.financials.trim());
+          console.log("Trying to parse financials:", form.financials.trim());
         } catch (err) {
           setError(
             "'Financial Summary' must be valid JSON (e.g. { \"revenue\": 50000 })"
@@ -163,7 +170,7 @@ export default function EntrepreneurProfile() {
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">
-            Entrepreneur Profile
+            Enterprise Profile
           </CardTitle>
           <p className="text-sm text-gray-500">
             Help investors understand your company
@@ -182,7 +189,13 @@ export default function EntrepreneurProfile() {
               placeholder="Company Name"
               value={form.name}
               onChange={handleChange}
+              className={
+                error?.toLowerCase().includes("company name")
+                  ? "border-red-500"
+                  : ""
+              }
             />
+            
             <Input
               name="industry"
               placeholder="Industry"

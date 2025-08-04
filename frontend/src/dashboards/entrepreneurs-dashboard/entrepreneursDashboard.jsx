@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
-import InvestorMatches from "./dashboard-components/components/matchComponents/investorMatches.jsx";
+import InvestorMatches from "./dashboard-components/components/matchComponents/matchFeed.jsx";
 import PipelineSummary from "./dashboard-components/components/pipelineSummary.jsx";
 import ProfileStatusCard from "./dashboard-components/components/profileStatusComponents/profileStatusCard.jsx";
 import EventList from "../../pages/eventShowcaseComponents/eventShowcaseAccess.jsx";

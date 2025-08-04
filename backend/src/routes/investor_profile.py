@@ -50,10 +50,15 @@ def create_investor_profile():
     if error_response:
         return error_response, status
 
-    data = request.json
-
     if user.role != 'investor':
         return jsonify({'error': 'Only investors can create an investor profile'}), 403
+
+    #Prevent duplicate profile
+    existing_profile = InvestorProfile.query.filter_by(user_id=user.id).first()
+    if existing_profile:
+        return jsonify({'error': 'Investor profile already exists'}), 400
+
+    data = request.json
 
     profile = InvestorProfile(
         user_id=user.id,
@@ -71,19 +76,7 @@ def create_investor_profile():
         meeting_preference=data.get('meeting_preference')
     )
 
-    subscription = Subscription(
-        user_id=user.id,
-        enterprise_id=None,
-        tier=data.get('tier'),
-        status='active',
-        stripe_customer_id=data.get('stripe_customer_id'),
-        stripe_subscription_id=data.get('stripe_subscription_id'),
-        started_at=datetime.utcnow(),
-        ended_at=None
-    )
-
     db.session.add(profile)
-    db.session.add(subscription)
     db.session.commit()
 
-    return jsonify({'message': 'Investor profile and subscription created successfully'}), 201
+    return jsonify({'message': 'Investor profile created successfully'}), 201

@@ -22,7 +22,7 @@ function MatchFeed() {
         if (sessionError || !session?.access_token)
           throw new Error("User not authenticated");
 
-        const res = await fetch("http://127.0.0.1:8000/api/matching/matches", {
+        const res = await fetch("http://127.0.0.1:8000/api/matching/matches/investors", {
           method: "GET",
           headers: {
             Authorization: `Bearer ${session.access_token}`,
@@ -49,28 +49,27 @@ function MatchFeed() {
 
   return (
     <section className="px-6 py-4">
-      <h2 className="text-xl font-semibold mb-4">Startup Matches</h2>
+      <h2 className="text-xl font-semibold mb-4">Matched Investors</h2>
       <div className="grid gap-4">
-        {matches.map((match, index) => {
-          const e = match.enterprise;
-          const founder = e.founder || {};
-
-          return (
+        {matches.length === 0 ? (
+          <p className="text-gray-500">No matches found yet.</p>
+        ) : (
+          matches.map((match, index) => (
             <MatchCard
-              key={e.id}
-              founder={`${founder.first_name || ""} ${founder.last_name || ""}`}
-              company_name={e.name}
-              description={e.target_market}
-              location={e.location}
-              profile_image={founder.profile_image}
+              key={index}
+              founder={`${match.investor.first_name} ${match.investor.last_name}`}
+              company_name={match.investor.investor_type || "Investor"}
+              description={`Interested in ${match.investor.industries?.join(", ") || "various sectors"}`}
+              location={match.investor.location}
+              profile_image={match.investor.profile_image}
               match_score={match.compatibility_score}
-              match_reasons={match.reasons}
-              funding_stage={e.stage}
-              industry={e.industry}
+              match_reasons={match.match_reasons}
+              funding_stage={match.investor.investment_stages?.join(", ")}
+              industry={match.investor.industries?.[0]}
               isFavorite={false}
             />
-          );
-        })}
+          ))
+        )}
       </div>
     </section>
   );

@@ -22,6 +22,7 @@ from src.routes.analytics import analytics_bp
 from src.routes.subscriptions import subscriptions_bp
 from src.socketio import socketio
 from src.websockets import messages_ws
+from src.routes.stripe_webhook import stripe_bp
 
 load_dotenv()
 
@@ -61,6 +62,7 @@ def create_app():
     app.register_blueprint(subscriptions_bp, url_prefix='/subscriptions')
     app.register_blueprint(investorprofile_bp, url_prefix='/investors')
     app.register_blueprint(enterpriseprofile_bp, url_prefix='/enterprise')
+    app.register_blueprint(stripe_bp, url_prefix='/stripe')
 
     # Static file serving
     @app.route('/', defaults={'path': ''})

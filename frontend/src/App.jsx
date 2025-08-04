@@ -31,7 +31,7 @@ function App() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
+      console.log("Access token:", session?.access_token);
       if (session?.user) {
         const { data: userProfile, error } = await supabase
           .from("user")
@@ -132,7 +132,14 @@ function App() {
           path="/dashboard/user"
           element={
             <ProtectedRoute>
-              <MainUserDashboard role={user?.role || ""} />
+              {user?.role ? (
+                <MainUserDashboard role={user.role} />
+              ) : (
+                <div className="min-h-screen flex items-center justify-center text-gray-600">
+                  <Loader2 className="h-8 w-8 animate-spin mr-2" />
+                  <span>Loading your role...</span>
+                </div>
+              )}
             </ProtectedRoute>
           }
         />

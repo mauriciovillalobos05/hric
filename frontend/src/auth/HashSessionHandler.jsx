@@ -105,7 +105,7 @@ export default function HashSessionHandler() {
             return;
           }
 
-          console.log("✅ Signup token verified, session created", data);
+          console.log("Signup token verified, session created", data);
           navigate("/onboarding");
           window.history.replaceState(
             {},

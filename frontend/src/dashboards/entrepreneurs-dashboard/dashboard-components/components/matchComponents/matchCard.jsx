@@ -3,7 +3,7 @@ import Badge from "./uiComponents/badge";
 import Button from "./uiComponents/button";
 import { UserCircle2, Star, StarOff } from "lucide-react";
 
-function InvestorCard({
+function MatchCard({
   founder,
   company_name,
   description,
@@ -98,4 +98,4 @@ function InvestorCard({
   );
 }
 
-export default InvestorCard;
+export default MatchCard;

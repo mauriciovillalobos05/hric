@@ -1,9 +1,11 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Badge from "./uiComponents/badge";
 import Button from "./uiComponents/button";
 import { UserCircle2, Star, StarOff } from "lucide-react";
 
 function MatchCard({
+  user_id,
   founder,
   company_name,
   description,
@@ -17,7 +19,7 @@ function MatchCard({
   isFavorite = false,
 }) {
   const [favorited, setFavorited] = useState(isFavorite);
-
+  const navigate = useNavigate();
   const handleFavoriteClick = () => {
     const newState = !favorited;
     setFavorited(newState);
@@ -28,7 +30,7 @@ function MatchCard({
 
   return (
     <div className="border rounded-lg shadow-md p-4 bg-white w-full relative">
-      {/* ⭐ Favorite Toggle Button */}
+      {/* Favorite Toggle Button */}
       <div
         className="absolute top-3 right-3 cursor-pointer"
         onClick={handleFavoriteClick}
@@ -88,7 +90,12 @@ function MatchCard({
         </div>
 
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/profile/${user_id}`)
+          }
+          >
             View Profile
           </Button>
           <Button size="sm">Connect</Button>

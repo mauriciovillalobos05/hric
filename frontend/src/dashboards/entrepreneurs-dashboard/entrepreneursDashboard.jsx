@@ -12,7 +12,7 @@ import DocumentStatus from "./dashboard-components/components/documentStatus.jsx
 import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
-import defaultAvatar from "../../assets/default_user_image.png"; 
+import defaultAvatar from "../../assets/default_user_image.png";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -52,7 +52,7 @@ function EntrepreneurDashboard() {
         if (!session?.user) return;
         const userId = session.user.id;
 
-        // ✅ Updated user fetch with email and role
+        // Updated user fetch with email and role
         const { data: user, error: userErr } = await supabase
           .from("user")
           .select("first_name, last_name, profile_image, email, role")
@@ -69,7 +69,7 @@ function EntrepreneurDashboard() {
             ? supabase.storage
                 .from("profile-images")
                 .getPublicUrl(user.profile_image).data?.publicUrl
-            : defaultAvatar; 
+            : defaultAvatar;
 
         setAvatarUrl(resolvedAvatarUrl);
 
@@ -314,7 +314,7 @@ function EntrepreneurDashboard() {
         role={userRole}
         onSubmit={handleSubmitRegistration}
       />
-      <DocumentStatus initialDocuments={[]} />
+      <DocumentStatus />
       <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
       <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
       <InsightsPanel role={userRole} /> {/* Optional */}

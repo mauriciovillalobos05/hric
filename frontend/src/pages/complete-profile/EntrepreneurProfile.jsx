@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import LocationAutocomplete from "@/components/locationAutoComplete";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -28,12 +29,14 @@ export default function EntrepreneurProfile() {
     business_model: "",
     problem_solved: "",
     traction_summary: "",
-    stripe_customer_id: null,
-    stripe_subscription_id: null,
-    tier: null,
+    stripe_customer_id: "",
+    stripe_subscription_id: "",
+    tier: "",
   });
   const [error, setError] = useState(null);
   const [enterpriseId, setEnterpriseId] = useState(null);
+
+  // Custom hook to fetch user profile and existing enterprise data
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -56,18 +59,17 @@ export default function EntrepreneurProfile() {
         if (enterpriseData) {
           setEnterpriseId(enterpriseData.id);
           setForm({
-            ...form,
             ...enterpriseData,
-            stripe_customer_id,
-            stripe_subscription_id,
-            tier: plan,
+            stripe_customer_id: stripe_customer_id || "",
+            stripe_subscription_id: stripe_subscription_id || "",
+            tier: plan || "",
           });
         } else {
           setForm((prev) => ({
             ...prev,
-            stripe_customer_id,
-            stripe_subscription_id,
-            tier: plan,
+            stripe_customer_id: stripe_customer_id || "",
+            stripe_subscription_id: stripe_subscription_id || "",
+            tier: plan || "",
           }));
         }
       } catch (err) {
@@ -80,6 +82,7 @@ export default function EntrepreneurProfile() {
     fetchProfile();
   }, []);
 
+  // Handle form input changes
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({
@@ -88,6 +91,7 @@ export default function EntrepreneurProfile() {
     }));
   };
 
+  // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -106,6 +110,7 @@ export default function EntrepreneurProfile() {
       }
 
       const payload = { ...form };
+      console.log("Submitting:", payload);
 
       // Clean up all empty strings to null or valid types
       for (const key in payload) {
@@ -136,16 +141,20 @@ export default function EntrepreneurProfile() {
       if (payload.funding_needed)
         payload.funding_needed = parseFloat(payload.funding_needed);
 
-      const res = await fetch("http://127.0.0.1:8000/enterprise/profile", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/enterprise/enterprise/${enterpriseId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
 
       const data = await res.json();
+      
       if (!res.ok) throw new Error(data.error || "Submission failed");
 
       navigate("/dashboard/entrepreneur");
@@ -195,7 +204,7 @@ export default function EntrepreneurProfile() {
                   : ""
               }
             />
-            
+
             <Input
               name="industry"
               placeholder="Industry"
@@ -208,16 +217,15 @@ export default function EntrepreneurProfile() {
               value={form.stage}
               onChange={handleChange}
             />
-            <Input
-              name="location"
-              placeholder="Company Location"
+            <LocationAutocomplete
               value={form.location}
-              onChange={handleChange}
+              onChange={(value) => setForm({ ...form, location: value })}
             />
             <Input
               name="team_size"
               placeholder="Team Size"
               type="number"
+              min="1"
               value={form.team_size}
               onChange={handleChange}
             />
@@ -225,6 +233,7 @@ export default function EntrepreneurProfile() {
               name="funding_needed"
               placeholder="Funding Needed (USD)"
               type="number"
+              min="0"
               value={form.funding_needed}
               onChange={handleChange}
             />

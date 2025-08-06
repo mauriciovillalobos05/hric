@@ -1,31 +1,38 @@
 from flask import Blueprint, jsonify, request, session
 from datetime import datetime, timedelta
 from src.models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
+import os
+import jwt
 
 enterprise_bp = Blueprint('entrepreneur', __name__)
 
-# --------------------- Admin Auth Helper ---------------------
-def require_admin_auth():
-    Users_id = session.get('Users_id')
-    if not Users_id:
-        return None, jsonify({'error': 'Not authenticated'}), 401
-    Users = Users.query.get(Users_id)
-    if not Users:
-        return None, jsonify({'error': 'Users not found'}), 404
-    if Users.role != 'admin':
-        return None, jsonify({'error': 'Admin access required'}), 403
-    return Users, None, None
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY')
+
+def get_token_from_header():
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        return auth_header.split(" ")[1]
+    return None
+
+def require_auth():
+    token = get_token_from_header()
+    if not token:
+        return None, jsonify({'error': 'Missing token'}), 401
+
+    # Verify token via Supabase API or decode manually (simplified for dev use):
+    try:
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        user_id = decoded['sub']
+        user = Users.query.get(user_id)
+        if not user:
+            return None, jsonify({'error': 'User not found'}), 404
+        return user, None, None
+    except Exception as e:
+        return None, jsonify({'error': f'Invalid token: {str(e)}'}), 401
+    
 
 # --------------------- Auth Helpers ---------------------
-def require_auth():
-    Users_id = session.get('Users_id')
-    if not Users_id:
-        return None, jsonify({'error': 'Not authenticated'}), 401
-    Users = Users.query.get(Users_id)
-    if not Users:
-        return None, jsonify({'error': 'Users not found'}), 404
-    return Users, None, None
-
 def require_entrepreneur_auth():
     Users, err, status = require_auth()
     if err:
@@ -136,14 +143,18 @@ def update_enterprise_core_data(enterprise_id):
             return error_response, status_code
 
         enterprise = Enterprise.query.get(enterprise_id)
-        if not enterprise or enterprise.Users_id != Users.id:
+        if not enterprise or enterprise.user_id != Users.id:
             return jsonify({'error': 'Enterprise not found or unauthorized'}), 404
 
         data = request.json
-        allowed_fields = ['name', 'industry', 'stage', 'business_model', 'team_size', 'target_market']
+        allowed_fields = [
+            'name', 'industry', 'stage', 'location', 'team_size',
+            'funding_needed', 'pitch_deck_url', 'demo_url', 'financials',
+            'target_market', 'business_model', 'problem_solved', 'traction_summary'
+        ]
         for field in allowed_fields:
-            if field in data:
-                setattr(enterprise, field, data[field])
+            if field in data:  # even if data[field] is null, we want to overwrite it
+                setattr(enterprise, field, data.get(field))
 
         enterprise.updated_at = datetime.utcnow()
         db.session.commit()

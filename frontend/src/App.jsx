@@ -13,6 +13,7 @@ import InvestorProfile from "./pages/complete-profile/InvestorProfile";
 import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import EmailPendingSecondary from "./pages/emailPendingSecondary";
 import EmailConfirmationSent from "./pages/emailConfirmationSent";
+import ProfilePreview from "./pages/profileViews/ProfilePreview";
 
 // import Subscription from "./pages/Subscription"; // assuming you have this actual component
 import { createClient } from "@supabase/supabase-js";
@@ -118,6 +119,15 @@ function App() {
           }
         />
 
+        {/* View a profile */}
+        <Route
+          path="/profile/:userId"
+          element={
+            <ProtectedRoute>
+              <ProfilePreview />
+            </ProtectedRoute>
+          }
+        />
         {/* FOR LATER once we have the subscription page */}
         {/* <Route
         path="/subscription"

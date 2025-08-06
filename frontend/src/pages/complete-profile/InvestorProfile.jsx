@@ -6,11 +6,44 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import LocationMultiSelect from "../cmpnnts/LocationMultiSelect";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
+
+function MultiSelect({ label, options, selected, onChange }) {
+  const toggleOption = (option) => {
+    if (selected.includes(option)) {
+      onChange(selected.filter((item) => item !== option));
+    } else {
+      onChange([...selected, option]);
+    }
+  };
+
+  return (
+    <div>
+      <label className="block font-medium mb-1">{label}</label>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => toggleOption(option)}
+            className={`px-3 py-1 border rounded-full text-sm ${
+              selected.includes(option)
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-white text-gray-700 border-gray-300"
+            }`}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function InvestorProfile() {
   const navigate = useNavigate();
@@ -33,6 +66,50 @@ export default function InvestorProfile() {
     tier: null,
   });
   const [error, setError] = useState(null);
+
+  const industryOptions = [
+    "Technology",
+    "Healthcare",
+    "Finance",
+    "Education",
+    "Agriculture",
+    "Energy",
+    "E-commerce",
+    "Transportation",
+    "Media",
+    "Real Estate",
+  ];
+
+  const investmentStageOptions = [
+    "Pre-seed",
+    "Seed",
+    "Series A",
+    "Series B",
+    "Series C",
+    "Growth",
+    "IPO",
+  ];
+
+  const investorTypeOptions = [
+    "Angel",
+    "Venture Capitalist",
+    "Institutional",
+    "Family Office",
+    "Corporate VC",
+    "Accelerator/Incubator",
+  ];
+
+  const riskOptions = ["Low", "Medium", "High"];
+
+  const commOptions = [
+    "Weekly",
+    "Bi-weekly",
+    "Monthly",
+    "Quarterly",
+    "On-demand",
+  ];
+
+  const meetingOptions = ["In-person", "Virtual", "Hybrid", "Email Only"];
 
   useEffect(() => {
     const fetchStripeMeta = async () => {
@@ -67,13 +144,6 @@ export default function InvestorProfile() {
     }));
   };
 
-  const handleArrayInput = (e, field) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: e.target.value.split(",").map((val) => val.trim()),
-    }));
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -88,7 +158,7 @@ export default function InvestorProfile() {
       const res = await fetch("http://127.0.0.1:8000/investors/profile", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(form),
@@ -124,20 +194,27 @@ export default function InvestorProfile() {
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              name="industries"
-              placeholder="Industries (comma-separated)"
-              onChange={(e) => handleArrayInput(e, "industries")}
+            <MultiSelect
+              label="Industries"
+              options={industryOptions}
+              selected={form.industries}
+              onChange={(newValues) =>
+                setForm((prev) => ({ ...prev, industries: newValues }))
+              }
             />
-            <Input
-              name="investment_stages"
-              placeholder="Investment Stages (comma-separated)"
-              onChange={(e) => handleArrayInput(e, "investment_stages")}
+            <MultiSelect
+              label="Investment Stages"
+              options={investmentStageOptions}
+              selected={form.investment_stages}
+              onChange={(newValues) =>
+                setForm((prev) => ({ ...prev, investment_stages: newValues }))
+              }
             />
-            <Input
-              name="geographic_focus"
-              placeholder="Geographic Focus (comma-separated)"
-              onChange={(e) => handleArrayInput(e, "geographic_focus")}
+            <LocationMultiSelect
+              values={form.geographic_focus}
+              onChange={(newValues) =>
+                setForm((prev) => ({ ...prev, geographic_focus: newValues }))
+              }
             />
             <div className="flex gap-4">
               <Input
@@ -155,18 +232,32 @@ export default function InvestorProfile() {
                 onChange={handleChange}
               />
             </div>
-            <Input
+            <select
               name="investor_type"
-              placeholder="Investor Type"
               value={form.investor_type}
               onChange={handleChange}
-            />
-            <Input
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Investor Type</option>
+              {investorTypeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <select
               name="risk_tolerance"
-              placeholder="Risk Tolerance (e.g. Low, Medium, High)"
               value={form.risk_tolerance}
               onChange={handleChange}
-            />
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Risk Tolerance</option>
+              {riskOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
             <Input
               name="portfolio_size"
               placeholder="Portfolio Size"
@@ -174,18 +265,32 @@ export default function InvestorProfile() {
               value={form.portfolio_size}
               onChange={handleChange}
             />
-            <Input
+            <select
               name="communication_frequency"
-              placeholder="Communication Frequency"
               value={form.communication_frequency}
               onChange={handleChange}
-            />
-            <Input
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Communication Frequency</option>
+              {commOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <select
               name="meeting_preference"
-              placeholder="Meeting Preference"
               value={form.meeting_preference}
               onChange={handleChange}
-            />
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Meeting Preference</option>
+              {meetingOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -204,7 +309,6 @@ export default function InvestorProfile() {
               />
               Available for Advisory
             </label>
-
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
             </Button>

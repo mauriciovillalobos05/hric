@@ -1,36 +1,35 @@
 from flask import Blueprint, request, jsonify
 from ..models.user import Users, Enterprise, InvestorProfile, MatchRecommendation, db
-from datetime import datetime
-from sqlalchemy import func
+from datetime import datetime, timedelta
+from sqlalchemy import func, and_
 import requests
 import os
+from sqlalchemy.orm import joinedload
+from rapidfuzz import fuzz
+import json
 
 matching_bp = Blueprint('matching', __name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
-# Supabase JWT auth
+MATCH_REFRESH_INTERVAL_MINUTES = 10
+MATCH_SCORE_THRESHOLD = 30
+
 def require_auth():
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return None, jsonify({"error": "Missing or invalid Authorization header"}), 401
 
     token = auth_header.split(" ")[1]
-
     try:
         resp = requests.get(
             f"{SUPABASE_URL}/auth/v1/user",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "apikey": SUPABASE_ANON_KEY,
-            },
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
         )
         if resp.status_code != 200:
             return None, jsonify({"error": "Invalid or expired token"}), 401
-
-        supabase_user = resp.json()
-        user_id = supabase_user["id"]
+        user_id = resp.json()["id"]
     except Exception as e:
         return None, jsonify({"error": f"Token verification failed: {str(e)}"}), 500
 
@@ -40,60 +39,80 @@ def require_auth():
 
     return user, None, None
 
+def fuzzy_match_score(a, b):
+    if not a or not b:
+        return 0
+    return fuzz.token_set_ratio(a.lower(), b.lower())
+
+def fuzzy_list_match_score(target, candidates, threshold=70):
+    if not target or not candidates:
+        return 0
+    scores = [fuzzy_match_score(target, c) for c in candidates]
+    best_score = max(scores) if scores else 0
+    return best_score if best_score >= threshold else 0
 
 def calculate_compatibility_score(profile: InvestorProfile, enterprise: Enterprise):
     score = 0
     reasons = []
 
-    # 1. Industry match
-    if enterprise.industry in (profile.industries or []):
+    # Fuzzy industry match
+    industry_score = fuzzy_list_match_score(enterprise.industry, profile.industries)
+    if industry_score:
         score += 25
-        reasons.append(f"Industry match: {enterprise.industry}")
+        reasons.append(f"Industry match: {enterprise.industry} ({industry_score}%)")
 
-    # 2. Stage match
-    if enterprise.stage in (profile.investment_stages or []):
+    # Fuzzy stage match
+    stage_score = fuzzy_list_match_score(enterprise.stage, profile.investment_stages)
+    if stage_score:
         score += 20
-        reasons.append(f"Stage match: {enterprise.stage}")
+        reasons.append(f"Stage match: {enterprise.stage} ({stage_score}%)")
 
-    # 3. Investment range match (use financials.funding_goal or fallback to funding_needed)
-    target = None
-    if isinstance(enterprise.financials, dict):
-        target = enterprise.financials.get('funding_goal')
-    if not target and enterprise.funding_needed:
-        target = float(enterprise.funding_needed)
+    # Fuzzy location match
+    location_score = fuzzy_list_match_score(enterprise.location, profile.geographic_focus)
+    if location_score:
+        score += 10
+        reasons.append(f"Location match: {enterprise.location} ({location_score}%)")
 
-    if target and profile.investment_range_min and profile.investment_range_max:
-        if profile.investment_range_min <= target <= profile.investment_range_max:
+    # Funding range match
+    financials = enterprise.financials
+    if isinstance(financials, str):
+        try:
+            financials = json.loads(financials)
+        except Exception:
+            financials = {}
+
+    target_funding = financials.get('funding_goal') if financials else None
+    if not target_funding and enterprise.funding_needed:
+        target_funding = float(enterprise.funding_needed)
+
+    if (
+        target_funding and
+        profile.investment_range_min is not None and
+        profile.investment_range_max is not None
+    ):
+        if profile.investment_range_min <= target_funding <= profile.investment_range_max:
             score += 20
-            reasons.append(f"Funding goal in range: ${target:,.0f}")
+            reasons.append(f"Funding goal in range: ${target_funding:,.0f}")
 
-    # 4. Geographic focus match (precise and correct match reason)
-    matched_geo = next(
-        (g for g in profile.geographic_focus if g.lower().strip() == (enterprise.owner.location or "").lower().strip()),
-        None
-    )
-    if matched_geo:
-        score += 10
-        reasons.append(f"Geographic match: {matched_geo}")
-
-
-    # 5. Risk tolerance logic
+    # Risk tolerance mapping
     risk_map = {
-        'high': ['idea', 'mvp'],
-        'medium': ['early_revenue', 'growth'],
-        'low': ['scale', 'mature']
+        'high': ['idea', 'pre-seed', 'mvp'],
+        'medium': ['early', 'seed', 'series a'],
+        'low': ['growth', 'series b', 'series c', 'ipo', 'scale']
     }
-    if profile.risk_tolerance and enterprise.stage in risk_map.get(profile.risk_tolerance, []):
-        score += 10
-        reasons.append(f"Risk tolerance match: {profile.risk_tolerance} vs. {enterprise.stage}")
+    if profile.risk_tolerance and enterprise.stage:
+        stage = enterprise.stage.lower()
+        tolerance = profile.risk_tolerance.lower()
+        if stage in risk_map.get(tolerance, []):
+            score += 10
+            reasons.append(f"Risk match: {tolerance} aligns with stage {enterprise.stage}")
 
-    # 6. Advisory support
+    # Advisory availability
     if profile.advisory_availability and enterprise.is_actively_fundraising:
         score += 5
-        reasons.append("Strategic support opportunity")
+        reasons.append("Strategic support available")
 
     return min(score, 100), reasons
-
 
 @matching_bp.route('/matches', methods=['GET'])
 def generate_and_return_matches():
@@ -101,48 +120,51 @@ def generate_and_return_matches():
     if err:
         return err, status
 
+    now = datetime.utcnow()
     matches = []
-    threshold = 30
+
+    # RATE LIMITING: only refresh every 10 minutes per user
+    latest_match = MatchRecommendation.query.filter_by(user_id=user.id).order_by(MatchRecommendation.generated_at.desc()).first()
+    if latest_match and (now - latest_match.generated_at) < timedelta(minutes=MATCH_REFRESH_INTERVAL_MINUTES):
+        should_refresh = False
+    else:
+        should_refresh = True
 
     if user.role == 'investor' and user.investor_profile:
         profile = user.investor_profile
 
-        enterprises = Enterprise.query \
-            .join(Users, Users.id == Enterprise.user_id) \
-            .filter(Enterprise.is_actively_fundraising == True) \
-            .all()
+        if should_refresh:
+            enterprises = Enterprise.query \
+                .join(Users, Users.id == Enterprise.user_id) \
+                .filter(Enterprise.is_actively_fundraising == True) \
+                .all()
 
-        for e in enterprises:
-            score, reasons = calculate_compatibility_score(profile, e)
-            existing = MatchRecommendation.query.filter_by(
-                user_id=user.id,
-                enterprise_id=e.id
-            ).first()
+            for e in enterprises:
+                score, reasons = calculate_compatibility_score(profile, e)
+                existing = MatchRecommendation.query.filter_by(user_id=user.id, enterprise_id=e.id).first()
 
-            if score >= threshold:
-                if not existing:
-                    rec = MatchRecommendation(
-                        user_id=user.id,
-                        enterprise_id=e.id,
-                        score=score,
-                        reasons=reasons,
-                        generated_at=datetime.utcnow()
-                    )
-                    db.session.add(rec)
-            elif existing:
-                db.session.delete(existing)
+                if score >= MATCH_SCORE_THRESHOLD:
+                    if not existing:
+                        db.session.add(MatchRecommendation(
+                            user_id=user.id,
+                            enterprise_id=e.id,
+                            score=score,
+                            reasons=reasons,
+                            generated_at=now
+                        ))
+                elif existing:
+                    db.session.delete(existing)
 
-        db.session.commit()
+            db.session.commit()
 
-        # Return current matches for this investor
-        cached = MatchRecommendation.query \
+        cached_matches = MatchRecommendation.query \
             .filter_by(user_id=user.id, status='pending') \
             .join(Enterprise, Enterprise.id == MatchRecommendation.enterprise_id) \
             .filter(Enterprise.is_actively_fundraising == True) \
             .order_by(MatchRecommendation.score.desc()) \
             .all()
 
-        for rec in cached:
+        for rec in cached_matches:
             e = rec.enterprise
             e_data = e.to_dict(include_founder=True)
             e_data['funding_goal'] = (
@@ -161,39 +183,35 @@ def generate_and_return_matches():
         if not enterprise:
             return jsonify({'error': 'Entrepreneur must have an enterprise'}), 400
 
-        investors = Users.query \
-            .filter_by(role='investor') \
-            .join(InvestorProfile, Users.id == InvestorProfile.user_id) \
-            .all()
+        if should_refresh:
+            investors = Users.query \
+                .filter_by(role='investor') \
+                .join(InvestorProfile, Users.id == InvestorProfile.user_id) \
+                .all()
 
-        for investor in investors:
-            profile = investor.investor_profile
-            if not profile:
-                continue
+            for investor in investors:
+                profile = investor.investor_profile
+                if not profile:
+                    continue
 
-            score, reasons = calculate_compatibility_score(profile, enterprise)
-            existing = MatchRecommendation.query.filter_by(
-                user_id=investor.id,
-                enterprise_id=enterprise.id
-            ).first()
+                score, reasons = calculate_compatibility_score(profile, enterprise)
+                existing = MatchRecommendation.query.filter_by(user_id=investor.id, enterprise_id=enterprise.id).first()
 
-            if score >= threshold:
-                if not existing:
-                    rec = MatchRecommendation(
-                        user_id=investor.id,
-                        enterprise_id=enterprise.id,
-                        score=score,
-                        reasons=reasons,
-                        generated_at=datetime.utcnow()
-                    )
-                    db.session.add(rec)
-            elif existing:
-                db.session.delete(existing)
+                if score >= MATCH_SCORE_THRESHOLD:
+                    if not existing:
+                        db.session.add(MatchRecommendation(
+                            user_id=investor.id,
+                            enterprise_id=enterprise.id,
+                            score=score,
+                            reasons=reasons,
+                            generated_at=now
+                        ))
+                elif existing:
+                    db.session.delete(existing)
 
-        db.session.commit()
+            db.session.commit()
 
-        # Return current matches for this enterprise
-        cached = MatchRecommendation.query \
+        cached_matches = MatchRecommendation.query \
             .join(Enterprise, Enterprise.id == MatchRecommendation.enterprise_id) \
             .join(Users, Users.id == MatchRecommendation.user_id) \
             .filter(
@@ -203,11 +221,10 @@ def generate_and_return_matches():
             .order_by(MatchRecommendation.score.desc()) \
             .all()
 
-        for rec in cached:
+        for rec in cached_matches:
             investor_user = Users.query.get(rec.user_id)
             if not investor_user:
                 continue
-
             matches.append({
                 'investor': {
                     'first_name': investor_user.first_name or "Unnamed",
@@ -224,4 +241,8 @@ def generate_and_return_matches():
     else:
         return jsonify({'error': 'Only investors or entrepreneurs with valid profiles can access matches'}), 403
 
-    return jsonify({'matches': matches}), 200
+    return jsonify({
+        'matches': matches,
+        'last_refreshed': latest_match.generated_at.isoformat() if latest_match else None,
+        'refreshed_now': should_refresh
+    }), 200

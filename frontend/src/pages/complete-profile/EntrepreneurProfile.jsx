@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import LocationAutocomplete from "../cmpnnts/Location";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -23,7 +24,9 @@ export default function EntrepreneurProfile() {
     funding_needed: "",
     pitch_deck_url: "",
     demo_url: "",
-    financials: "",
+    financials: {
+      funding_goal: "",
+    },
     target_market: "",
     business_model: "",
     problem_solved: "",
@@ -34,6 +37,63 @@ export default function EntrepreneurProfile() {
   });
   const [error, setError] = useState(null);
 
+  const industryOptions = [
+    "Technology",
+    "Healthcare",
+    "Finance",
+    "Education",
+    "Agriculture",
+    "Energy",
+    "E-commerce",
+    "Transportation",
+    "Media",
+    "Real Estate",
+  ];
+
+  const stageOptions = [
+    "Idea",
+    "Pre-seed",
+    "Seed",
+    "Series A",
+    "Series B",
+    "Series C",
+    "Growth",
+    "IPO",
+  ];
+
+  const teamSizeOptions = [
+    "1-2",
+    "3-5",
+    "6-10",
+    "11-20",
+    "21-50",
+    "51-100",
+    "100+",
+  ];
+
+  const targetMarketOptions = [
+    "Young Adults (18-25)",
+    "Adults (26-40)",
+    "Middle-aged (41-60)",
+    "Seniors (60+)",
+    "Parents",
+    "Students",
+    "Working Professionals",
+    "High-Income Individuals",
+    "Budget-Conscious Consumers",
+    "Urban Residents",
+    "Rural Communities",
+    "Tech-Savvy Users",
+    "Non-Tech-Savvy Users",
+    "Health-Conscious Consumers",
+    "Sustainability-Focused Consumers",
+    "Small Businesses",
+    "Enterprises",
+    "Freelancers / Creators",
+    "B2B (Business to Business)",
+    "B2C (Business to Consumer)",
+  ];
+
   useEffect(() => {
     const fetchStripeMeta = async () => {
       try {
@@ -42,7 +102,8 @@ export default function EntrepreneurProfile() {
           error: userError,
         } = await supabase.auth.getUser();
         if (userError) throw userError;
-        const { stripe_customer_id, stripe_subscription_id, plan } = user.user_metadata || {};
+        const { stripe_customer_id, stripe_subscription_id, plan } =
+          user.user_metadata || {};
         setForm((prev) => ({
           ...prev,
           stripe_customer_id,
@@ -77,13 +138,23 @@ export default function EntrepreneurProfile() {
       } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("No session token found");
 
+      // Prepare the payload, parsing numbers as needed
+      const payload = {
+        ...form,
+        team_size: parseInt(form.team_size) || null,
+        funding_needed: parseFloat(form.funding_needed) || null,
+        financials: {
+          funding_goal: parseFloat(form.financials.funding_goal) || null,
+        },
+      };
+
       const res = await fetch("http://127.0.0.1:8000/enterprise/profile", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -110,27 +181,143 @@ export default function EntrepreneurProfile() {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Entrepreneur Profile</CardTitle>
-          <p className="text-sm text-gray-500">Help investors understand your company</p>
+          <CardTitle className="text-2xl font-bold">
+            Entrepreneur Profile
+          </CardTitle>
+          <p className="text-sm text-gray-500">
+            Help investors understand your company
+          </p>
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input name="name" placeholder="Company Name" value={form.name} onChange={handleChange} />
-            <Input name="industry" placeholder="Industry" value={form.industry} onChange={handleChange} />
-            <Input name="stage" placeholder="Stage (e.g. Pre-seed, Series A)" value={form.stage} onChange={handleChange} />
-            <Input name="location" placeholder="Company Location" value={form.location} onChange={handleChange} />
-            <Input name="team_size" placeholder="Team Size" type="number" value={form.team_size} onChange={handleChange} />
-            <Input name="funding_needed" placeholder="Funding Needed (USD)" type="number" value={form.funding_needed} onChange={handleChange} />
-            <Input name="pitch_deck_url" placeholder="Pitch Deck URL" value={form.pitch_deck_url} onChange={handleChange} />
-            <Input name="demo_url" placeholder="Demo URL" value={form.demo_url} onChange={handleChange} />
-            <Input name="financials" placeholder="Financial Summary" value={form.financials} onChange={handleChange} />
-            <Input name="target_market" placeholder="Target Market" value={form.target_market} onChange={handleChange} />
-            <textarea name="business_model" placeholder="Business Model" rows={3} className="w-full border rounded-md p-2" value={form.business_model} onChange={handleChange} />
-            <textarea name="problem_solved" placeholder="Problem Solved" rows={3} className="w-full border rounded-md p-2" value={form.problem_solved} onChange={handleChange} />
-            <textarea name="traction_summary" placeholder="Traction Summary" rows={3} className="w-full border rounded-md p-2" value={form.traction_summary} onChange={handleChange} />
+            <Input
+              name="name"
+              placeholder="Company Name"
+              value={form.name}
+              onChange={handleChange}
+            />
+            <select
+              name="industry"
+              value={form.industry}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Industry</option>
+              {industryOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <select
+              name="stage"
+              value={form.stage}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Stage</option>
+              {stageOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+
+            <LocationAutocomplete
+              value={form.location}
+              onChange={(value) => setForm({ ...form, location: value })}
+            />
+            <select
+              name="team_size"
+              value={form.team_size}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Team Size</option>
+              {teamSizeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <Input
+              name="funding_needed"
+              placeholder="Funding Needed (USD)"
+              type="number"
+              value={form.funding_needed}
+              onChange={handleChange}
+            />
+            <Input
+              name="pitch_deck_url"
+              placeholder="Pitch Deck URL"
+              value={form.pitch_deck_url}
+              onChange={handleChange}
+            />
+            <Input
+              name="demo_url"
+              placeholder="Demo URL"
+              value={form.demo_url}
+              onChange={handleChange}
+            />
+            <Input
+              name="funding_goal"
+              type="number"
+              placeholder="Funding Goal (USD)"
+              value={form.financials.funding_goal}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  financials: {
+                    ...prev.financials,
+                    funding_goal: e.target.value,
+                  },
+                }))
+              }
+            />
+            <select
+              name="target_market"
+              value={form.target_market}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select Target Market</option>
+              {targetMarketOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <textarea
+              name="business_model"
+              placeholder="Business Model"
+              rows={3}
+              className="w-full border rounded-md p-2"
+              value={form.business_model}
+              onChange={handleChange}
+            />
+            <textarea
+              name="problem_solved"
+              placeholder="Problem Solved"
+              rows={3}
+              className="w-full border rounded-md p-2"
+              value={form.problem_solved}
+              onChange={handleChange}
+            />
+            <textarea
+              name="traction_summary"
+              placeholder="Traction Summary"
+              rows={3}
+              className="w-full border rounded-md p-2"
+              value={form.traction_summary}
+              onChange={handleChange}
+            />
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
+              {loading ? (
+                <Loader2 className="animate-spin h-5 w-5" />
+              ) : (
+                "Submit"
+              )}
             </Button>
           </form>
         </CardContent>

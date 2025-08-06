@@ -57,6 +57,7 @@ function MatchFeed() {
           matches.map((match, index) => (
             <MatchCard
               key={index}
+              user_id={match.investor.id}
               founder={`${match.investor.first_name} ${match.investor.last_name}`}
               company_name={match.investor.investor_type || "Investor"}
               description={`Interested in ${match.investor.industries?.join(", ") || "various sectors"}`}

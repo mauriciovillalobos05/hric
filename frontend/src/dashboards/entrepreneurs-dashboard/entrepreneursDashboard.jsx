@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
+import DashboardShortcuts from "./dashboard-components/components/directAccessButtons/DashboardShortcuts.jsx";
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
-import InvestorMatches from "./dashboard-components/components/matchComponents/matchFeed.jsx";
-import PipelineSummary from "./dashboard-components/components/pipelineSummary.jsx";
+import MatchesDashboard from "./dashboard-components/components/matchComponents/matchesDashboard.jsx";
 import ProfileStatusCard from "./dashboard-components/components/profileStatusComponents/profileStatusCard.jsx";
 import EventList from "../../pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import RegisterModal from "../../pages/eventShowcaseComponents/registerModal.jsx";
@@ -12,7 +12,11 @@ import DocumentStatus from "./dashboard-components/components/documentStatus.jsx
 import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
+import ScrollToTopButton from "@/components/scrollToTopButton.jsx";
 import defaultAvatar from "../../assets/default_user_image.png";
+
+// Matching algorithm
+import { StartupMatcher } from "./dashboard-components/components/matchComponents/components/algorithms/matchingAlgorithm.js"; // Import the matching algorithm
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -29,13 +33,11 @@ function EntrepreneurDashboard() {
   const [messages, setMessages] = useState([]);
   const [matches, setMatches] = useState([]);
   const [events, setEvents] = useState([]);
-  const [pipelineData, setPipelineData] = useState({
-    contacted: 0,
-    interested: 0,
-    scheduled: 0,
-    diligence: 0,
-    termSheet: 0,
-  });
+  const [selectedStartups, setSelectedStartups] = useState([]);
+
+  // Simulation results state
+  const [simulationResults, setSimulationResults] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -121,19 +123,81 @@ function EntrepreneurDashboard() {
           .eq("enterprise_id", userId)
           .order("compatibility_score", { ascending: false });
 
-        const formattedMatches = (matchData || []).map((m) => ({
-          founder: m.investor.company_name,
-          company_name: m.investor.company_name,
-          description: `Invests in ${m.investor.industry}`,
-          location: m.investor.location,
-          profile_image: m.investor.profile_image,
-          match_score: m.compatibility_score,
-          match_reasons: m.match_reasons ? m.match_reasons.split(",") : [],
-          funding_stage: m.investor.funding_stage,
-          industry: m.investor.industry,
-        }));
+        // Format matches (UNLINED LATER)
 
+        // const formattedMatches = (matchData || []).map((m) => ({
+        //   founder: m.investor.company_name,
+        //   company_name: m.investor.company_name,
+        //   description: `Invests in ${m.investor.industry}`,
+        //   location: m.investor.location,
+        //   profile_image: m.investor.profile_image,
+        //   match_score: m.compatibility_score,
+        //   match_reasons: m.match_reasons ? m.match_reasons.split(",") : [],
+        //   funding_stage: m.investor.funding_stage,
+        //   industry: m.investor.industry,
+        // }));
+
+        // For now, use mock data
+        const formattedMatches = [
+          {
+            founder: "Mock Capital",
+            startup_name: "Mock Capital",
+            description: "Invests in AI and SaaS",
+            location: "San Francisco, CA",
+            profile_image: null,
+            match_score: 88,
+            match_reasons: [
+              "Aligned industry",
+              "Strong traction",
+              "Good team fit",
+            ],
+            funding_stage: "Seed",
+            industry: "Technology",
+
+            // Correct attributes for algorithm
+            fundingSeeking: 2000000,
+            percent_technical_founders: 80,
+            percent_previous_exits: 20,
+            revenue_scalar: 0.8, // (normalized value between 0–1)
+            number_of_employees: 30,
+            currently_raising: true,
+            roi_category: "High",
+
+            // Optional display fields for card
+            monthly_revenue: 50000,
+            valuation: 20000000,
+            current_investors: ["Accel", "Sequoia"],
+          },
+          {
+            founder: "SeedSpark",
+            startup_name: "SeedSpark",
+            description: "Invests in early-stage consumer startups",
+            location: "New York, NY",
+            profile_image: null,
+            match_score: 72,
+            match_reasons: ["Geographic alignment", "Early-stage focus"],
+            funding_stage: "Pre-Seed",
+            industry: "Consumer",
+
+            fundingSeeking: 1500000,
+            percent_technical_founders: 60,
+            percent_previous_exits: 0,
+            revenue_scalar: 0.3,
+            number_of_employees: 10,
+            currently_raising: false,
+            roi_category: "Medium",
+
+            monthly_revenue: 10000,
+            valuation: 5000000,
+            current_investors: ["First Round"],
+          },
+        ];
+        
+        // Set matches state
         setMatches(formattedMatches);
+        if (formattedMatches.length > 0) {
+          setSelectedStartups([formattedMatches[0]]);
+        }
 
         // Fetch events
         const { data: eventsData, error: eventsErr } = await supabase
@@ -178,14 +242,6 @@ function EntrepreneurDashboard() {
             read: false,
           },
         ]);
-
-        setPipelineData({
-          contacted: 3,
-          interested: 2,
-          scheduled: 1,
-          diligence: 0,
-          termSheet: 0,
-        });
       } catch (err) {
         console.error("Entrepreneur dashboard fetch error:", err);
       } finally {
@@ -275,6 +331,35 @@ function EntrepreneurDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
+  //
+  // Example matcher function
+  //
+  const matcher = new StartupMatcher();
+
+  const runSimulation = (startup) => {
+    const filters = {
+      roiWeight: 25,
+      technicalFoundersWeight: 20,
+      previousExitsWeight: 15,
+      revenueWeight: 20,
+      teamSizeWeight: 10,
+      currentlyRaisingWeight: 10,
+      stagePreference: "All",
+      locationPreference: "All",
+      industryPreference: "All",
+    };
+    return matcher.runMonteCarloSimulation(startup, filters);
+  };
+
+  useEffect(() => {
+    if (selectedStartups.length > 0) {
+      const result = runSimulation(selectedStartups[0]);
+      setSimulationResults(result);
+    } else {
+      setSimulationResults(null);
+    }
+  }, [selectedStartups]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-600">
@@ -286,38 +371,73 @@ function EntrepreneurDashboard() {
 
   return (
     <>
-      <HeaderBar
-        entrepreneurName={entrepreneurName}
-        notifications={notifications}
-        profileImage={avatarUrl}
-        messages={messages}
-        onOpenChat={handleOpenChat}
-      />
-      <PipelineSummary data={pipelineData} />
-      <ProfileStatusCard
-        completion={completion}
-        missingSections={missingSections}
-        onUpdateClick={() => navigate("/complete-profile/entrepreneur")}
-      />
-      <InvestorMatches matches={matches} onToggleFavorite={() => {}} />
-      <EventList
-        events={events}
-        role={userRole}
-        onRegisterClick={handleOpenRegister}
-      />
-      <RegisterModal
-        open={showRegisterModal}
-        onClose={() => {
-          setShowRegisterModal(false);
-        }}
-        event={selectedEvent}
-        role={userRole}
-        onSubmit={handleSubmitRegistration}
-      />
-      <DocumentStatus />
-      <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
-      <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
-      <InsightsPanel role={userRole} /> {/* Optional */}
+      <div id="dashboard-top">
+        <HeaderBar
+          entrepreneurName={entrepreneurName}
+          notifications={notifications}
+          profileImage={avatarUrl}
+          messages={messages}
+          onOpenChat={handleOpenChat}
+        />
+      </div>
+
+      {/* Shortcut navigation */}
+      <div className="px-6 mt-4">
+        <DashboardShortcuts />
+      </div>
+
+      {/* Profile Completion */}
+      <div id="profile-completion">
+        <ProfileStatusCard
+          completion={completion}
+          missingSections={missingSections}
+          onUpdateClick={() => navigate("/complete-profile/entrepreneur")}
+        />
+      </div>
+
+      {/* Matches */}
+      <div id="matches">
+        <MatchesDashboard
+          matchedStartups={matches}
+          selectedStartups={selectedStartups}
+          onStartupSelect={(startup) => setSelectedStartups([startup])}
+          simulationResults={simulationResults} // optionally add if available
+        />
+      </div>
+
+      {/* Events */}
+      <div id="events">
+        <EventList
+          events={events}
+          role={userRole}
+          onRegisterClick={handleOpenRegister}
+        />
+        <RegisterModal
+          open={showRegisterModal}
+          onClose={() => setShowRegisterModal(false)}
+          event={selectedEvent}
+          role={userRole}
+          onSubmit={handleSubmitRegistration}
+        />
+      </div>
+
+      {/* Documents */}
+      <div id="documents">
+        <DocumentStatus />
+      </div>
+
+      {/* Messages */}
+      <div id="messages">
+        <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
+        <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
+      </div>
+
+      {/* Insights */}
+      <div id="insights">
+        <InsightsPanel role={userRole} />
+      </div>
+
+      <ScrollToTopButton />
     </>
   );
 }

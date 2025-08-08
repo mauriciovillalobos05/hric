@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import HomePage from "./dashboards/HomePage";
 import MainUserDashboard from "./dashboards/MainUserDashboard";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";

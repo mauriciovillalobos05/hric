@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button.jsx";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
 import DashboardShortcuts from "./dashboard-components/components/directAccessButtons/DashboardShortcuts.jsx";
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
@@ -10,13 +11,18 @@ import EventList from "../../pages/eventShowcaseComponents/eventShowcaseAccess.j
 import RegisterModal from "../../pages/eventShowcaseComponents/registerModal.jsx";
 import DocumentStatus from "./dashboard-components/components/documentStatus.jsx";
 import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
-import { Loader2 } from "lucide-react";
+import FilterPanel from "./dashboard-components/components/matchComponents/components/FilterPanel/FilterPanel.jsx";
+import { Loader2, RefreshCw } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import ScrollToTopButton from "@/components/scrollToTopButton.jsx";
 import defaultAvatar from "../../assets/default_user_image.png";
+import transformFilters from "./dashboard-components/components/matchComponents/components/FilterPanel/transformFilters.jsx";
 
 // Matching algorithm
-import { StartupMatcher } from "./dashboard-components/components/matchComponents/components/algorithms/matchingAlgorithm.js"; // Import the matching algorithm
+import { InvestorMatcher } from "./dashboard-components/components/matchComponents/components/algorithms/matchingAlgorithm.js"; // Import the matching algorithm
+
+// Mock matches
+import mockMatches from "./dashboard-components/components/matchComponents/mockInvestors.js"; // Import mock matches if needed
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -31,9 +37,11 @@ function EntrepreneurDashboard() {
   const [notifications, setNotifications] = useState([]);
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [matches, setMatches] = useState([]);
   const [events, setEvents] = useState([]);
-  const [selectedStartups, setSelectedStartups] = useState([]);
+
+  // Matches state
+  const [matchedInvestors, setMatchedInvestors] = useState([]);
+  const [selectedInvestors, setSelectedInvestors] = useState([]);
 
   // Simulation results state
   const [simulationResults, setSimulationResults] = useState(null);
@@ -41,9 +49,95 @@ function EntrepreneurDashboard() {
   const [loading, setLoading] = useState(true);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [filters, setFilters] = useState({
+    userType: "vc",
+    stagePreference: "All",
+    locationPreference: "All",
+    industryPreference: "All",
+    checkSizeRange: "All",
+
+    // sliders
+    roiWeight: 20,
+    technicalFoundersWeight: 15,
+    previousExitsWeight: 15,
+    revenueWeight: 20,
+    teamSizeWeight: 15,
+    currentlyRaisingWeight: 15,
+  });
 
   const navigate = useNavigate();
 
+  const handleFilterChange = (newFilters) => {
+    setFilters(newFilters);
+    // Optional: run matching logic here based on updated filters
+  };
+
+  //
+  // Example matcher function
+  //
+
+  useEffect(() => {
+    const matcher = new InvestorMatcher();
+    const simFilters = transformFilters(filters);
+
+    const filteredAndScored = mockMatches
+      .filter((inv) => {
+        const matchesStage =
+          filters.stagePreference === "All" ||
+          inv.stage.includes(filters.stagePreference);
+        const matchesIndustry =
+          filters.industryPreference === "All" ||
+          inv.industries.includes(filters.industryPreference);
+        const matchesLocation =
+          filters.locationPreference === "All" ||
+          inv.location.includes(filters.locationPreference);
+        return matchesStage && matchesIndustry && matchesLocation;
+      })
+      .map((investor) => {
+        const sim = matcher.runMonteCarloSimulation(investor, simFilters);
+        return {
+          ...investor,
+          matchScore: sim.mean, // or baseScore if you want the raw weighted average
+          simulation: sim,
+        };
+      });
+
+    setMatchedInvestors(filteredAndScored);
+  }, [filters]);
+
+  const handleInvestorSelect = (investor) => {
+    setSelectedInvestors((prev) => {
+      const isSelected = prev.some((i) => i.id === investor.id);
+      const updated = isSelected
+        ? prev.filter((i) => i.id !== investor.id)
+        : [...prev, investor];
+
+      if (!isSelected && updated.length === 1) {
+        setSimulationResults(investor.simulation); // ✅ set it here!
+      }
+
+      return updated;
+    });
+  };
+
+  // Reset filters to default
+  const resetFilters = () => {
+    setFilters({
+      userType: "vc",
+      stagePreference: "All",
+      locationPreference: "All",
+      industryPreference: "All",
+      checkSizeRange: "All",
+      roiWeight: 20,
+      technicalFoundersWeight: 15,
+      previousExitsWeight: 15,
+      revenueWeight: 20,
+      teamSizeWeight: 15,
+      currentlyRaisingWeight: 15,
+    });
+  };
+
+  // Fetch user, enterprise, messages, matches, events on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -138,66 +232,8 @@ function EntrepreneurDashboard() {
         // }));
 
         // For now, use mock data
-        const formattedMatches = [
-          {
-            founder: "Mock Capital",
-            startup_name: "Mock Capital",
-            description: "Invests in AI and SaaS",
-            location: "San Francisco, CA",
-            profile_image: null,
-            match_score: 88,
-            match_reasons: [
-              "Aligned industry",
-              "Strong traction",
-              "Good team fit",
-            ],
-            funding_stage: "Seed",
-            industry: "Technology",
 
-            // Correct attributes for algorithm
-            fundingSeeking: 2000000,
-            percent_technical_founders: 80,
-            percent_previous_exits: 20,
-            revenue_scalar: 0.8, // (normalized value between 0–1)
-            number_of_employees: 30,
-            currently_raising: true,
-            roi_category: "High",
-
-            // Optional display fields for card
-            monthly_revenue: 50000,
-            valuation: 20000000,
-            current_investors: ["Accel", "Sequoia"],
-          },
-          {
-            founder: "SeedSpark",
-            startup_name: "SeedSpark",
-            description: "Invests in early-stage consumer startups",
-            location: "New York, NY",
-            profile_image: null,
-            match_score: 72,
-            match_reasons: ["Geographic alignment", "Early-stage focus"],
-            funding_stage: "Pre-Seed",
-            industry: "Consumer",
-
-            fundingSeeking: 1500000,
-            percent_technical_founders: 60,
-            percent_previous_exits: 0,
-            revenue_scalar: 0.3,
-            number_of_employees: 10,
-            currently_raising: false,
-            roi_category: "Medium",
-
-            monthly_revenue: 10000,
-            valuation: 5000000,
-            current_investors: ["First Round"],
-          },
-        ];
-        
         // Set matches state
-        setMatches(formattedMatches);
-        if (formattedMatches.length > 0) {
-          setSelectedStartups([formattedMatches[0]]);
-        }
 
         // Fetch events
         const { data: eventsData, error: eventsErr } = await supabase
@@ -331,35 +367,6 @@ function EntrepreneurDashboard() {
     setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
   };
 
-  //
-  // Example matcher function
-  //
-  const matcher = new StartupMatcher();
-
-  const runSimulation = (startup) => {
-    const filters = {
-      roiWeight: 25,
-      technicalFoundersWeight: 20,
-      previousExitsWeight: 15,
-      revenueWeight: 20,
-      teamSizeWeight: 10,
-      currentlyRaisingWeight: 10,
-      stagePreference: "All",
-      locationPreference: "All",
-      industryPreference: "All",
-    };
-    return matcher.runMonteCarloSimulation(startup, filters);
-  };
-
-  useEffect(() => {
-    if (selectedStartups.length > 0) {
-      const result = runSimulation(selectedStartups[0]);
-      setSimulationResults(result);
-    } else {
-      setSimulationResults(null);
-    }
-  }, [selectedStartups]);
-
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white text-gray-600">
@@ -396,13 +403,29 @@ function EntrepreneurDashboard() {
       </div>
 
       {/* Matches */}
-      <div id="matches">
-        <MatchesDashboard
-          matchedStartups={matches}
-          selectedStartups={selectedStartups}
-          onStartupSelect={(startup) => setSelectedStartups([startup])}
-          simulationResults={simulationResults} // optionally add if available
-        />
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* LEFT: Filter Panel */}
+        <div className="w-full lg:w-1/4 space-y-4 sticky top-6">
+          <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-center"
+            onClick={resetFilters}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Reset Filters
+          </Button>
+        </div>
+
+        {/* RIGHT: Dashboard */}
+        <div className="w-full lg:w-3/4">
+          <MatchesDashboard
+            matchedInvestors={matchedInvestors}
+            selectedInvestors={selectedInvestors}
+            onInvestorSelect={handleInvestorSelect}
+            simulationResults={simulationResults}
+          />
+        </div>
       </div>
 
       {/* Events */}

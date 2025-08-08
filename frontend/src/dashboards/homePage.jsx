@@ -503,11 +503,11 @@ function HomePage() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" variant="secondary" className="text-lg px-8 py-4">
+            <Button size="lg" variant="secondary" className="text-lg px-8 py-4" onClick={() => handleNavigate('register')}>
               <Building className="mr-2 h-5 w-5" />
               Join as Investor
             </Button>
-            <Button size="lg" variant="outline" className="text-lg px-8 py-4 text-white border-white hover:bg-white hover:text-blue-600">
+            <Button size="lg" variant="outline" className="text-lg px-8 py-4 border-white hover:bg-white hover:text-blue-600" onClick={() => handleNavigate('register')}>
               <Zap className="mr-2 h-5 w-5" />
               Apply as Entrepreneur
             </Button>

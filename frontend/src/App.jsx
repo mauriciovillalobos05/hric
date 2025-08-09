@@ -14,7 +14,7 @@ import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import EmailPendingSecondary from "./pages/emailPendingSecondary";
 import EmailConfirmationSent from "./pages/emailConfirmationSent";
 import ProfilePreview from "./pages/profileViews/ProfilePreview";
-
+import { Loader2 } from "lucide-react"; 
 // import Subscription from "./pages/Subscription"; // assuming you have this actual component
 import { createClient } from "@supabase/supabase-js";
 
@@ -157,9 +157,9 @@ function App() {
         <Route
           path="/dashboard/investor"
           element={
-            <ProtectedRoute isAllowed={user?.role === "investor"}>
+            //<ProtectedRoute isAllowed={user?.role === "investor"}>
               <InvestorsDashboard />
-            </ProtectedRoute>
+            //</ProtectedRoute>
           }
         />
 

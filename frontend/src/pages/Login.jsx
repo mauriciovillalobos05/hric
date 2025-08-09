@@ -48,9 +48,10 @@ function Login() {
       return;
     }
 
-    const role = userProfile.user_type;
-
-    // Navigate based on role
+    const role = userProfile.role;
+    console.log("User role:", role);
+    console.log("User data", userProfile);
+    // Navigate based on role 
     if (role === "investor") {
       navigate("/dashboard/investor");
     } else if (role === "entrepreneur") {
@@ -59,7 +60,7 @@ function Login() {
       navigate("/dashboard/user");
     }
   };
-
+  
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 px-4">
       <Card className="w-full max-w-md shadow-lg border-0">

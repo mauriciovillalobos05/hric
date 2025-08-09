@@ -38,7 +38,7 @@ function InvestorsDashboard() {
           .from("user")
           .select("first_name, last_name, profile_image")
           .eq("id", user.id)
-          .maybeSingle();
+          .single();
 
         if (profile && !profileError) {
           let profileImg = "/default_user_image.png";
@@ -58,21 +58,21 @@ function InvestorsDashboard() {
           { data: notificationsData },
           { data: messagesData },
         ] = await Promise.all([
-          supabase.from("match_recommendation").select("*").eq("user_id", user.id),
+          supabase.from("matches").select("*").eq("investor_id", user.id),
           supabase
             .from("event")
             .select("*")
             .order("date", { ascending: true }),
           supabase
-            .from("notification")
-            .select("title, created_at, read")
+            .from("notifications")
+            .select("title, time, read")
             .eq("user_id", user.id)
-            .order("created_at", { ascending: false }),
+            .order("time", { ascending: false }),
           supabase
-            .from("message")
-            .select("sender_id, message_type, created_at, is_read")
+            .from("messages")
+            .select("sender, preview, time, read")
             .eq("receiver_id", user.id)
-            .order("created_at", { ascending: false }),
+            .order("time", { ascending: false }),
         ]);
 
         setMatches(matchesData || []);

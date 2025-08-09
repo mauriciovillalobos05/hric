@@ -1,267 +1,318 @@
-from flask import Blueprint, request, jsonify
-from datetime import datetime
-from ..models.user import db, Users, Subscription
-import stripe
-import os
-import requests
+# src/routes/subscriptions.py
 
-subscriptions_bp = Blueprint('subscriptions', __name__)
+from datetime import datetime, timezone
+import os
+
+import requests
+import stripe
+from flask import Blueprint, jsonify, request
+from sqlalchemy import or_
+
+from src.extensions import db
+from src.models.user import User, Subscription, UserPlan, Enterprise, EnterpriseUser
+
+subscriptions_bp = Blueprint("subscriptions", __name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
-# Supabase JWT auth
+
+# --------------------- Auth --------------------- #
+
 def require_auth():
+    """Validate Supabase JWT and return (user, token, error_tuple_or_None)."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        return None, jsonify({"error": "Missing or invalid Authorization header"}), 401
+        return None, None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
 
     token = auth_header.split(" ")[1]
-
     try:
         resp = requests.get(
             f"{SUPABASE_URL}/auth/v1/user",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "apikey": SUPABASE_ANON_KEY,
-            },
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
+            timeout=15,
         )
         if resp.status_code != 200:
-            return None, jsonify({"error": "Invalid or expired token"}), 401
-
-        supabase_user = resp.json()
-        user_id = supabase_user["id"]
+            return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
+        user_id = resp.json()["id"]
     except Exception as e:
-        return None, jsonify({"error": f"Token verification failed: {str(e)}"}), 500
+        return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
 
-    user = Users.query.get(user_id)
+    user = User.query.get(user_id)
     if not user:
-        return None, jsonify({"error": "User not found in database"}), 404
+        return None, None, (jsonify({"error": "User not found in database"}), 404)
 
-    return user, None, None
+    return user, token, None
 
-PLAN_CONFIG = {
-    "investor_basic": {
-        "name": "Investor Basic",
-        "price_id": os.getenv("STRIPE_PRICE_INVESTOR_BASIC"),
-    },
-    "investor_premium": {
-        "name": "Investor Premium",
-        "price_id": os.getenv("STRIPE_PRICE_INVESTOR_PREMIUM"),
-    },
-    "investor_vip": {
-        "name": "Investor VIP",
-        "price_id": os.getenv("STRIPE_PRICE_INVESTOR_VIP"),
-    },
-    "entrepreneur_free": {
-        "name": "Entrepreneur Free",
-        "price_id": None,
-    },
-    "entrepreneur_premium": {
-        "name": "Entrepreneur Premium",
-        "price_id": os.getenv("STRIPE_PRICE_ENTREPRENEUR_PREMIUM"),
-    },
-    "entrepreneur_enterprise": {
-        "name": "Entrepreneur Enterprise",
-        "price_id": os.getenv("STRIPE_PRICE_ENTREPRENEUR_ENTERPRISE"),
-    },
-}
 
-@subscriptions_bp.route('/plans', methods=['GET'])
+# --------------------- Helpers --------------------- #
+
+def _active_or_trialing():
+    return ("active", "trialing")
+
+def _user_success_path(user: User) -> str:
+    """
+    Heuristic success path based on memberships:
+    - investor membership -> /dashboard/investor
+    - startup membership  -> /dashboard/entrepreneur
+    - none                -> /complete-profile
+    """
+    # collect user's active enterprises
+    active_memberships = [m for m in user.enterprise_memberships if m.is_active]
+    enterprise_ids = [m.enterprise_id for m in active_memberships]
+    if not enterprise_ids:
+        return "/complete-profile"
+
+    ents = Enterprise.query.filter(Enterprise.id.in_(enterprise_ids)).all()
+    has_investor = any(e.enterprise_type in ("investor", "both") for e in ents)
+    has_startup = any(e.enterprise_type in ("startup", "both") for e in ents)
+
+    if has_investor:
+        return "/dashboard/investor"
+    if has_startup:
+        return "/dashboard/entrepreneur"
+    return "/dashboard"
+
+def _plan_to_dict(plan: UserPlan):
+    return {
+        "id": str(plan.id),
+        "plan_key": plan.plan_key,
+        "name": plan.name,
+        "description": plan.description,
+        "monthly_price": float(plan.monthly_price or 0),
+        "annual_price": float(plan.annual_price or 0),
+        "features": plan.features or [],
+        "is_active": bool(plan.is_active),
+        "stripe_product_id": plan.stripe_product_id,
+        "stripe_price_id_monthly": plan.stripe_price_id_monthly,
+        "stripe_price_id_annual": plan.stripe_price_id_annual,
+    }
+
+def _sub_to_dict(sub: Subscription, include_plan=True):
+    data = {
+        "id": str(sub.id),
+        "status": sub.status,
+        "stripe_status_raw": sub.stripe_status_raw,
+        "start_date": sub.start_date.isoformat() if sub.start_date else None,
+        "end_date": sub.end_date.isoformat() if sub.end_date else None,
+        "current_period_start": sub.current_period_start.isoformat() if sub.current_period_start else None,
+        "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+        "cancel_at_period_end": sub.cancel_at_period_end,
+        "auto_renew": sub.auto_renew,
+        "amount": float(sub.amount or 0),
+        "currency": sub.currency,
+        "payment_frequency": sub.payment_frequency,
+        "stripe_subscription_id": sub.stripe_subscription_id,
+        "stripe_customer_id": sub.stripe_customer_id,
+        "stripe_price_id": sub.stripe_price_id,
+        "stripe_product_id": sub.stripe_product_id,
+        "default_payment_method_id": sub.default_payment_method_id,
+        "collection_method": sub.collection_method,
+        "cancelled_at": sub.cancelled_at.isoformat() if sub.cancelled_at else None,
+    }
+    if include_plan and sub.user_plan_id:
+        plan = UserPlan.query.get(sub.user_plan_id)
+        data["plan"] = _plan_to_dict(plan) if plan else None
+    return data
+
+
+# --------------------- Routes --------------------- #
+
+@subscriptions_bp.route("/plans", methods=["GET"])
 def get_plans():
-    return jsonify({
-        'plans': [
-            {'key': key, 'name': value['name'], 'price_id': value['price_id']}
-            for key, value in PLAN_CONFIG.items()
-        ]
-    }), 200
+    """List active plans from the DB (UserPlan)."""
+    plans = UserPlan.query.filter_by(is_active=True).order_by(UserPlan.name.asc()).all()
+    return jsonify({"plans": [_plan_to_dict(p) for p in plans]}), 200
 
-@subscriptions_bp.route('/checkout', methods=['POST'])
+
+@subscriptions_bp.route("/checkout", methods=["POST"])
 def create_checkout_session():
+    """
+    Create a Stripe Checkout Session for a given plan_key and billing_interval.
+    body: { "plan_key": "...", "billing_interval": "monthly"|"annual" }
+    """
+    user, token, err = require_auth()
+    if err:
+        return err
+
+    if not FRONTEND_URL:
+        return jsonify({"error": "FRONTEND_URL not set in environment"}), 500
+
+    data = request.get_json(silent=True) or {}
+    plan_key = data.get("plan_key")
+    interval = (data.get("billing_interval") or "monthly").lower()
+
+    if interval not in ("monthly", "annual"):
+        return jsonify({"error": "billing_interval must be 'monthly' or 'annual'"}), 400
+
+    plan = UserPlan.query.filter_by(plan_key=plan_key, is_active=True).first()
+    if not plan:
+        return jsonify({"error": "Invalid or inactive plan_key"}), 400
+
+    # choose stripe price id based on interval
+    price_id = plan.stripe_price_id_monthly if interval == "monthly" else plan.stripe_price_id_annual
+    if not price_id:
+        # treat as free/internal plan: no stripe checkout
+        return jsonify({"redirect_url": f"{FRONTEND_URL}{_user_success_path(user)}"}), 200
+
+    # Create Stripe customer if we don’t yet have one (optional)
+    customer_id = user.stripe_customer_id
     try:
-        user, error, status = require_auth()
-        if error:
-            return error, status
+        if not customer_id:
+            customer = stripe.Customer.create(email=user.email)
+            customer_id = customer["id"]
+            user.stripe_customer_id = customer_id
+            db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to create Stripe customer: {str(e)}"}), 500
 
-        data = request.json
-        plan_key = data.get("plan")
-        if not plan_key or plan_key not in PLAN_CONFIG:
-            return jsonify({'error': 'Invalid plan key'}), 400
+    # Success path heuristic
+    success_path = _user_success_path(user)
 
-        frontend_url = os.getenv("FRONTEND_URL")
-        if not frontend_url:
-            return jsonify({'error': 'FRONTEND_URL not set in environment'}), 500
-
-        price_id = PLAN_CONFIG[plan_key]["price_id"]
-
-        if not price_id:
-            # Handle free plan
-            success_path = "dashboard/entrepreneur" if user.role == "entrepreneur" else "dashboard/investor"
-            return jsonify({'redirect_url': frontend_url + success_path}), 200
-
-        # Check if user already has a subscription (to adjust success path, not to update)
-        existing_sub = Subscription.query.filter_by(user_id=user.id).first()
-
-        if user.role == 'investor':
-            success_path = "dashboard/investor" if existing_sub else "complete-profile/investor"
-        elif user.role == 'entrepreneur':
-            success_path = "dashboard/entrepreneur" if existing_sub or user.enterprises else "complete-profile/entrepreneur"
-        else:
-            return jsonify({'error': 'Unsupported user role'}), 400
-
-        # Create new Stripe Checkout session (always)
-        stripe_session = stripe.checkout.Session.create(
-            success_url=frontend_url + success_path,
-            cancel_url=frontend_url + "/subscription/cancel",
-            payment_method_types=["card"],
+    try:
+        session = stripe.checkout.Session.create(
             mode="subscription",
-            customer_email=user.email,
+            success_url=f"{FRONTEND_URL}{success_path}",
+            cancel_url=f"{FRONTEND_URL}/subscription/cancel",
+            payment_method_types=["card"],
+            customer=customer_id,
             line_items=[{"price": price_id, "quantity": 1}],
             metadata={
                 "user_id": str(user.id),
+                "plan_key": plan.plan_key,
                 "price_id": price_id,
-                "plan_key": plan_key
-            }
+                "interval": interval,
+            },
         )
-
-        return jsonify({'checkout_url': stripe_session.url}), 200
-
+        return jsonify({"checkout_url": session.url}), 200
     except Exception as e:
-        print("Stripe checkout error:", e)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-@subscriptions_bp.route('/current', methods=['GET'])
+
+@subscriptions_bp.route("/current", methods=["GET"])
 def get_user_subscription():
-    user, error, status = require_auth()
-    if error: return error, status
+    """Return the user's current active/trialing subscription, if any."""
+    user, _, err = require_auth()
+    if err:
+        return err
 
-    if not user.subscription:
-        return jsonify({'tier': 'free'}), 200
-
-    return jsonify({'subscription': user.subscription.to_dict()}), 200
-
-@subscriptions_bp.route('/change', methods=['POST'])
-def change_plan():
-    user, error, status = require_auth()
-    if error: return error, status
-
-    data = request.json
-    new_tier = data.get("plan")
-    if new_tier not in PLAN_CONFIG:
-        return jsonify({'error': 'Invalid plan selected'}), 400
-
-    enterprise_id = user.enterprises[0].id if user.role == "entrepreneur" and user.enterprises else None
-
-    if user.subscription:
-        user.subscription.tier = new_tier
-        user.subscription.status = 'active'
-        user.subscription.started_at = datetime.utcnow()
-    else:
-        new_sub = Subscription(
-            user_id=user.id,
-            enterprise_id=enterprise_id,
-            tier=new_tier,
-            status='active',
-            started_at=datetime.utcnow()
+    sub = (
+        Subscription.query.filter(
+            Subscription.user_id == user.id,
+            Subscription.status.in_(_active_or_trialing()),
         )
-        db.session.add(new_sub)
+        .order_by(
+            Subscription.current_period_end.desc().nullslast(),
+            Subscription.start_date.desc().nullslast(),
+        )
+        .first()
+    )
 
+    if not sub:
+        return jsonify({"subscription": None}), 200
+
+    return jsonify({"subscription": _sub_to_dict(sub)}), 200
+
+
+@subscriptions_bp.route("/change", methods=["POST"])
+def change_plan():
+    """
+    Change to a FREE/internal plan immediately (no Stripe).
+    For paid plans, the client should call /checkout instead.
+    body: { "plan_key": "...", "billing_interval": "monthly"|"annual" }
+    """
+    user, _, err = require_auth()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    plan_key = data.get("plan_key")
+    interval = (data.get("billing_interval") or "monthly").lower()
+    if interval not in ("monthly", "annual"):
+        return jsonify({"error": "billing_interval must be 'monthly' or 'annual'"}), 400
+
+    plan = UserPlan.query.filter_by(plan_key=plan_key, is_active=True).first()
+    if not plan:
+        return jsonify({"error": "Invalid or inactive plan_key"}), 400
+
+    # If plan has a Stripe price id, force the client to use /checkout
+    price_id = plan.stripe_price_id_monthly if interval == "monthly" else plan.stripe_price_id_annual
+    if price_id:
+        return jsonify({"error": "Use /subscriptions/checkout for paid plans"}), 400
+
+    # Create/replace a local subscription row for the free plan
+    # Close any existing active/trialing subs
+    now = datetime.now(timezone.utc)
+    subs = Subscription.query.filter(Subscription.user_id == user.id, Subscription.status.in_(_active_or_trialing())).all()
+    for s in subs:
+        s.status = "canceled"
+        s.cancelled_at = now
+        s.end_date = now
+
+    new_sub = Subscription(
+        user_id=user.id,
+        user_plan_id=plan.id,
+        status="active",
+        start_date=now,
+        current_period_start=now,
+        current_period_end=None,
+        amount=0,
+        currency="USD",
+        payment_frequency=interval if interval in ("monthly", "annual") else None,
+        auto_renew=False,
+        cancel_at_period_end=False,
+        stripe_status_raw="",
+    )
+    db.session.add(new_sub)
     db.session.commit()
-    return jsonify({'message': 'Plan updated successfully'}), 200
 
-@subscriptions_bp.route('/cancel', methods=['POST'])
+    return jsonify({"message": "Plan changed", "subscription": _sub_to_dict(new_sub)}), 200
+
+
+@subscriptions_bp.route("/cancel", methods=["POST"])
 def cancel_subscription():
-    user, error, status = require_auth()
-    if error: return error, status
+    """
+    Cancel the user's current subscription.
+    - If it's a Stripe sub, request cancel_at_period_end=True at Stripe; local row is updated.
+    - If it's a free/local sub, mark canceled immediately.
+    """
+    user, _, err = require_auth()
+    if err:
+        return err
 
-    if user.subscription:
-        user.subscription.status = 'cancelled'
-        user.subscription.canceled_at = datetime.utcnow()
-        db.session.commit()
+    sub = (
+        Subscription.query.filter(
+            Subscription.user_id == user.id,
+            Subscription.status.in_(_active_or_trialing()),
+        )
+        .order_by(
+            Subscription.current_period_end.desc().nullslast(),
+            Subscription.start_date.desc().nullslast(),
+        )
+        .first()
+    )
+    if not sub:
+        return jsonify({"message": "No active subscription"}), 200
 
-    return jsonify({'message': 'Subscription cancelled'}), 200
-
-@subscriptions_bp.route('/stripe/webhook', methods=['POST'])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get('stripe-signature')
-    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    now = datetime.now(timezone.utc)
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        if sub.stripe_subscription_id:
+            # set cancel_at_period_end at Stripe; webhook will finalize status later
+            stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
+            sub.cancel_at_period_end = True
+            # Keep status as-is until webhook updates it; just persist the intent.
+        else:
+            # Local/free sub: cancel immediately
+            sub.status = "canceled"
+            sub.cancelled_at = now
+            sub.end_date = now
+
+        db.session.commit()
+        return jsonify({"message": "Subscription cancellation scheduled" if sub.stripe_subscription_id else "Subscription cancelled"}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
-    if event['type'] == 'checkout.session.completed':
-        session_data = event['data']['object']
-        metadata = session_data.get("metadata", {})
-        user_id = metadata.get("user_id")
-        price_id = metadata.get("price_id")
-
-        user = Users.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        tier = next((key for key, cfg in PLAN_CONFIG.items() if cfg["price_id"] == price_id), None)
-        if not tier:
-            return jsonify({'error': 'Invalid price_id'}), 400
-
-        stripe_subscription_id = session_data.get("subscription")
-        stripe_customer_id = session_data.get("customer")
-
-        try:
-            stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
-        except Exception as e:
-            return jsonify({'error': f'Stripe subscription retrieval failed: {str(e)}'}), 400
-
-        enterprise_id = user.enterprises[0].id if user.role == "entrepreneur" and user.enterprises else None
-
-        existing = Subscription.query.filter_by(
-            user_id=user.id,
-            stripe_subscription_id=stripe_subscription_id
-        ).first()
-
-        if not existing:
-            new_sub = Subscription(
-                user_id=user.id,
-                enterprise_id=enterprise_id,
-                tier=tier,
-                status=stripe_sub.status,
-                stripe_customer_id=stripe_customer_id,
-                stripe_subscription_id=stripe_subscription_id,
-                started_at=datetime.utcfromtimestamp(stripe_sub.current_period_start),
-                ended_at=datetime.utcfromtimestamp(stripe_sub.current_period_end)
-            )
-            db.session.add(new_sub)
-            db.session.commit()
-
-    elif event['type'] == 'customer.subscription.updated':
-        sub_data = event['data']['object']
-        stripe_subscription_id = sub_data['id']
-        new_status = sub_data['status']
-        new_start = datetime.utcfromtimestamp(sub_data['current_period_start'])
-        new_end = datetime.utcfromtimestamp(sub_data['current_period_end'])
-        new_price_id = sub_data['items']['data'][0]['price']['id']
-
-        tier = next((key for key, cfg in PLAN_CONFIG.items() if cfg["price_id"] == new_price_id), None)
-
-        subscription = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
-        if subscription:
-            subscription.status = new_status
-            subscription.tier = tier
-            subscription.started_at = new_start
-            subscription.ended_at = new_end
-            db.session.commit()
-
-    elif event['type'] == 'customer.subscription.deleted':
-        sub_data = event['data']['object']
-        stripe_subscription_id = sub_data['id']
-
-        subscription = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
-        if subscription:
-            subscription.status = 'cancelled'
-            subscription.ended_at = datetime.utcnow()
-            db.session.commit()
-
-    return jsonify({'received': True}), 200
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500

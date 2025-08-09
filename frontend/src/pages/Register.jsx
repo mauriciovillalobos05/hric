@@ -30,6 +30,7 @@ export default function Register() {
   const [role, setRole] = useState(defaultRole);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -59,7 +60,7 @@ export default function Register() {
     if (error) {
       setError(error.message);
     } else {
-      navigate("/");
+      navigate("/email-confirmation-sent");
     }
     setLoading(false);
   };
@@ -175,7 +176,11 @@ export default function Register() {
               )}
             </Button>
           </form>
-
+          {successMessage && (
+            <div className="bg-green-100 text-green-800 px-4 py-2 rounded-md mb-4 border border-green-300">
+              {successMessage}
+            </div>
+          )}
           <p className="text-sm text-center text-gray-600 mt-6">
             Already have an account?{" "}
             <button

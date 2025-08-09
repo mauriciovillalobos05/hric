@@ -9,11 +9,14 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
-import ConfirmEmail from "./pages/emailConfirmation";
-import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import InvestorProfile from "./pages/complete-profile/InvestorProfile";
+import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
+import EmailPendingSecondary from "./pages/emailPendingSecondary";
+import EmailConfirmationSent from "./pages/emailConfirmationSent";
+import ProfilePreview from "./pages/profileViews/ProfilePreview";
+
+// import Subscription from "./pages/Subscription"; // assuming you have this actual component
 import { createClient } from "@supabase/supabase-js";
-import Subscription from "./dashboards/investors-dashboard/dashboard-components/components/headerBarComponents/components/Subscription.jsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -29,7 +32,7 @@ function App() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
+      console.log("Access token:", session?.access_token);
       if (session?.user) {
         const { data: userProfile, error } = await supabase
           .from("user")
@@ -53,80 +56,123 @@ function App() {
   if (loading) return null; // or a spinner/loading screen
 
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/confirm-email" element={<ConfirmEmail />} />
+    <>
+      <Routes>
+        {/* Public routes */}
+        {/* Home, Login and Register routes */}
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
-      <Route
-        path="/onboarding"
-        element={
-          <ProtectedRoute>
-            <Onboarding />
-          </ProtectedRoute>
-        }
-      />
+        {/* Secondary Email pending confirmation route */}
+        <Route
+          path="/email-pending-secondary"
+          element={
+            <ProtectedRoute>
+              <EmailPendingSecondary />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route path="/complete-profile/investor" element={
-        <ProtectedRoute>
-          <InvestorProfile />
-        </ProtectedRoute>} 
-      />
-      
-      <Route path="/complete-profile/entrepreneur" element={
-        <ProtectedRoute>
-          <EntrepreneurProfile />
-        </ProtectedRoute>} 
-      />
+        {/* Email confirmation route */}
+        <Route
+          path="/email-confirmation-sent"
+          element={<EmailConfirmationSent />}
+        />
 
-      <Route
-        path="/profile-settings"
-        element={
-          <ProtectedRoute>
-            <ProfileSettings />
-          </ProtectedRoute>
-        }
-      />
+        {/* Onboarding and profile completion routes */}
+        <Route
+          path="/onboarding"
+          element={
+            <ProtectedRoute>
+              <Onboarding />
+            </ProtectedRoute>
+          }
+        />
 
+        {/* Investor profile completion */}
+        <Route
+          path="/complete-profile/investor"
+          element={
+            <ProtectedRoute>
+              <InvestorProfile />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* FOR LATER once we have the subscription page */}
-      <Route
+        {/* Entrepreneur profile completion */}
+        <Route
+          path="/complete-profile/entrepreneur"
+          element={
+            <ProtectedRoute>
+              <EntrepreneurProfile />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/profile-settings"
+          element={
+            <ProtectedRoute>
+              <ProfileSettings />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* View a profile */}
+        <Route
+          path="/profile/:userId"
+          element={
+            <ProtectedRoute>
+              <ProfilePreview />
+            </ProtectedRoute>
+          }
+        />
+        {/* FOR LATER once we have the subscription page */}
+        {/* <Route
         path="/subscription"
         element={
           <ProtectedRoute>
             <Subscription />
           </ProtectedRoute>
         }
-      /> 
+      /> */}
 
-      <Route
-        path="/dashboard/user"
-        element={
-          <ProtectedRoute>
-            <MainUserDashboard role={user?.role || ""} />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/dashboard/user"
+          element={
+            <ProtectedRoute>
+              {user?.role ? (
+                <MainUserDashboard role={user.role} />
+              ) : (
+                <div className="min-h-screen flex items-center justify-center text-gray-600">
+                  <Loader2 className="h-8 w-8 animate-spin mr-2" />
+                  <span>Loading your role...</span>
+                </div>
+              )}
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/dashboard/investor"
-        element={
-          <ProtectedRoute isAllowed={user?.role === "investor"}>
-            <InvestorsDashboard />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/dashboard/investor"
+          element={
+            <ProtectedRoute isAllowed={user?.role === "investor"}>
+              <InvestorsDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route
-        path="/dashboard/entrepreneur"
-        element={
-          <ProtectedRoute isAllowed={user?.role === "entrepreneur"}>
-            <EntrepreneurDashboard />
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+        <Route
+          path="/dashboard/entrepreneur"
+          element={
+            <ProtectedRoute isAllowed={user?.role === "entrepreneur"}>
+              <EntrepreneurDashboard />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </>
   );
 }
 

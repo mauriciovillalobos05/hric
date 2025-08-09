@@ -9,9 +9,9 @@ const supabase = createClient(
 );
 
 function HeaderBar({
-  investorName,
+  investorName = "Investor",
   notifications = [],
-  profileImage,
+  profileImage = "/default_user_image.png",
   messages = [],
   onOpenChat = () => {},
 }) {
@@ -19,12 +19,12 @@ function HeaderBar({
   const [chatBarOpen, setChatBarIsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
-
   const menuRef = useRef(null);
+
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
   const unreadMessagesCount = messages.filter((n) => !n.read).length;
 
-  // Close dropdowns when clicking outside
+  // Handle outside click to close dropdowns
   useEffect(() => {
     function handleClickOutside(event) {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -37,31 +37,24 @@ function HeaderBar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Logout function
+  // Supabase logout
   const handleLogout = async () => {
-    
-    // 1. Update role metadata while still logged in
     const { error: updateError } = await supabase.auth.updateUser({
-      data: { role: "" }, // or null / undefined
+      data: { role: "" },
     });
 
-    const { data: { user } } = await supabase.auth.getUser();
-    console.log("Role before logout:", user?.user_metadata?.role);
-    
     if (updateError) {
-      console.error("Failed to clear role:", updateError);
-      return; // optional: stop if update fails
+      console.error("Failed to clear role metadata:", updateError);
     }
 
-    // 2. Now sign out
     const { error: logoutError } = await supabase.auth.signOut();
     if (logoutError) {
       console.error("Logout failed:", logoutError);
     }
 
-    // 3. Go to homepage
     navigate("/");
   };
+
   return (
     <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b relative">
       {/* Greeting */}
@@ -72,9 +65,9 @@ function HeaderBar({
         <p className="text-sm text-gray-500">Your investment dashboard</p>
       </div>
 
-      {/* Right Controls */}
+      {/* Right controls */}
       <div className="flex items-center space-x-6" ref={menuRef}>
-        {/* Message Icon */}
+        {/* Messages */}
         <div
           className="relative cursor-pointer"
           onClick={() => {
@@ -89,26 +82,21 @@ function HeaderBar({
           )}
         </div>
 
-        {/* Chat Dropdown */}
         {chatBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">
-              Recent Messages
-            </div>
+            <div className="p-4 border-b font-semibold text-gray-700">Recent Messages</div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {messages.length === 0 ? (
-                <li className="p-4 text-gray-500 text-sm text-center">
-                  No messages
-                </li>
+                <li className="p-4 text-gray-500 text-sm text-center">No messages</li>
               ) : (
                 messages.map((msg, index) => (
                   <li
                     key={index}
-                    className="p-4 hover:bg-gray-50 text-sm"
+                    className="p-4 hover:bg-gray-50 text-sm cursor-pointer"
                     onClick={() => {
                       onOpenChat(msg);
                       setChatBarIsOpen(false);
-                    }} // trigger chat open
+                    }}
                   >
                     <p className="font-medium text-gray-800">{msg.sender}</p>
                     <p className="text-gray-600">{msg.preview}</p>
@@ -120,7 +108,7 @@ function HeaderBar({
           </div>
         )}
 
-        {/* Notification Bell */}
+        {/* Notifications */}
         <div
           className="relative cursor-pointer"
           onClick={() => {
@@ -135,17 +123,12 @@ function HeaderBar({
           )}
         </div>
 
-        {/* Notification Dropdown */}
         {notificationBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">
-              Notifications
-            </div>
+            <div className="p-4 border-b font-semibold text-gray-700">Notifications</div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {notifications.length === 0 ? (
-                <li className="p-4 text-gray-500 text-sm text-center">
-                  No notifications
-                </li>
+                <li className="p-4 text-gray-500 text-sm text-center">No notifications</li>
               ) : (
                 notifications.map((notif, index) => (
                   <li key={index} className="p-4 hover:bg-gray-50 text-sm">
@@ -158,7 +141,7 @@ function HeaderBar({
           </div>
         )}
 
-        {/* Profile Image */}
+        {/* Avatar */}
         <div
           className="relative cursor-pointer"
           onClick={() => {
@@ -169,11 +152,9 @@ function HeaderBar({
         >
           <img
             src={profileImage}
-            alt=""
+            alt="Investor avatar"
             className="h-10 w-10 rounded-full object-cover border border-gray-300"
           />
-
-          {/* Dropdown Menu */}
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border z-50">
               <ul className="py-1 text-sm text-gray-700">

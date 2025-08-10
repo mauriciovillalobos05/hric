@@ -3,7 +3,9 @@ from decimal import Decimal
 from enum import Enum
 import uuid
 from typing import Optional, List, Dict, Any
-
+from sqlalchemy import event, CheckConstraint, Index
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, INET  # you already use these
+from sqlalchemy import Numeric  # if not already imported as Numeric
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, Date,
     Numeric, ForeignKey, CheckConstraint, UniqueConstraint,
@@ -12,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID, INET, JSONB, DATERANGE
 from sqlalchemy.orm import declarative_base, relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
+import sqlalchemy as sa
 
 # ---------------------------------------
 # Base
@@ -997,3 +1000,373 @@ class AIFieldVenue(Base, UUIDMixin, TimestampMixin):
     hourly_rate = Column(Numeric(10, 2))
     is_available= Column(Boolean, default=True)
     contact_info= Column(JSONB, default=dict)
+
+# =====================================================
+# VERIFICATION CORE MODELS
+# =====================================================
+
+class VerificationLevel(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verification_levels"
+
+    name = Column(String(50), nullable=False)
+    user_type = Column(String(20), nullable=False)  # investor|startup
+    price_usd = Column(Numeric(10, 2), nullable=False, default=0)
+    features = Column(JSONB, nullable=False, default=dict)
+    processing_time_days = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        CheckConstraint("user_type IN ('investor','startup')", name="check_vlevel_user_type"),
+    )
+
+    verifications = relationship("Verification", back_populates="verification_level")
+
+
+class Verification(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verifications"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    verification_level_id = Column(UUID(as_uuid=True), ForeignKey("verification_levels.id"), nullable=False, index=True)
+    user_type = Column(String(20), nullable=False)  # investor|startup
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    risk_score = Column(Integer)
+    risk_factors = Column(JSONB, default=list)
+    verification_data = Column(JSONB, default=dict)
+    third_party_results = Column(JSONB, default=dict)
+    rejection_reason = Column(Text)
+    expires_at = Column(DateTime(timezone=True))
+    initiated_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    completed_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("user_type IN ('investor','startup')", name="check_ver_user_type"),
+        CheckConstraint("status IN ('pending','in_progress','under_review','approved','rejected','expired')", name="check_ver_status"),
+        CheckConstraint("risk_score IS NULL OR (risk_score >= 0 AND risk_score <= 100)", name="check_ver_risk_score"),
+        Index("idx_verifications_user_level", "user_id", "verification_level_id"),
+    )
+
+    verification_level = relationship("VerificationLevel", back_populates="verifications")
+    documents = relationship("VerificationDocument", back_populates="verification", cascade="all, delete-orphan")
+    assignments = relationship("VerificationAssignment", back_populates="verification", cascade="all, delete-orphan")
+    steps = relationship("VerificationStep", back_populates="verification", cascade="all, delete-orphan")
+    audit_logs = relationship("VerificationAuditLog", back_populates="verification", cascade="all, delete-orphan")
+    notifications = relationship("VerificationNotification", back_populates="verification", cascade="all, delete-orphan")
+    external_calls = relationship("ExternalServiceCall", back_populates="verification", cascade="all, delete-orphan")
+
+    user = relationship("User")  # lightweight; no back_populates to avoid import loops
+
+
+class DocumentType(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "document_types"
+
+    name = Column(String(100), nullable=False)
+    user_type = Column(String(20), nullable=False)  # investor|startup
+    verification_level = Column(String(50), nullable=False)
+    is_required = Column(Boolean, nullable=False, default=True)
+    accepted_formats = Column(ARRAY(String), default=["pdf", "jpg", "jpeg", "png"])
+    max_file_size_mb = Column(Integer, default=50)
+    description = Column(Text)
+    validation_rules = Column(JSONB, default=dict)
+
+    __table_args__ = (
+        CheckConstraint("user_type IN ('investor','startup')", name="check_doc_user_type"),
+    )
+
+    documents = relationship("VerificationDocument", back_populates="document_type")
+
+
+class VerificationDocument(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verification_documents"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_type_id = Column(UUID(as_uuid=True), ForeignKey("document_types.id"), nullable=False, index=True)
+    file_name = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size_bytes = Column(Integer, nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    ocr_text = Column(Text)
+    extracted_data = Column(JSONB, default=dict)
+    validation_results = Column(JSONB, default=dict)
+    rejection_reason = Column(Text)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    processed_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','processing','approved','rejected')", name="check_document_status"),
+    )
+
+    verification = relationship("Verification", back_populates="documents")
+    document_type = relationship("DocumentType", back_populates="documents")
+
+# =====================================================
+# THIRD-PARTY PROVIDER MARKETPLACE MODELS
+# =====================================================
+
+class ProviderCategory(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "provider_categories"
+
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text)
+    icon = Column(String(50))
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    providers = relationship("ServiceProvider", back_populates="category")
+
+
+class ServiceProvider(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "service_providers"
+
+    company_name = Column(String(200), nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("provider_categories.id"), nullable=False, index=True)
+    contact_email = Column(String(255), nullable=False)
+    contact_phone = Column(String(50))
+    website_url = Column(String(500))
+    address = Column(JSONB, default=dict)
+    geographic_coverage = Column(ARRAY(String), default=["global"])
+    languages_supported = Column(ARRAY(String), default=["en"])
+    certifications = Column(JSONB, default=list)
+    pricing_model = Column(String(50), default="per_verification")
+    base_price_usd = Column(Numeric(10, 2))
+    rating = Column(Numeric(3, 2))
+    total_reviews = Column(Integer, default=0)
+    verification_count = Column(Integer, default=0)
+    average_turnaround_hours = Column(Integer)
+    is_verified = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    api_endpoint = Column(String(500))
+    api_key_hash = Column(String(255))
+    webhook_url = Column(String(500))
+    onboarding_completed_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("rating IS NULL OR (rating >= 0 AND rating <= 5)", name="check_provider_rating"),
+    )
+
+    category = relationship("ProviderCategory", back_populates="providers")
+    services = relationship("ProviderService", back_populates="provider", cascade="all, delete-orphan")
+    assignments = relationship("VerificationAssignment", back_populates="provider")
+    reviews = relationship("ProviderReview", back_populates="provider")
+
+
+class ProviderService(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "provider_services"
+
+    provider_id = Column(UUID(as_uuid=True), ForeignKey("service_providers.id", ondelete="CASCADE"), nullable=False, index=True)
+    service_name = Column(String(200), nullable=False)
+    service_type = Column(String(100), nullable=False)
+    description = Column(Text)
+    price_usd = Column(Numeric(10, 2))
+    turnaround_hours = Column(Integer)
+    requirements = Column(JSONB, default=dict)
+    deliverables = Column(JSONB, default=dict)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    provider = relationship("ServiceProvider", back_populates="services")
+    assignments = relationship("VerificationAssignment", back_populates="service")
+
+
+class VerificationAssignment(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verification_assignments"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider_id = Column(UUID(as_uuid=True), ForeignKey("service_providers.id"), nullable=False, index=True)
+    service_id = Column(UUID(as_uuid=True), ForeignKey("provider_services.id"), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="assigned", index=True)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    results = Column(JSONB, default=dict)
+    provider_notes = Column(Text)
+    cost_usd = Column(Numeric(10, 2))
+
+    __table_args__ = (
+        CheckConstraint("status IN ('assigned','in_progress','completed','failed','cancelled')", name="check_assignment_status"),
+    )
+
+    verification = relationship("Verification", back_populates="assignments")
+    provider = relationship("ServiceProvider", back_populates="assignments")
+    service = relationship("ProviderService", back_populates="assignments")
+
+
+class ProviderReview(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "provider_reviews"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id"), nullable=False, index=True)
+    provider_id = Column(UUID(as_uuid=True), ForeignKey("service_providers.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    rating = Column(Integer, nullable=False)
+    review_text = Column(Text)
+    response_time_rating = Column(Integer)
+    quality_rating = Column(Integer)
+    communication_rating = Column(Integer)
+    is_verified_review = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint("rating >= 1 AND rating <= 5", name="check_review_rating"),
+        CheckConstraint("response_time_rating IS NULL OR (response_time_rating >= 1 AND response_time_rating <= 5)", name="check_resp_time_rating"),
+        CheckConstraint("quality_rating IS NULL OR (quality_rating >= 1 AND quality_rating <= 5)", name="check_quality_rating"),
+        CheckConstraint("communication_rating IS NULL OR (communication_rating >= 1 AND communication_rating <= 5)", name="check_comm_rating"),
+    )
+
+    provider = relationship("ServiceProvider", back_populates="reviews")
+    user = relationship("User")
+
+# =====================================================
+# THIRD-PARTY API INTEGRATION MODELS
+# =====================================================
+
+class ExternalService(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "external_services"
+
+    service_name = Column(String(100), nullable=False, unique=True)
+    service_type = Column(String(50), nullable=False)
+    api_endpoint = Column(String(500), nullable=False)
+    api_version = Column(String(20))
+    supported_countries = Column(ARRAY(String), default=["global"])
+    supported_document_types = Column(ARRAY(String), default=[])
+    pricing_per_check = Column(Numeric(10, 2))
+    average_response_time_seconds = Column(Integer)
+    success_rate = Column(Numeric(5, 2))
+    is_active = Column(Boolean, nullable=False, default=True)
+    configuration = Column(JSONB, default=dict)
+
+    service_calls = relationship("ExternalServiceCall", back_populates="service")
+
+
+class ExternalServiceCall(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "external_service_calls"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    service_id = Column(UUID(as_uuid=True), ForeignKey("external_services.id"), nullable=False, index=True)
+    call_type = Column(String(100), nullable=False)
+    request_data = Column(JSONB, default=dict)
+    response_data = Column(JSONB, default=dict)
+    status = Column(String(30), nullable=False)
+    response_time_ms = Column(Integer)
+    cost_usd = Column(Numeric(10, 2))
+    error_message = Column(Text)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','success','failed','timeout')", name="check_call_status"),
+    )
+
+    verification = relationship("Verification", back_populates="external_calls")
+    service = relationship("ExternalService", back_populates="service_calls")
+
+# =====================================================
+# WORKFLOW AND AUTOMATION MODELS
+# =====================================================
+
+class VerificationStep(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verification_steps"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    step_name = Column(String(100), nullable=False)
+    step_order = Column(Integer, nullable=False)
+    status = Column(String(30), nullable=False, default="pending")
+    assigned_to = Column(String(100))  # 'system', 'provider_id', 'manual_review'
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    results = Column(JSONB, default=dict)
+    error_message = Column(Text)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','in_progress','completed','failed','skipped')", name="check_step_status"),
+    )
+
+    verification = relationship("Verification", back_populates="steps")
+
+
+class VerificationRule(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verification_rules"
+
+    name = Column(String(200), nullable=False)
+    user_type = Column(String(20), nullable=False)
+    verification_level = Column(String(50), nullable=False)
+    trigger_conditions = Column(JSONB, nullable=False, default=dict)
+    actions = Column(JSONB, nullable=False, default=dict)
+    priority = Column(Integer, nullable=False, default=100)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        CheckConstraint("user_type IN ('investor','startup')", name="check_rule_user_type"),
+    )
+
+# =====================================================
+# COMPLIANCE AND AUDIT MODELS
+# =====================================================
+
+class VerificationAuditLog(Base, UUIDMixin):
+    __tablename__ = "verification_audit_log"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(String(100), nullable=False)
+    actor_type = Column(String(50), nullable=False)  # 'user','system','provider','admin'
+    actor_id = Column(String(255))
+    old_values = Column(JSONB, default=dict)
+    new_values = Column(JSONB, default=dict)
+    ip_address = Column(INET)
+    user_agent = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    verification = relationship("Verification", back_populates="audit_logs")
+
+# (Optional) rolling/periodic summaries
+class ComplianceReport(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "compliance_reports"
+
+    report_type = Column(String(100), nullable=False)
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+    generated_by = Column(UUID(as_uuid=True))  # users.id (not FK to keep simple)
+    report_data = Column(JSONB, nullable=False, default=dict)
+    file_path = Column(String(500))
+    status = Column(String(30), nullable=False, default="pending")
+
+# =====================================================
+# NOTIFICATIONS
+# =====================================================
+
+class VerificationNotification(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "verification_notifications"
+
+    verification_id = Column(UUID(as_uuid=True), ForeignKey("verifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    recipient_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    notification_type = Column(String(100), nullable=False)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    channels = Column(ARRAY(String), default=["email"])  # email,sms,push,in_app
+    sent_at = Column(DateTime(timezone=True))
+    read_at = Column(DateTime(timezone=True))
+    notif_metadata = Column("metadata", JSONB, default=dict)
+
+    verification = relationship("Verification", back_populates="notifications")
+    recipient = relationship("User")
+
+# =====================================================
+# SIDE EFFECT: When a verification is approved, mark the owner enterprise verified
+# =====================================================
+@event.listens_for(Verification, "after_update")
+def _sync_enterprise_verified(mapper, connection, target):
+    if target.status != "approved":
+        return
+    ent_tbl = Enterprise.__table__
+    eu_tbl = EnterpriseUser.__table__
+    subq = (
+        sa.select(eu_tbl.c.enterprise_id)
+        .select_from(eu_tbl.join(ent_tbl, eu_tbl.c.enterprise_id == ent_tbl.c.id))
+        .where(
+            eu_tbl.c.user_id == target.user_id,
+            eu_tbl.c.role == sa.literal("owner"),
+            eu_tbl.c.is_active.is_(True),
+            ent_tbl.c.enterprise_type.in_([target.user_type, "both"]),
+        )
+        .limit(1)
+    )
+    row = connection.execute(subq).first()
+    if row:
+        connection.execute(
+            ent_tbl.update()
+            .where(ent_tbl.c.id == row.enterprise_id)
+            .values(is_verified=True, verification_date=func.now())
+        )

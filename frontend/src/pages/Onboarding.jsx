@@ -1,4 +1,3 @@
-// src/pages/Onboarding.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
@@ -14,78 +13,86 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-
-
-function mapPlanToKey(role, planName) {
-  const normalized = planName.toLowerCase();
-
-  if (role === "investor") {
-    if (normalized === "basic") return "investor_basic";
-    if (normalized === "premium") return "investor_premium";
-    if (normalized === "vip") return "investor_vip";
-  } else if (role === "entrepreneur") {
-    if (normalized === "free") return "entrepreneur_free";
-    if (normalized === "premium") return "entrepreneur_premium";
-    if (normalized === "enterprise") return "entrepreneur_enterprise";
-  }
-
-  return null;
-}
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 export default function Onboarding() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState(null);
+
+  const [plans, setPlans] = useState([]);
+  const [selectedPlanKey, setSelectedPlanKey] = useState("");
+
+  // Only columns that exist in public.users
   const [form, setForm] = useState({
     first_name: "",
     last_name: "",
     phone: "",
-    location: "",
+    location: "", // ← NEW
     linkedin_url: "",
+    twitter_url: "",
     website_url: "",
     bio: "",
-    plan: "",
+    timezone: "UTC",
+    language_preference: "en",
     role: "",
   });
-  const [file, setFile] = useState(null);
-  const [error, setError] = useState(null);
-  const navigate = useNavigate();
 
-  // Fetch user and role on mount
+  // Prefill from Supabase + load plans
   useEffect(() => {
-    const fetchUserData = async () => {
+    (async () => {
       try {
         const {
           data: { user },
           error,
         } = await supabase.auth.getUser();
-
+        if (error) throw error;
         if (!user) throw new Error("User not authenticated");
 
-        const metadata = user.user_metadata || {};
+        const meta = user.user_metadata || {};
         const role =
-          metadata.role ||
+          meta.role ||
           sessionStorage.getItem("registrationRole") ||
           "entrepreneur";
 
         setForm((prev) => ({
           ...prev,
-          email: user.email,
           role,
-          first_name: metadata.first_name || "",
-          last_name: metadata.last_name || "",
-          phone: metadata.phone || "",
+          first_name: meta.first_name || "",
+          last_name: meta.last_name || "",
+          phone: meta.phone || "",
+          // If you store location in user_metadata you can prefill here too:
+          location: meta.location || "",
         }));
 
+        const res = await fetch(`${API_BASE}/api/subscriptions/plans`);
+        const json = await res.json();
+        const activePlans = Array.isArray(json.plans) ? json.plans : [];
+        setPlans(activePlans);
+
         sessionStorage.removeItem("registrationRole");
-      } catch (err) {
-        console.error(err);
-        setError(err.message);
+      } catch (e) {
+        console.error(e);
+        setError(e.message || "Failed to load user");
       } finally {
         setLoading(false);
       }
-    };
-
-    fetchUserData();
+    })();
   }, []);
+
+  const visiblePlans = plans.filter((p) => {
+    if (!form.role) return false;
+    const prefix = form.role === "investor" ? "investor_" : "entrepreneur_";
+    return (p.plan_key || "").startsWith(prefix);
+  });
+
+  const prettyPrice = (num) => {
+    const n = Number(num || 0);
+    if (!isFinite(n) || n <= 0) return "$0";
+    return `$${n}`;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -96,101 +103,106 @@ export default function Onboarding() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-
       if (!user) throw new Error("User not authenticated");
 
-      let profileImagePath = null;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("User session expired");
 
+      if (!selectedPlanKey) {
+        throw new Error("Please choose a plan to continue.");
+      }
+
+      // Optional avatar upload
+      let profileImagePath = null;
       if (file) {
         const ext = file.name.split(".").pop();
         const filename = `profile.${ext}`;
         const filepath = `${user.id}/${filename}`;
-
         const { error: uploadError } = await supabase.storage
           .from("profile-images")
           .upload(filepath, file, { upsert: true });
-
         if (uploadError) throw uploadError;
-
         profileImagePath = filepath;
       }
 
-      // Update Supabase metadata
+      // Persist role/plan in Supabase metadata (client convenience)
       const { error: metadataError } = await supabase.auth.updateUser({
         data: {
           role: form.role,
-          plan: mapPlanToKey(form.role, form.plan),
+          plan: selectedPlanKey,
+          location: form.location || null,
         },
       });
       if (metadataError) throw metadataError;
 
-      // Upsert into your user table
-      const { error: dbError } = await supabase.from("user").upsert({
-        id: user.id,
-        email: user.email,
-        role: form.role,
-        first_name: form.first_name,
-        last_name: form.last_name,
-        phone: form.phone,
-        location: form.location,
-        linkedin_url: form.linkedin_url,
-        website_url: form.website_url,
-        bio: form.bio,
-        profile_image: profileImagePath,
+      // Build clean payload with trimming
+      const payload = {
+        first_name: (form.first_name || "").trim(),
+        last_name: (form.last_name || "").trim(),
+        phone: (form.phone || "").trim(),
+        location: (form.location || "").trim(), // ← NEW
+        linkedin_url: (form.linkedin_url || "").trim(),
+        twitter_url: (form.twitter_url || "").trim(),
+        website_url: (form.website_url || "").trim(),
+        bio: (form.bio || "").trim(),
+        timezone: form.timezone || "UTC",
+        language_preference: form.language_preference || "en",
+        profile_image_url: profileImagePath, // may be null if not uploaded
+      };
+
+      // Update users table
+      const profileRes = await fetch(`${API_BASE}/api/auth/profile`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
       });
+      if (!profileRes.ok) {
+        const t = await profileRes.text();
+        throw new Error(t || "Failed to save profile");
+      }
 
-      if (dbError) throw dbError;
-
-      // Request Stripe checkout session from your backend
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) throw new Error("User session expired");
-
-      const response = await fetch(
-        "http://127.0.0.1:8000/subscriptions/checkout",
+      // Create Stripe checkout session (or redirect for free plans)
+      const checkoutRes = await fetch(
+        `${API_BASE}/api/subscriptions/checkout`,
         {
           method: "POST",
           headers: {
+            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
             Accept: "application/json",
           },
           body: JSON.stringify({
-            plan: mapPlanToKey(form.role, form.plan),
+            plan_key: selectedPlanKey,
+            billing_interval: "monthly",
           }),
         }
       );
 
-      const text = await response.text();
-      try {
-        const data = JSON.parse(text);
-        if (!response.ok || !data.checkout_url) {
-          throw new Error(data.error || "Failed to create Stripe session");
-        }
-        window.location.href = data.checkout_url;
-      } catch (parseErr) {
-        console.error("Could not parse backend error:", text);
-        throw new Error("Server error. Please check the console.");
+      const resp = await checkoutRes.json().catch(() => ({}));
+      if (!checkoutRes.ok) {
+        throw new Error(resp.error || "Failed to create Stripe session");
       }
 
-      const data = await response.json();
-
-      if (!response.ok || !data.checkout_url) {
-        throw new Error(data.error || "Failed to create Stripe session");
+      if (resp.checkout_url) {
+        window.location.href = resp.checkout_url;
+        return;
+      }
+      if (resp.redirect_url) {
+        window.location.href = resp.redirect_url;
+        return;
       }
 
-      window.location.href = data.checkout_url;
-
-      // Navigate to appropriate dashboard
-      localStorage.setItem("user_role", form.role);
       navigate(
         form.role === "investor"
           ? "/dashboard/investor"
           : "/dashboard/entrepreneur"
       );
-      sessionStorage.removeItem("registrationRole");
     } catch (err) {
       console.error("Onboarding error:", err);
       setError(err.message || "Failed to complete onboarding");
@@ -199,104 +211,6 @@ export default function Onboarding() {
     }
   };
 
-  const investorPlans = [
-    {
-      name: "Basic",
-      price: "$50",
-      period: "/month",
-      description: "Perfect for casual investors exploring opportunities",
-      features: [
-        "Basic profile creation",
-        "Startup browsing",
-        "Limited matching (10/month)",
-        "Basic messaging (50/month)",
-        "Event notifications",
-        "Document downloads (5/month)",
-      ],
-      popular: false,
-    },
-    {
-      name: "Premium",
-      price: "$150",
-      period: "/month",
-      description: "Ideal for active investors seeking quality deals",
-      features: [
-        "All Basic features",
-        "Unlimited matching",
-        "Advanced search filters",
-        "Priority customer support",
-        "Investment tracking tools",
-        "Market insights reports",
-        "Unlimited messaging & downloads",
-      ],
-      popular: true,
-    },
-    {
-      name: "VIP",
-      price: "$300",
-      period: "/month",
-      description: "Premium service for serious high-net-worth investors",
-      features: [
-        "All Premium features",
-        "Personal investment advisor",
-        "Exclusive deal access",
-        "Free event attendance",
-        "Custom matching criteria",
-        "Direct founder introductions",
-        "White-glove support",
-      ],
-      popular: false,
-    },
-  ];
-
-  const entrepreneurPlans = [
-    {
-      name: "Free",
-      price: "$0",
-      period: "/month",
-      description: "Get started with basic platform access",
-      features: [
-        "Basic profile creation",
-        "Limited investor browsing",
-        "Basic messaging",
-        "3 matches per month",
-        "3 document uploads",
-        "Community access",
-      ],
-      popular: false,
-    },
-    {
-      name: "Premium",
-      price: "$75",
-      period: "/month",
-      description: "Full access for serious fundraising",
-      features: [
-        "Full profile creation",
-        "Unlimited investor browsing",
-        "Priority matching",
-        "Analytics dashboard",
-        "Pitch practice tools",
-        "Unlimited uploads & matches",
-      ],
-      popular: true,
-    },
-    {
-      name: "Enterprise",
-      price: "$200",
-      period: "/month",
-      description: "Advanced features for established companies",
-      features: [
-        "All Premium features",
-        "Dedicated success manager",
-        "Custom branding",
-        "API access",
-        "White-label solutions",
-        "Enterprise showcases",
-      ],
-      popular: false,
-    },
-  ];
-
   if (loading) {
     return (
       <div className="flex justify-center items-center h-screen">
@@ -304,8 +218,6 @@ export default function Onboarding() {
       </div>
     );
   }
-
-  const plans = form.role === "investor" ? investorPlans : entrepreneurPlans;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4">
@@ -324,6 +236,7 @@ export default function Onboarding() {
             onSubmit={handleSubmit}
             className="grid grid-cols-1 md:grid-cols-2 gap-4"
           >
+            {/* Avatar */}
             <div className="col-span-2 flex justify-center">
               <label className="relative cursor-pointer group">
                 <Input
@@ -341,20 +254,49 @@ export default function Onboarding() {
                     className="w-full h-full object-cover"
                   />
                 </div>
-                <div className="absolute bottom-0 w-full text-center text-xs text-gray-600 bg-white bg-opacity-70 py-1 rounded-b-full">
+                <div className="absolute bottom-0 w-full text-center text-xs text-gray-600 bg-white/70 py-1 rounded-b-full">
                   Change
                 </div>
               </label>
             </div>
+
+            {/* Required fields */}
+            <Input
+              placeholder="First Name"
+              value={form.first_name}
+              onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+              required
+            />
+            <Input
+              placeholder="Last Name"
+              value={form.last_name}
+              onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+              required
+            />
+
+            {/* Optional columns in users */}
+            <Input
+              placeholder="Phone"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            />
             <LocationAutocomplete
+              placeholder="Location (City, State, Country)"
               value={form.location}
-              onChange={(value) => setForm({ ...form, location: value })}
+              onChange={(loc) => setForm({ ...form, location: loc })}
             />
             <Input
               placeholder="LinkedIn URL"
               value={form.linkedin_url}
               onChange={(e) =>
                 setForm({ ...form, linkedin_url: e.target.value })
+              }
+            />
+            <Input
+              placeholder="Twitter URL"
+              value={form.twitter_url}
+              onChange={(e) =>
+                setForm({ ...form, twitter_url: e.target.value })
               }
             />
             <Input
@@ -371,21 +313,54 @@ export default function Onboarding() {
               onChange={(e) => setForm({ ...form, bio: e.target.value })}
               rows={4}
             />
+
+            {/* Preferences */}
+            <select
+              value={form.timezone}
+              onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="UTC">Timezone: UTC</option>
+              <option value="America/New_York">America/New_York</option>
+              <option value="America/Los_Angeles">America/Los_Angeles</option>
+              <option value="Europe/London">Europe/London</option>
+              <option value="Europe/Madrid">Europe/Madrid</option>
+            </select>
+            <select
+              value={form.language_preference}
+              onChange={(e) =>
+                setForm({ ...form, language_preference: e.target.value })
+              }
+              className="w-full border rounded-md p-2"
+            >
+              <option value="en">Language: English</option>
+              <option value="es">Language: Spanish</option>
+              <option value="fr">Language: French</option>
+            </select>
+
+            {/* Plan selection */}
             <div className="col-span-2">
               <h3 className="text-lg font-semibold mb-2">Choose Your Plan</h3>
+
+              {visiblePlans.length === 0 && (
+                <p className="text-sm text-gray-600">
+                  No active plans found for your role yet.
+                </p>
+              )}
+
               <div className="grid md:grid-cols-3 gap-4">
-                {plans.map((plan, index) => (
+                {visiblePlans.map((plan) => (
                   <Card
-                    key={index}
-                    className={`border relative cursor-pointer transition-all duration-200 hover:shadow-md ${
-                      form.plan === plan.name
+                    key={plan.id}
+                    className={`border relative cursor-pointer transition-all hover:shadow-md ${
+                      selectedPlanKey === plan.plan_key
                         ? "border-blue-600 ring-2 ring-blue-500"
                         : "border-gray-200"
                     }`}
-                    onClick={() => setForm({ ...form, plan: plan.name })}
+                    onClick={() => setSelectedPlanKey(plan.plan_key)}
                   >
-                    {plan.popular && (
-                      <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                    {plan.features?.includes?.("popular") && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                         <Badge className="bg-blue-600 text-white px-3 py-1">
                           Most Popular
                         </Badge>
@@ -395,22 +370,21 @@ export default function Onboarding() {
                       <CardTitle className="text-xl">{plan.name}</CardTitle>
                       <div className="mt-2">
                         <span className="text-2xl font-bold text-gray-900">
-                          {plan.price}
+                          {prettyPrice(plan.monthly_price)}
                         </span>
-                        <span className="text-gray-600">{plan.period}</span>
+                        <span className="text-gray-600">/month</span>
                       </div>
-                      <p className="text-sm mt-2 text-gray-600">
-                        {plan.description}
-                      </p>
+                      {plan.description && (
+                        <p className="text-sm mt-2 text-gray-600">
+                          {plan.description}
+                        </p>
+                      )}
                     </CardHeader>
                     <CardContent>
                       <ul className="text-sm text-gray-700 space-y-1">
-                        {plan.features.slice(0, 4).map((f, i) => (
-                          <li key={i}>• {f}</li>
+                        {(plan.features || []).slice(0, 6).map((f) => (
+                          <li key={String(f)}>• {String(f)}</li>
                         ))}
-                        {plan.features.length > 4 && (
-                          <li className="text-blue-500">+ more</li>
-                        )}
                       </ul>
                     </CardContent>
                   </Card>

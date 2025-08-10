@@ -1,17 +1,29 @@
+// src/components/HeaderBar.jsx
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
 import { Bell, MessageCircle } from "lucide-react";
 
-function HeaderBar({ 
-  entrepreneurName, 
-  notifications = [], 
-  profileImage, 
-  messages = [], 
-  onOpenChat = () => {} 
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
+function HeaderBar({
+  entrepreneurName,
+  notifications = [],
+  profileImage,
+  messages = [],
+  onOpenChat = () => {},
 }) {
-  
+  const navigate = useNavigate();
   const [notificationBarOpen, setNotificationBarIsOpen] = useState(false);
   const [chatBarOpen, setChatBarIsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const menuRef = useRef(null);
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
@@ -30,6 +42,33 @@ function HeaderBar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      // get current access token to notify API before signOut
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.access_token) {
+        // best-effort server log
+        fetch(`${API_BASE}/api/auth/logout`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).catch(() => {});
+      }
+
+      await supabase.auth.signOut(); // revoke refresh token
+    } catch (e) {
+      // non-fatal; still send them to login
+      console.error("Logout error:", e);
+    } finally {
+      setMenuOpen(false);
+      navigate("/login");
+    }
+  };
+
   return (
     <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b relative">
       {/* Greeting */}
@@ -37,12 +76,13 @@ function HeaderBar({
         <h1 className="text-2xl font-bold text-gray-900">
           Welcome back, {entrepreneurName}
         </h1>
-        <p className="text-sm text-gray-500">Your Ideas and Associate Partners dashboard</p>
+        <p className="text-sm text-gray-500">
+          Your Ideas and Associate Partners dashboard
+        </p>
       </div>
 
       {/* Right Controls */}
       <div className="flex items-center space-x-6" ref={menuRef}>
-
         {/* Message Icon */}
         <div
           className="relative cursor-pointer"
@@ -61,7 +101,9 @@ function HeaderBar({
         {/* Chat Dropdown */}
         {chatBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">Recent Messages</div>
+            <div className="p-4 border-b font-semibold text-gray-700">
+              Recent Messages
+            </div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {messages.length === 0 ? (
                 <li className="p-4 text-gray-500 text-sm text-center">
@@ -69,13 +111,13 @@ function HeaderBar({
                 </li>
               ) : (
                 messages.map((msg, index) => (
-                  <li 
-                    key={index} 
+                  <li
+                    key={index}
                     className="p-4 hover:bg-gray-50 text-sm"
                     onClick={() => {
-                      onOpenChat(msg)
-                      setChatBarIsOpen(false)
-                    }} // trigger chat open
+                      onOpenChat(msg);
+                      setChatBarIsOpen(false);
+                    }}
                   >
                     <p className="font-medium text-gray-800">{msg.sender}</p>
                     <p className="text-gray-600">{msg.preview}</p>
@@ -144,9 +186,19 @@ function HeaderBar({
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border z-50">
               <ul className="py-1 text-sm text-gray-700">
-                <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Profile Settings</li>
-                <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-600">
-                  Log Out
+                <li
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => navigate("/settings/profile")}
+                >
+                  Profile Settings
+                </li>
+                <li
+                  className={`px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-600 ${
+                    loggingOut ? "opacity-70 cursor-wait" : ""
+                  }`}
+                  onClick={handleLogout}
+                >
+                  {loggingOut ? "Logging out…" : "Log Out"}
                 </li>
               </ul>
             </div>

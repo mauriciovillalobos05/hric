@@ -12,6 +12,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
 export default function EntrepreneurProfile() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -95,28 +98,28 @@ export default function EntrepreneurProfile() {
   ];
 
   useEffect(() => {
-    const fetchStripeMeta = async () => {
+    (async () => {
       try {
         const {
           data: { user },
           error: userError,
         } = await supabase.auth.getUser();
         if (userError) throw userError;
+
         const { stripe_customer_id, stripe_subscription_id, plan } =
-          user.user_metadata || {};
+          user?.user_metadata || {};
         setForm((prev) => ({
           ...prev,
           stripe_customer_id,
           stripe_subscription_id,
           tier: plan,
         }));
-      } catch (err) {
-        console.error("Metadata error:", err);
+      } catch (e) {
+        console.error("Metadata error:", e);
       } finally {
         setLoading(false);
       }
-    };
-    fetchStripeMeta();
+    })();
   }, []);
 
   const handleChange = (e) => {
@@ -125,6 +128,27 @@ export default function EntrepreneurProfile() {
       ...prev,
       [name]: value,
     }));
+  };
+
+  const teamSizeToInt = (v) => {
+    // "3-5" -> 5, "100+" -> 100, "12" -> 12, "" -> null
+    if (!v) return null;
+    if (typeof v === "number") return v;
+    const plus = v.endsWith("+");
+    if (plus) return parseInt(v, 10) || null;
+    if (v.includes("-")) {
+      const parts = v.split("-").map((x) => parseInt(x, 10)).filter(Boolean);
+      if (!parts.length) return null;
+      return Math.max(...parts);
+    }
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const toFloat = (v) => {
+    if (v === "" || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   };
 
   const handleSubmit = async (e) => {
@@ -138,17 +162,16 @@ export default function EntrepreneurProfile() {
       } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("No session token found");
 
-      // Prepare the payload, parsing numbers as needed
       const payload = {
         ...form,
-        team_size: parseInt(form.team_size) || null,
-        funding_needed: parseFloat(form.funding_needed) || null,
+        team_size: teamSizeToInt(form.team_size),
+        funding_needed: toFloat(form.funding_needed),
         financials: {
-          funding_goal: parseFloat(form.financials.funding_goal) || null,
+          funding_goal: toFloat(form.financials.funding_goal),
         },
       };
 
-      const res = await fetch("http://127.0.0.1:8000/enterprise/profile", {
+      const res = await fetch(`${API_BASE}/api/entrepreneurs/profile`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -157,7 +180,7 @@ export default function EntrepreneurProfile() {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Submission failed");
 
       navigate("/dashboard/entrepreneur");
@@ -181,12 +204,8 @@ export default function EntrepreneurProfile() {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">
-            Entrepreneur Profile
-          </CardTitle>
-          <p className="text-sm text-gray-500">
-            Help investors understand your company
-          </p>
+          <CardTitle className="text-2xl font-bold">Entrepreneur Profile</CardTitle>
+          <p className="text-sm text-gray-500">Help investors understand your company</p>
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
@@ -205,11 +224,10 @@ export default function EntrepreneurProfile() {
             >
               <option value="">Select Industry</option>
               {industryOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
+                <option key={opt} value={opt}>{opt}</option>
               ))}
             </select>
+
             <select
               name="stage"
               value={form.stage}
@@ -218,16 +236,15 @@ export default function EntrepreneurProfile() {
             >
               <option value="">Select Stage</option>
               {stageOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
+                <option key={opt} value={opt}>{opt}</option>
               ))}
             </select>
 
             <LocationAutocomplete
               value={form.location}
-              onChange={(value) => setForm({ ...form, location: value })}
+              onChange={(value) => setForm((prev) => ({ ...prev, location: value }))}
             />
+
             <select
               name="team_size"
               value={form.team_size}
@@ -236,11 +253,10 @@ export default function EntrepreneurProfile() {
             >
               <option value="">Select Team Size</option>
               {teamSizeOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
+                <option key={opt} value={opt}>{opt}</option>
               ))}
             </select>
+
             <Input
               name="funding_needed"
               placeholder="Funding Needed (USD)"
@@ -268,10 +284,7 @@ export default function EntrepreneurProfile() {
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  financials: {
-                    ...prev.financials,
-                    funding_goal: e.target.value,
-                  },
+                  financials: { ...prev.financials, funding_goal: e.target.value },
                 }))
               }
             />
@@ -283,9 +296,7 @@ export default function EntrepreneurProfile() {
             >
               <option value="">Select Target Market</option>
               {targetMarketOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
+                <option key={opt} value={opt}>{opt}</option>
               ))}
             </select>
             <textarea
@@ -312,12 +323,9 @@ export default function EntrepreneurProfile() {
               value={form.traction_summary}
               onChange={handleChange}
             />
+
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? (
-                <Loader2 className="animate-spin h-5 w-5" />
-              ) : (
-                "Submit"
-              )}
+              {loading ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
             </Button>
           </form>
         </CardContent>

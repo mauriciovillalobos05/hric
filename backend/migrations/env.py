@@ -1,72 +1,57 @@
-import logging
+# migrations/env.py
 from logging.config import fileConfig
 from alembic import context
+from sqlalchemy import engine_from_config, pool
 from flask import current_app
-from src.main import create_app
 
-app = create_app()
+# 👇 your declarative base (the one you called declarative_base())
+from src.models.user import Base as ModelBase
+# 👇 only if you also use Flask-SQLAlchemy's db.Model anywhere
+from src.extensions import db
 
-# Alembic Config
 config = context.config
-fileConfig(config.config_file_name)
-logger = logging.getLogger('alembic.env')
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 
-# Use app context to get engine and metadata
-with app.app_context():
-    def get_engine():
-        try:
-            # Flask-SQLAlchemy <3
-            return current_app.extensions['migrate'].db.get_engine()
-        except (TypeError, AttributeError):
-            # Flask-SQLAlchemy >=3
-            return current_app.extensions['migrate'].db.engine
+# Ensure Alembic uses the app’s DB URL
+sqlalchemy_url = current_app.config.get("SQLALCHEMY_DATABASE_URI")
+if sqlalchemy_url:
+    config.set_main_option("sqlalchemy.url", sqlalchemy_url)
 
-    def get_engine_url():
-        try:
-            return get_engine().url.render_as_string(hide_password=False).replace('%', '%%')
-        except AttributeError:
-            return str(get_engine().url).replace('%', '%%')
+# Point Alembic at ALL your metadatas.
+# If you only use ModelBase, you can set just ModelBase.metadata.
+target_metadata = [ModelBase.metadata, db.metadata]
 
-    config.set_main_option('sqlalchemy.url', get_engine_url())
-    target_db = current_app.extensions['migrate'].db
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True,
+        compare_server_default=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
 
-    def get_metadata():
-        if hasattr(target_db, 'metadatas'):
-            return target_db.metadatas[None]
-        return target_db.metadata
-
-    def run_migrations_offline():
-        url = config.get_main_option("sqlalchemy.url")
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
         context.configure(
-            url=url, target_metadata=get_metadata(), literal_binds=True
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
         )
         with context.begin_transaction():
             context.run_migrations()
 
-    def run_migrations_online():
-        def process_revision_directives(context, revision, directives):
-            if getattr(config.cmd_opts, 'autogenerate', False):
-                script = directives[0]
-                if script.upgrade_ops.is_empty():
-                    directives[:] = []
-                    logger.info('No changes in schema detected.')
-
-        conf_args = current_app.extensions['migrate'].configure_args
-        if conf_args.get("process_revision_directives") is None:
-            conf_args["process_revision_directives"] = process_revision_directives
-
-        connectable = get_engine()
-
-        with connectable.connect() as connection:
-            context.configure(
-                connection=connection,
-                target_metadata=get_metadata(),
-                **conf_args
-            )
-            with context.begin_transaction():
-                context.run_migrations()
-
-    if context.is_offline_mode():
-        run_migrations_offline()
-    else:
-        run_migrations_online()
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

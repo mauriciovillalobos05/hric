@@ -1,4 +1,3 @@
-// src/pages/CompleteProfile/InvestorProfile.jsx
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
@@ -13,13 +12,13 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
 function MultiSelect({ label, options, selected, onChange }) {
   const toggleOption = (option) => {
-    if (selected.includes(option)) {
-      onChange(selected.filter((item) => item !== option));
-    } else {
-      onChange([...selected, option]);
-    }
+    if (selected.includes(option)) onChange(selected.filter((x) => x !== option));
+    else onChange([...selected, option]);
   };
 
   return (
@@ -100,48 +99,37 @@ export default function InvestorProfile() {
   ];
 
   const riskOptions = ["Low", "Medium", "High"];
-
-  const commOptions = [
-    "Weekly",
-    "Bi-weekly",
-    "Monthly",
-    "Quarterly",
-    "On-demand",
-  ];
-
+  const commOptions = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "On-demand"];
   const meetingOptions = ["In-person", "Virtual", "Hybrid", "Email Only"];
 
   useEffect(() => {
-    const fetchStripeMeta = async () => {
+    (async () => {
       try {
         const {
           data: { user },
           error: userError,
         } = await supabase.auth.getUser();
         if (userError) throw userError;
+
         const { stripe_customer_id, stripe_subscription_id, plan } =
-          user.user_metadata || {};
+          user?.user_metadata || {};
         setForm((prev) => ({
           ...prev,
           stripe_customer_id,
           stripe_subscription_id,
           tier: plan,
         }));
-      } catch (err) {
-        console.error("Metadata error:", err);
+      } catch (e) {
+        console.error("Metadata error:", e);
       } finally {
         setLoading(false);
       }
-    };
-    fetchStripeMeta();
+    })();
   }, []);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
   };
 
   const handleSubmit = async (e) => {
@@ -153,18 +141,33 @@ export default function InvestorProfile() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("No session token found");
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No session token found");
 
-      const res = await fetch("http://127.0.0.1:8000/investors/profile", {
+      // Validate min/max on client as well
+      const minV = form.investment_range_min !== "" ? Number(form.investment_range_min) : null;
+      const maxV = form.investment_range_max !== "" ? Number(form.investment_range_max) : null;
+      if (minV !== null && maxV !== null && minV > maxV) {
+        throw new Error("Minimum investment cannot exceed maximum.");
+      }
+
+      const payload = {
+        ...form,
+        investment_range_min: minV,
+        investment_range_max: maxV,
+        portfolio_size: form.portfolio_size !== "" ? Number(form.portfolio_size) : null,
+      };
+
+      const res = await fetch(`${API_BASE}/api/investors/profile`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Submission failed");
 
       navigate("/dashboard/investor");
@@ -198,23 +201,17 @@ export default function InvestorProfile() {
               label="Industries"
               options={industryOptions}
               selected={form.industries}
-              onChange={(newValues) =>
-                setForm((prev) => ({ ...prev, industries: newValues }))
-              }
+              onChange={(v) => setForm((p) => ({ ...p, industries: v }))}
             />
             <MultiSelect
               label="Investment Stages"
               options={investmentStageOptions}
               selected={form.investment_stages}
-              onChange={(newValues) =>
-                setForm((prev) => ({ ...prev, investment_stages: newValues }))
-              }
+              onChange={(v) => setForm((p) => ({ ...p, investment_stages: v }))}
             />
             <LocationMultiSelect
               values={form.geographic_focus}
-              onChange={(newValues) =>
-                setForm((prev) => ({ ...prev, geographic_focus: newValues }))
-              }
+              onChange={(v) => setForm((p) => ({ ...p, geographic_focus: v }))}
             />
             <div className="flex gap-4">
               <Input
@@ -272,7 +269,7 @@ export default function InvestorProfile() {
               className="w-full border rounded-md p-2"
             >
               <option value="">Select Communication Frequency</option>
-              {commOptions.map((opt) => (
+              {["Weekly", "Bi-weekly", "Monthly", "Quarterly", "On-demand"].map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
@@ -285,7 +282,7 @@ export default function InvestorProfile() {
               className="w-full border rounded-md p-2"
             >
               <option value="">Select Meeting Preference</option>
-              {meetingOptions.map((opt) => (
+              {["In-person", "Virtual", "Hybrid", "Email Only"].map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
@@ -309,6 +306,7 @@ export default function InvestorProfile() {
               />
               Available for Advisory
             </label>
+
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
             </Button>

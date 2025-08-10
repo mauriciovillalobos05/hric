@@ -39,20 +39,23 @@ function HeaderBar({
 
   // Logout function with metadata clearing
   const handleLogout = async () => {
-    const { error: updateError } = await supabase.auth.updateUser({
-      data: { role: "" },
-    });
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (updateError) {
-      console.error("Failed to clear role metadata:", updateError);
+    // 1) tell your API we’re logging out (while we still have a token)
+    if (session?.access_token) {
+      fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }).catch(() => {});
     }
 
-    const { error: logoutError } = await supabase.auth.signOut();
-    if (logoutError) {
-      console.error("Logout failed:", logoutError);
-    }
+    // 2) revoke Supabase session
+    await supabase.auth.signOut();
 
-    navigate("/");
+    // 3) clean up and redirect
+    navigate("/login");
   };
 
   return (
@@ -87,10 +90,14 @@ function HeaderBar({
         {/* Messages Dropdown */}
         {chatBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">Recent Messages</div>
+            <div className="p-4 border-b font-semibold text-gray-700">
+              Recent Messages
+            </div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {messages.length === 0 ? (
-                <li className="p-4 text-gray-500 text-sm text-center">No messages</li>
+                <li className="p-4 text-gray-500 text-sm text-center">
+                  No messages
+                </li>
               ) : (
                 messages.map((msg, index) => (
                   <li
@@ -129,10 +136,14 @@ function HeaderBar({
         {/* Notification Dropdown */}
         {notificationBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">Notifications</div>
+            <div className="p-4 border-b font-semibold text-gray-700">
+              Notifications
+            </div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {notifications.length === 0 ? (
-                <li className="p-4 text-gray-500 text-sm text-center">No notifications</li>
+                <li className="p-4 text-gray-500 text-sm text-center">
+                  No notifications
+                </li>
               ) : (
                 notifications.map((notif, index) => (
                   <li key={index} className="p-4 hover:bg-gray-50 text-sm">

@@ -13,6 +13,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
 function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,40 +26,70 @@ function Login() {
     e.preventDefault();
     setError(null);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    // 1) Supabase sign-in
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
-    if (error) {
-      setError(error.message);
+    if (signInError) {
+      setError(signInError.message);
       return;
     }
 
-    const sessionUser = data.user;
+    const accessToken = data?.session?.access_token;
+    const user = data?.user;
 
-    // Now fetch from your custom 'user' table
-    const { data: userProfile, error: profileError } = await supabase
-      .from("user")
-      .select("role")
-      .eq("id", sessionUser.id)
-      .single();
-
-    if (profileError) {
-      console.error("Failed to fetch user_type", profileError);
-      setError("Could not retrieve user type.");
+    if (!accessToken || !user) {
+      setError("Login failed: no session returned.");
       return;
     }
 
-    const role = userProfile.user_type;
+    try {
+      // 2) Optional: tell backend we just logged in (updates last_active_at, logs activity)
+      await fetch(`${API_BASE}/api/auth/after-login`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {});
 
-    // Navigate based on role
-    if (role === "investor") {
-      navigate("/dashboard/investor");
-    } else if (role === "entrepreneur") {
-      navigate("/dashboard/entrepreneur");
-    } else {
-      navigate("/dashboard/user");
+      // 3) Ask backend who we are and where to go
+      const meRes = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!meRes.ok) {
+        const body = await meRes.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to fetch profile");
+      }
+
+      const me = await meRes.json();
+
+      // find owner membership (active)
+      const owner = (me.memberships || []).find(
+        (m) => m.role === "owner" && m.is_active
+      );
+
+      // enterprise_type may be inside membership.enterprise or membership.enterprise_type
+      const enterpriseType =
+        owner?.enterprise?.enterprise_type || owner?.enterprise_type;
+
+      // fallback: try Supabase user metadata if membership isn’t ready yet
+      const metaRole = user?.user_metadata?.role || user?.user_metadata?.plan;
+
+      let route = "/dashboard/user";
+      if (enterpriseType === "investor") route = "/dashboard/investor";
+      else if (enterpriseType === "startup") route = "/dashboard/entrepreneur";
+      else if (typeof metaRole === "string") {
+        const r = metaRole.toLowerCase();
+        if (r.includes("investor")) route = "/dashboard/investor";
+        else if (r.includes("entrepreneur") || r.includes("startup"))
+          route = "/dashboard/entrepreneur";
+      }
+
+      navigate(route);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Could not complete login.");
     }
   };
 
@@ -82,9 +115,7 @@ function Login() {
               />
             </div>
             <div>
-              <label className="block mb-1 text-sm text-gray-700">
-                Password
-              </label>
+              <label className="block mb-1 text-sm text-gray-700">Password</label>
               <Input
                 type="password"
                 placeholder="••••••••"
@@ -107,7 +138,7 @@ function Login() {
             </Button>
           </form>
           <p className="mt-4 text-sm text-center text-gray-600">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <span
               onClick={() => navigate("/register")}
               className="text-blue-600 hover:underline cursor-pointer"

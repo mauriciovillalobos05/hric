@@ -14,6 +14,7 @@ import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import InvestorProfile from "./pages/complete-profile/InvestorProfile";
 import { createClient } from "@supabase/supabase-js";
 import Subscription from "./dashboards/investors-dashboard/dashboard-components/components/headerBarComponents/components/Subscription.jsx";
+import StripeLanding from "@/pages/StripeLanding";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -73,6 +74,8 @@ function App() {
           <InvestorProfile />
         </ProtectedRoute>} 
       />
+      
+      <Route path="/stripe/return" element={<StripeLanding />} />
       
       <Route path="/complete-profile/entrepreneur" element={
         <ProtectedRoute>

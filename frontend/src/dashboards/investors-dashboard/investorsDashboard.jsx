@@ -1,14 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
-import InvestorOverview from "./dashboard-components/components/investorOverview.jsx";
-import MatchFeed from "./dashboard-components/components/matchComponents/matchFeed.jsx";
-import InvestorTools from "./dashboard-components/components/investorTools.jsx";
-import EventHighlight from "./dashboard-components/components/eventHighlight.jsx";
-import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
-import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
-import PortfolioSummary from "./dashboard-components/components/portfolioSummary.jsx";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
+import defaultAvatar from "../../assets/default_user_image.png";
+import InvestorTabs from "./dashboard-components/components/investorTabs.jsx";
+import { makeApi } from "@/lib/apiClient.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -21,82 +17,220 @@ function InvestorsDashboard() {
   const [events, setEvents] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [investorName, setInvestorName] = useState("Investor");
+  const [investor, setInvestor] = useState(null);
+  const [userRole, setUserRole] = useState("");
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [selectedTab, setSelectedTab] = useState("matches");
+
+  // keep token & userId handy for follow-up actions (e.g. event registration)
+  const authRef = useRef({ token: null, userId: null });
+
+  // ---------- Mappers from API -> UI ----------
+  const mapMessages = (items) =>
+    (Array.isArray(items) ? items : []).map((m) => ({
+      id: m.id,
+      subject: m.subject ?? "",
+      preview: m.preview ?? "",
+      created_at: m.created_at ?? m.date ?? null,
+    }));
+
+  const mapMatches = (items = []) =>
+    items.map((it) => ({
+      id: it.match_id || it.id,
+      startup_id: it.startup_enterprise_id || it.startup?.id,
+      startup_name: it.startup?.name || it.startup_name || "Startup",
+      industry:
+        it.startup?.profile?.industry?.name ||
+        it.industry ||
+        it.startup_industry ||
+        "",
+      funding_stage:
+        it.startup?.profile?.stage?.name || it.stage || it.funding_stage || "",
+      score: Number(it.overall_score ?? 0),
+      badges: it.badges || [],
+      _raw: it,
+    }));
+
+  const mapEvents = (items = [], userId) =>
+    items.map((e) => ({
+      id: e.id,
+      title: e.title,
+      description: e.description,
+      date: e.start_time || e.date, // your API might send start_time
+      agenda: e.agenda || [],
+      presenters: e.speakers || e.presenters || [],
+      registration_status:
+        e.registration?.status || e.registration_status || null,
+      _raw: e,
+    }));
+
   useEffect(() => {
+    let cancelled = false;
+
     const fetchData = async () => {
+      setLoading(true);
       try {
+        // 1) Auth via Supabase (we use its JWT for your API)
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) return;
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        const { data: profile, error: profileError } = await supabase
-          .from("user")
-          .select("first_name, last_name, profile_image")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profile && !profileError) {
-          let profileImg = "/default_user_image.png";
-          if (profile.profile_image) {
-            const { data } = supabase.storage
-              .from("profile-images")
-              .getPublicUrl(profile.profile_image);
-            profileImg = data?.publicUrl || profileImg;
-          }
-          setInvestorName(`${profile.first_name} ${profile.last_name}`);
-          setAvatarUrl(profileImg);
+        if (!session?.user) {
+          setLoading(false);
+          return;
         }
 
-        const [
-          { data: matchesData },
-          { data: eventsData },
-          { data: notificationsData },
-          { data: messagesData },
-        ] = await Promise.all([
-          supabase.from("match_recommendation").select("*").eq("user_id", user.id),
-          supabase
-            .from("event")
-            .select("*")
-            .order("date", { ascending: true }),
-          supabase
-            .from("notification")
-            .select("title, created_at, read")
-            .eq("user_id", user.id)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("message")
-            .select("sender_id, message_type, created_at, is_read")
-            .eq("receiver_id", user.id)
-            .order("created_at", { ascending: false }),
-        ]);
+        const token = session.access_token;
+        const userId = session.user.id;
+        authRef.current = { token, userId };
+        const api = makeApi(token);
+        const inboxRes = await api.messages(5);
+        const inboxItems = Array.isArray(inboxRes?.items)
+          ? inboxRes.items
+          : Array.isArray(inboxRes?.messages)
+          ? inboxRes.messages
+          : Array.isArray(inboxRes)
+          ? inboxRes
+          : [];
 
-        setMatches(matchesData || []);
-        setFilteredMatches(matchesData || []);
-        setEvents(eventsData || []);
-        setNotifications(notificationsData || []);
-        setMessages(messagesData || []);
-      } catch (error) {
-        console.error("Dashboard data load failed:", error);
+        setInbox(mapMessages(inboxItems));
+
+        const notifRes = await api.notifications(20);
+        const notifItems = Array.isArray(notifRes?.items)
+          ? notifRes.items
+          : Array.isArray(notifRes?.messages)
+          ? notifRes.messages
+          : Array.isArray(notifRes)
+          ? notifRes
+          : [];
+
+        setNotifications(mapMessages(notifItems));
+        // 2) Load everything in parallel from your endpoints
+        const [me, investorData, inbox, recs, upcoming, notifs] =
+          await Promise.all([
+            api.me(), // { first_name, last_name, profile_image_url, role, ... }
+            api.investorMe(), // investor profile
+            api.messages(5), // inbox preview
+            api.matches({ limit: 50, mode: "investor" }), // recommendations
+            api.events(20), // upcoming + registration status
+            api.notifications(20).catch(() => []), // best-effort
+          ]);
+
+        if (cancelled) return;
+
+        // 3) Apply to UI state
+        const firstName = me?.first_name || "Investor";
+        const lastName = me?.last_name || "";
+        setInvestorName(
+          me?.full_name || `${firstName}${lastName ? " " + lastName : ""}`
+        );
+        setUserRole(me?.role || me?.user_role || "");
+        setAvatarUrl(me?.profile_image_url || defaultAvatar);
+        setInvestor(investorData || null);
+
+        const mMsgs = mapMessages(inbox);
+        setMessages(mMsgs);
+
+        const mMatches = mapMatches(recs?.matches || []);
+        setMatches(mMatches);
+        setFilteredMatches(mMatches);
+
+        const mEvents = mapEvents(upcoming, userId);
+        setEvents(mEvents);
+
+        setNotifications(
+          Array.isArray(notifs) && notifs.length
+            ? notifs.map((n) => ({
+                title: n.title || n.type || "Notification",
+                time: new Date(
+                  n.created_at || n.sent_at || Date.now()
+                ).toLocaleString(),
+                read: !!n.read_at,
+                _raw: n,
+              }))
+            : []
+        );
+      } catch (err) {
+        console.error("Investor dashboard fetch error (API):", err);
+
+        // ---- Fallback demo events, like you had before ----
+        const now = Date.now();
+        const plusDays = (d) =>
+          new Date(now + d * 24 * 60 * 60 * 1000).toISOString();
+        setEvents([
+          {
+            id: "evt_demo_err_001",
+            title: "Fallback Event",
+            description: "Shown because event fetch failed.",
+            date: plusDays(5),
+            agenda: ["Intro", "Session"],
+            presenters: ["TBD"],
+            registration_status: null,
+          },
+          {
+            id: "evt_demo_err_002",
+            title: "Backup Pitch Night",
+            description: "Backup list for local testing without a database.",
+            date: plusDays(10),
+            agenda: ["Welcome", "Pitches", "Networking"],
+            presenters: ["Startup A", "Startup B"],
+            registration_status: null,
+          },
+        ]);
       } finally {
-        setLoading(false); 
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchData();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const handleOpenRegister = (event) => {
+    setSelectedEvent(event);
+    setShowRegisterModal(true);
+  };
+
+  const handleSubmitRegistration = async (answers) => {
+    try {
+      const { token, userId } = authRef.current || {};
+      if (!token || !userId) throw new Error("Not authenticated");
+      const api = makeApi(token);
+
+      await api.registerToEvent(selectedEvent.id, answers);
+
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === selectedEvent.id
+            ? { ...e, registration_status: "registered" }
+            : e
+        )
+      );
+      setShowRegisterModal(false);
+    } catch (e) {
+      console.error("Event registration failed:", e);
+    }
+  };
 
   const handleSearchClick = ({ industry, stage }) => {
     const filtered = matches.filter((match) => {
       const matchesIndustry = industry
-        ? match.industry.toLowerCase().includes(industry.toLowerCase())
+        ? String(match.industry || "")
+            .toLowerCase()
+            .includes(industry.toLowerCase())
         : true;
       const matchesStage = stage
-        ? match.funding_stage.toLowerCase().includes(stage.toLowerCase())
+        ? String(match.funding_stage || "")
+            .toLowerCase()
+            .includes(stage.toLowerCase())
         : true;
       return matchesIndustry && matchesStage;
     });
@@ -124,6 +258,7 @@ function InvestorsDashboard() {
       </div>
     );
   }
+
   return (
     <>
       <HeaderBar
@@ -134,21 +269,27 @@ function InvestorsDashboard() {
         onOpenChat={handleOpenChat}
       />
 
-      <InvestorOverview onMetricsLoaded={() => {}} />
-      <PortfolioSummary />
-
-      <MatchFeed matches={filteredMatches} />
-
-      <InvestorTools
+      <InvestorTabs
+        matches={matches}
+        filteredMatches={filteredMatches}
         onSearchClick={handleSearchClick}
-        onPreferencesClick={() => alert("Preferences coming soon")}
-        onSavedClick={() => alert("Watchlist coming soon")}
+        selectedTab={selectedTab}
+        onTabChange={(value) => setSelectedTab(value)}
+        // Overview content
+        events={events}
+        userRole={userRole}
+        onRegisterClick={handleOpenRegister}
+        registerModalOpen={showRegisterModal}
+        onCloseRegisterModal={() => setShowRegisterModal(false)}
+        selectedEvent={selectedEvent}
+        onSubmitRegistration={handleSubmitRegistration}
+        onMetricsLoaded={() => {}}
+        // Messages content
+        messages={messages}
+        onOpenChat={handleOpenChat}
+        openChats={openChats}
+        onCloseChat={handleCloseChat}
       />
-
-      <EventHighlight Events={events} />
-
-      <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
-      <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
     </>
   );
 }

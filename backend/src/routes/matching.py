@@ -1,13 +1,14 @@
 # src/routes/matching.py
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import requests
 
 from flask import Blueprint, request, jsonify
+from werkzeug.http import http_date, parse_date
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
-
+from sqlalchemy.dialects.postgresql import insert
 from rapidfuzz import fuzz
 
 from src.extensions import db
@@ -21,6 +22,8 @@ from src.models.user import (
     GeographicArea, InvestorGeographicFocus,
     # matching
     MatchScore, MatchInteraction,
+    # startup profile (for enriched card fields)
+    StartupProfile,
 )
 
 matching_bp = Blueprint("matching", __name__)
@@ -53,13 +56,28 @@ def require_auth():
     except Exception as e:
         return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return None, None, (jsonify({"error": "User not found in database"}), 404)
     return user, token, None
 
 
 # --------------------- Helpers --------------------- #
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+def _as_utc(dt):
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+def _http_floor(dt):
+    """HTTP dates are second-precision; normalize tz-aware dt."""
+    if not dt:
+        return None
+    dt = _as_utc(dt)
+    return dt.replace(microsecond=0)
 
 def _user_investor_enterprise_ids(user_id):
     rows = (
@@ -74,7 +92,6 @@ def _user_investor_enterprise_ids(user_id):
     )
     return [r[0] for r in rows]
 
-
 def _user_startup_enterprise_ids(user_id):
     rows = (
         db.session.query(Enterprise.id)
@@ -88,31 +105,29 @@ def _user_startup_enterprise_ids(user_id):
     )
     return [r[0] for r in rows]
 
-
 def _fuzzy(a: str | None, b: str | None) -> int:
     if not a or not b:
         return 0
     return int(fuzz.token_set_ratio(a.lower(), b.lower()))
-
 
 def _best_fuzzy(target: str | None, candidates: list[str]) -> int:
     if not target or not candidates:
         return 0
     return max((_fuzzy(target, c) for c in candidates), default=0)
 
-
 def _enterprise_profile_map(e_ids):
     """Return {enterprise_id: EnterpriseProfile(with industry, stage loaded)}."""
     if not e_ids:
         return {}
     profiles = (
-        EnterpriseProfile.query
-        .options(joinedload(EnterpriseProfile.industry), joinedload(EnterpriseProfile.stage))
-        .filter(EnterpriseProfile.enterprise_id.in_(e_ids))
-        .all()
+        db.session.query(EnterpriseProfile)
+        .options(
+            joinedload(EnterpriseProfile.industry),
+            joinedload(EnterpriseProfile.stage),
+        )
+        .filter(EnterpriseProfile.enterprise_id.in_(e_ids)).all()
     )
     return {p.enterprise_id: p for p in profiles}
-
 
 def _load_investor_pref_names(profile_id):
     """Return (industry_names, stage_names) from normalized M2M + optional criteria JSON."""
@@ -131,8 +146,7 @@ def _load_investor_pref_names(profile_id):
     ind_names = {n for (n,) in inds}
     stage_names = {n for (n,) in stages}
 
-    # Optional: also read free-form preferences if you store them inside investment_criteria
-    prefs = InvestmentPreferences.query.filter_by(investor_profile_id=profile_id).first()
+    prefs = db.session.query(InvestmentPreferences).filter_by(investor_profile_id=profile_id).first()
     if prefs and isinstance(prefs.investment_criteria, dict):
         for n in (prefs.investment_criteria or {}).get("preferred_industries", []):
             if isinstance(n, str):
@@ -143,7 +157,6 @@ def _load_investor_pref_names(profile_id):
 
     return list(ind_names), list(stage_names)
 
-
 def _load_geo_focus_names(profile_id):
     """Return list of geographic area names from normalized M2M."""
     rows = (
@@ -153,7 +166,6 @@ def _load_geo_focus_names(profile_id):
         .all()
     )
     return [n for (n,) in rows]
-
 
 def _compute_score(investor_profile: InvestorProfile, e: Enterprise, ep: EnterpriseProfile | None):
     """
@@ -214,14 +226,8 @@ def _compute_score(investor_profile: InvestorProfile, e: Enterprise, ep: Enterpr
 
     return min(score, 100), reasons
 
-
 def _upsert_match(investor_eid, startup_eid, score, reasons, now):
-    """Create or update a MatchScore row (unique investor+startup)."""
-    m = (
-        MatchScore.query
-        .filter_by(investor_enterprise_id=investor_eid, startup_enterprise_id=startup_eid)
-        .first()
-    )
+    """Insert-or-update a MatchScore row (unique investor+startup)."""
     payload = {
         "compatibility_score": round(score / 100.0, 4),
         "fit_score": round(score / 100.0, 4),
@@ -232,18 +238,15 @@ def _upsert_match(investor_eid, startup_eid, score, reasons, now):
         "is_active": True,
         "notes": "autogen by /matching",
     }
-    if m:
-        for k, v in payload.items():
-            setattr(m, k, v)
-    else:
-        m = MatchScore(
-            investor_enterprise_id=investor_eid,
-            startup_enterprise_id=startup_eid,
-            **payload,
-        )
-        db.session.add(m)
-    return m
-
+    stmt = insert(MatchScore).values(
+        investor_enterprise_id=investor_eid,
+        startup_enterprise_id=startup_eid,
+        **payload,
+    ).on_conflict_do_update(
+        constraint="unique_match",  # matches the UniqueConstraint name in the model
+        set_=payload,
+    )
+    db.session.execute(stmt)
 
 def _latest_calc_time_for_investor(investor_eids):
     if not investor_eids:
@@ -253,7 +256,6 @@ def _latest_calc_time_for_investor(investor_eids):
         .filter(MatchScore.investor_enterprise_id.in_(investor_eids))
         .scalar()
     )
-
 
 def _latest_calc_time_for_startup(startup_eid):
     return (
@@ -267,22 +269,20 @@ def _latest_calc_time_for_startup(startup_eid):
 
 @matching_bp.route("/matches", methods=["GET"])
 def generate_and_return_matches():
-    """
-    Generates (if needed) and returns matches.
-    - If the caller belongs to investor org(s): generates matches for those investor enterprises.
-    - Else if the caller belongs to a startup org: generates matches for that startup (against all investors).
-    Query params:
-      - mode: "investor" | "startup" (optional). If omitted, auto-detect.
-    """
     user, _, err = require_auth()
     if err:
         return err
 
-    now = datetime.utcnow()
-    mode = request.args.get("mode")  # optional override
+    now = _utc_now()
+    mode = request.args.get("mode")
+    limit = request.args.get("limit", type=int)
 
     investor_eids = _user_investor_enterprise_ids(user.id)
-    startup_eids = _user_startup_enterprise_ids(user.id)
+    startup_eids  = _user_startup_enterprise_ids(user.id)
+
+    # Parse If-Modified-Since (seconds precision)
+    ims_raw = request.headers.get("If-Modified-Since")
+    ims_dt  = _http_floor(parse_date(ims_raw)) if ims_raw else None
 
     results = []
     refreshed_now = False
@@ -290,23 +290,33 @@ def generate_and_return_matches():
 
     # --------- Investor mode --------- #
     if (mode == "investor") or (mode is None and investor_eids):
-        # rate-limit by last calculated_at for these investor enterprises
-        last_calc = _latest_calc_time_for_investor(investor_eids)
-        last_refreshed = last_calc.isoformat() if last_calc else None
-        should_refresh = not last_calc or (now - last_calc) >= timedelta(minutes=MATCH_REFRESH_INTERVAL_MINUTES)
+        last_calc = _as_utc(_latest_calc_time_for_investor(investor_eids))
+        last_calc_s = _http_floor(last_calc)
+        last_refreshed = last_calc_s.isoformat() if last_calc_s else None
 
-        if should_refresh:
-            # load all active startups
+        is_stale = (last_calc_s is None) or (now - last_calc_s) >= timedelta(minutes=MATCH_REFRESH_INTERVAL_MINUTES)
+        if (not is_stale) and ims_dt and ims_dt >= last_calc_s:
+            resp = jsonify()
+            resp.status_code = 304
+            resp.headers["Last-Modified"] = http_date(last_calc_s)
+            resp.headers["Cache-Control"] = "private, must-revalidate"
+            resp.headers["Vary"] = "Authorization"
+            return resp
+
+        # Recompute if stale
+        if is_stale:
             startups = (
-                Enterprise.query
-                .filter(Enterprise.enterprise_type.in_(["startup", "both"]), Enterprise.status == "active")
+                db.session.query(Enterprise)
+                .filter(Enterprise.enterprise_type.in_(["startup", "both"]),
+                        Enterprise.status == "active")
                 .all()
             )
             eprof_map = _enterprise_profile_map([e.id for e in startups])
-
-            # each investor enterprise -> its InvestorProfile
-            inv_profiles = InvestorProfile.query.filter(InvestorProfile.enterprise_id.in_(investor_eids)).all()
-
+            inv_profiles = (
+                db.session.query(InvestorProfile)
+                .filter(InvestorProfile.enterprise_id.in_(investor_eids))
+                .all()
+            )
             for prof in inv_profiles:
                 for se in startups:
                     score, reasons = _compute_score(prof, se, eprof_map.get(se.id))
@@ -315,83 +325,131 @@ def generate_and_return_matches():
 
             db.session.commit()
             refreshed_now = True
-            last_refreshed = now.isoformat()
+            last_calc_s = _http_floor(now)
+            last_refreshed = last_calc_s.isoformat()
 
-        # return matches
-        matches = (
-            MatchScore.query
+        # Return matches (optionally limited)
+        q = (
+            db.session.query(MatchScore)
             .filter(MatchScore.investor_enterprise_id.in_(investor_eids))
             .order_by(MatchScore.overall_score.desc().nullslast())
-            .all()
         )
-        # hydrate startups
+        if limit:
+            q = q.limit(limit)
+        matches = q.all()
+
         startup_ids = list({m.startup_enterprise_id for m in matches})
-        e_map = {e.id: e for e in Enterprise.query.filter(Enterprise.id.in_(startup_ids)).all()}
+        e_map  = {e.id: e for e in db.session.query(Enterprise).filter(Enterprise.id.in_(startup_ids)).all()}
         ep_map = _enterprise_profile_map(startup_ids)
+        sp_map = {
+            sp.enterprise_id: sp
+            for sp in db.session.query(StartupProfile).filter(StartupProfile.enterprise_id.in_(startup_ids)).all()
+        }
 
         for m in matches:
             se = e_map.get(m.startup_enterprise_id)
-            sp = ep_map.get(m.startup_enterprise_id)
+            ep = ep_map.get(m.startup_enterprise_id)  # enterprise profile (industry/stage/tags)
+            sp = sp_map.get(m.startup_enterprise_id)  # startup profile (mrr/valuation/metrics)
+
             results.append({
                 "match_id": str(m.id),
                 "investor_enterprise_id": str(m.investor_enterprise_id),
                 "startup": {
                     "id": str(se.id) if se else str(m.startup_enterprise_id),
                     "name": se.name if se else None,
-                    "industry": sp.industry.name if (sp and sp.industry) else None,
-                    "stage": sp.stage.name if (sp and sp.stage) else None,
+                    "industry": ep.industry.name if (ep and ep.industry) else None,
+                    "stage": ep.stage.name if (ep and ep.stage) else None,
                     "location": se.location if se else None,
+                    # Enriched fields for the card UI
+                    # Prefer StartupProfile.team_size; fall back to Enterprise.employee_count
+                    "employees": (sp.team_size if sp and sp.team_size is not None
+                                  else (se.employee_count if se else None)),
+                    "tags": (ep.headline_tags if ep and ep.headline_tags else []),
+                    "mrr_usd": float(sp.display_mrr_usd) if sp and sp.display_mrr_usd is not None else None,
+                    "valuation_usd": float(sp.display_valuation_usd) if sp and sp.display_valuation_usd is not None else None,
+                    "key_metrics": {
+                        "technical_founders_pct": float(sp.technical_founders_pct) if sp and sp.technical_founders_pct is not None else None,
+                        "previous_exits_pct": float(sp.previous_exits_pct) if sp and sp.previous_exits_pct is not None else None,
+                    },
+                    "current_investors": sp.current_investors if sp and sp.current_investors else [],
+                    # Also include a nested shape the UI can read
+                    "startup_profile": {
+                        "team_size": sp.team_size if sp else None,
+                        "mrr_usd": float(sp.display_mrr_usd) if sp and sp.display_mrr_usd is not None else None,
+                        "arr_usd": float(sp.arr_usd) if sp and sp.arr_usd is not None else None,
+                        "current_valuation_usd": float(sp.display_valuation_usd) if sp and sp.display_valuation_usd is not None else None,
+                        "current_investors": sp.current_investors if sp and sp.current_investors else [],
+                        "technical_founders_pct": float(sp.technical_founders_pct) if sp and sp.technical_founders_pct is not None else None,
+                        "previous_exits_pct": float(sp.previous_exits_pct) if sp and sp.previous_exits_pct is not None else None,
+                    },
                 },
                 "overall_score": float(m.overall_score or 0),
                 "score_breakdown": m.score_breakdown or {},
                 "calculated_at": m.calculated_at.isoformat() if m.calculated_at else None,
             })
 
-        return jsonify({
+        resp = jsonify({
             "mode": "investor",
             "matches": results,
             "last_refreshed": last_refreshed,
             "refreshed_now": refreshed_now,
-        }), 200
+        })
+        resp.headers["Last-Modified"] = http_date(last_calc_s or _http_floor(now))
+        resp.headers["Cache-Control"] = "private, must-revalidate"
+        resp.headers["Vary"] = "Authorization"
+        return resp, 200
 
     # --------- Startup mode --------- #
     elif (mode == "startup") or (mode is None and startup_eids):
-        # choose the first startup enterprise (or iterate all if you prefer)
         startup_eid = startup_eids[0]
-        last_calc = _latest_calc_time_for_startup(startup_eid)
-        last_refreshed = last_calc.isoformat() if last_calc else None
-        should_refresh = not last_calc or (now - last_calc) >= timedelta(minutes=MATCH_REFRESH_INTERVAL_MINUTES)
+        last_calc = _as_utc(_latest_calc_time_for_startup(startup_eid))
+        last_calc_s = _http_floor(last_calc)
+        last_refreshed = last_calc_s.isoformat() if last_calc_s else None
 
-        se = Enterprise.query.get(startup_eid)
-        sp_map = _enterprise_profile_map([startup_eid])
-        sp = sp_map.get(startup_eid)
+        is_stale = (last_calc_s is None) or (now - last_calc_s) >= timedelta(minutes=MATCH_REFRESH_INTERVAL_MINUTES)
+        if (not is_stale) and ims_dt and ims_dt >= last_calc_s:
+            resp = jsonify()
+            resp.status_code = 304
+            resp.headers["Last-Modified"] = http_date(last_calc_s)
+            resp.headers["Cache-Control"] = "private, must-revalidate"
+            resp.headers["Vary"] = "Authorization"
+            return resp
 
-        if should_refresh:
-            # all investor profiles
+        # For scoring we need the startup enterprise & its enterprise profile
+        se = db.session.get(Enterprise, startup_eid)
+        ep_map = _enterprise_profile_map([startup_eid])
+        ep = ep_map.get(startup_eid)
+
+        if is_stale:
             inv_profiles = (
-                InvestorProfile.query
+                db.session.query(InvestorProfile)
                 .join(Enterprise, Enterprise.id == InvestorProfile.enterprise_id)
-                .filter(Enterprise.enterprise_type.in_(["investor", "both"]), Enterprise.status == "active")
+                .filter(Enterprise.enterprise_type.in_(["investor", "both"]),
+                        Enterprise.status == "active")
                 .all()
             )
             for prof in inv_profiles:
-                score, reasons = _compute_score(prof, se, sp)
+                score, reasons = _compute_score(prof, se, ep)
                 if score >= MATCH_SCORE_THRESHOLD:
                     _upsert_match(prof.enterprise_id, se.id, score, reasons, now)
 
             db.session.commit()
             refreshed_now = True
-            last_refreshed = now.isoformat()
+            last_calc_s = _http_floor(now)
+            last_refreshed = last_calc_s.isoformat()
 
-        # return matches for this startup
-        matches = (
-            MatchScore.query
+        # Return matches for this startup
+        q = (
+            db.session.query(MatchScore)
             .filter(MatchScore.startup_enterprise_id == startup_eid)
             .order_by(MatchScore.overall_score.desc().nullslast())
-            .all()
         )
+        if limit:
+            q = q.limit(limit)
+        matches = q.all()
+
         inv_ids = list({m.investor_enterprise_id for m in matches})
-        inv_map = {e.id: e for e in Enterprise.query.filter(Enterprise.id.in_(inv_ids)).all()}
+        inv_map = {e.id: e for e in db.session.query(Enterprise).filter(Enterprise.id.in_(inv_ids)).all()}
 
         for m in matches:
             ie = inv_map.get(m.investor_enterprise_id)
@@ -408,64 +466,16 @@ def generate_and_return_matches():
                 "calculated_at": m.calculated_at.isoformat() if m.calculated_at else None,
             })
 
-        return jsonify({
+        resp = jsonify({
             "mode": "startup",
             "matches": results,
             "last_refreshed": last_refreshed,
             "refreshed_now": refreshed_now,
-        }), 200
+        })
+        resp.headers["Last-Modified"] = http_date(last_calc_s or _http_floor(now))
+        resp.headers["Cache-Control"] = "private, must-revalidate"
+        resp.headers["Vary"] = "Authorization"
+        return resp, 200
 
     else:
         return jsonify({"error": "User must belong to an investor or startup enterprise"}), 403
-
-
-@matching_bp.route("/matches/<uuid:match_id>/interact", methods=["POST"])
-def record_match_interaction(match_id):
-    """
-    Body: { "action": "view" | "like" | "message" | "reject" | "save" }
-    Maps to MatchInteraction.interaction_type:
-      - message -> "contact"
-      - reject  -> "pass"
-      - save    -> "follow_up"
-      - like/view passthrough
-    Authorization: caller must belong to either side (investor or startup) of the match.
-    """
-    user, _, err = require_auth()
-    if err:
-        return err
-
-    match = MatchScore.query.get(match_id)
-    if not match:
-        return jsonify({"error": "Match not found"}), 404
-
-    # ensure user is member of either enterprise
-    mem = EnterpriseUser.query.filter(
-        EnterpriseUser.user_id == user.id,
-        EnterpriseUser.is_active.is_(True),
-        EnterpriseUser.enterprise_id.in_([match.investor_enterprise_id, match.startup_enterprise_id]),
-    ).first()
-    if not mem:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    data = request.get_json() or {}
-    action = data.get("action")
-    if action not in {"view", "like", "message", "reject", "save"}:
-        return jsonify({"error": "Invalid action"}), 400
-
-    mapping = {
-        "message": "contact",
-        "reject": "pass",
-        "save": "follow_up",
-    }
-    interaction_type = mapping.get(action, action)
-
-    mi = MatchInteraction(
-        match_id=match.id,
-        user_id=user.id,
-        interaction_type=interaction_type,
-        interaction_value={"source": "api", "original_action": action},
-    )
-    db.session.add(mi)
-    db.session.commit()
-
-    return jsonify({"message": "Interaction recorded"}), 201

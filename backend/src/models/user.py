@@ -333,6 +333,7 @@ class EnterpriseProfile(Base, UUIDMixin, TimestampMixin):
     key_metrics = Column(JSONB, default=dict)
     competitive_advantages = Column(ARRAY(Text))
     target_markets = Column(ARRAY(Text))
+    headline_tags = Column(ARRAY(String), default=list)
 
     enterprise = relationship("Enterprise", back_populates="profile")
     industry = relationship("Industry", back_populates="enterprise_profiles")
@@ -341,6 +342,7 @@ class EnterpriseProfile(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index('idx_enterprise_profile_key_metrics', 'key_metrics', postgresql_using='gin'),
         Index('idx_enterprise_profile_target_markets', 'target_markets', postgresql_using='gin'),
+        Index('idx_enterprise_profile_headline_tags', 'headline_tags', postgresql_using='gin'),
     )
 
 class InvestorProfile(Base, UUIDMixin, TimestampMixin):
@@ -422,6 +424,12 @@ class StartupProfile(Base, UUIDMixin, TimestampMixin):
     traction_metrics = Column(JSONB, default=dict)
     intellectual_property = Column(JSONB, default=dict)
     regulatory_considerations = Column(Text)
+    mrr_usd                 = Column(Numeric(15, 2))     # $/month, optional; UI will fall back to current_revenue
+    arr_usd                 = Column(Numeric(15, 2))     # convenience (12 * MRR)
+    current_valuation_usd   = Column(Numeric(15, 2))     # denormed from latest funding round (post-money if present)
+    current_investors       = Column(ARRAY(String), default=list)  # denormed names for chips
+    technical_founders_pct  = Column(Numeric(5, 2))      # 0–100
+    previous_exits_pct      = Column(Numeric(5, 2))      # 0–100
     enterprise = relationship("Enterprise", back_populates="startup_profile")
     metrics = relationship("StartupMetrics", back_populates="startup_profile", cascade="all, delete-orphan")
     funding_rounds = relationship("FundingRound", back_populates="startup_profile", cascade="all, delete-orphan")
@@ -431,6 +439,24 @@ class StartupProfile(Base, UUIDMixin, TimestampMixin):
         Index('idx_startup_metrics_traction', 'traction_metrics', postgresql_using='gin'),
     )
 
+    # --- helpers the UI can use directly ---
+    @hybrid_property
+    def display_mrr_usd(self):
+        """Prefer explicit mrr_usd; otherwise fall back to current_revenue."""
+        return self.mrr_usd or self.current_revenue
+
+    @hybrid_property
+    def display_valuation_usd(self):
+        """Prefer denormed valuation; otherwise best-effort from latest funding round."""
+        if self.current_valuation_usd:
+            return self.current_valuation_usd
+        # If not denormed, try to read the most recent FundingRound in-memory
+        if self.funding_rounds:
+            latest = sorted((fr for fr in self.funding_rounds if fr.close_date or fr.announcement_date),
+                            key=lambda fr: (fr.close_date or fr.announcement_date), reverse=True)[0]
+            return latest.post_money_valuation or latest.pre_money_valuation
+        return None
+    
 class StartupMetrics(Base, UUIDMixin):
     __tablename__ = 'startup_metrics'
     startup_profile_id = Column(UUID(as_uuid=True), ForeignKey('startup_profile.id', ondelete="CASCADE"), nullable=False, index=True)
@@ -449,8 +475,9 @@ class StartupMetrics(Base, UUIDMixin):
     creator = relationship("User")
 
     __table_args__ = (
-        UniqueConstraint('startup_profile_id', 'metric_type', 'metric_name', 'period_start', 'period_end',
+        UniqueConstraint('startup_profile_id','metric_type','metric_name','period_start','period_end',
                          name='uq_startup_metric_period'),
+        Index('idx_startup_metric_name', 'metric_name'),  # fast lookups
     )
 
 class FundingRound(Base, UUIDMixin, TimestampMixin):
@@ -1370,3 +1397,30 @@ def _sync_enterprise_verified(mapper, connection, target):
             .where(ent_tbl.c.id == row.enterprise_id)
             .values(is_verified=True, verification_date=func.now())
         )
+
+from sqlalchemy import event  # here is fine too
+
+@event.listens_for(FundingRound, "after_insert")
+@event.listens_for(FundingRound, "after_update")
+def _sync_startup_profile_from_round(mapper, connection, target):
+    sp_tbl = StartupProfile.__table__
+    new_val = target.post_money_valuation or target.pre_money_valuation
+
+    inv = []
+    if target.lead_investor:
+        inv.append(target.lead_investor)
+    if isinstance(target.investors, list):
+        inv.extend([x for x in target.investors if isinstance(x, str) and x])
+
+    seen, dedup = set(), []
+    for name in inv:
+        key = name.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            dedup.append(name.strip())
+
+    connection.execute(
+        sp_tbl.update()
+        .where(sp_tbl.c.id == target.startup_profile_id)
+        .values(current_valuation_usd=new_val, current_investors=dedup)
+    )

@@ -23,8 +23,7 @@ from src.routes.gamification import game_bp
 from src.routes.market_recs import recs_bp
 from src.socketio import socketio
 from src.routes.stripe_webhook import webhooks_bp
-from src.routes.enterprise_profile import entrepreneur_bp
-
+from src.routes.enterprise import entrepreneur_bp, enterprise_bp
 load_dotenv()
 
 def create_app():
@@ -59,23 +58,24 @@ def create_app():
         import src.models  # <-- important for Alembic autogenerate
 
     # Blueprints
-    app.register_blueprint(users_bp, url_prefix='/api')
+    app.register_blueprint(users_bp, url_prefix='/api/users')
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(investor_bp, url_prefix="/api/investors")
-    app.register_blueprint(entrepreneur_bp, url_prefix="/api/entrepreneurs")
-    app.register_blueprint(matching_bp, url_prefix='/api')
-    app.register_blueprint(events_bp, url_prefix='/api')
-    app.register_blueprint(documents_bp, url_prefix='/api')
-    app.register_blueprint(messages_bp, url_prefix='/api')
-    app.register_blueprint(analytics_bp, url_prefix='/api')
+    app.register_blueprint(enterprise_bp, url_prefix="/api/enterprise")
+    app.register_blueprint(entrepreneur_bp, url_prefix="/api/entrepreneur")
+    app.register_blueprint(matching_bp, url_prefix='/api/matching')
+    app.register_blueprint(events_bp, url_prefix='/api/events')
+    app.register_blueprint(documents_bp, url_prefix='/api/documents')
+    app.register_blueprint(messages_bp, url_prefix='/api/messages')
+    app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
     app.register_blueprint(subscriptions_bp, url_prefix="/api/subscriptions")
-    app.register_blueprint(lookups_bp, url_prefix="/api")
-    app.register_blueprint(members_bp, url_prefix="/api")
-    app.register_blueprint(startup_bp, url_prefix="/api")
-    app.register_blueprint(vp_bp,    url_prefix="/api")
-    app.register_blueprint(sims_bp,  url_prefix="/api")
-    app.register_blueprint(game_bp,  url_prefix="/api")
-    app.register_blueprint(recs_bp,  url_prefix="/api")
+    app.register_blueprint(lookups_bp, url_prefix="/api/lookups")
+    app.register_blueprint(members_bp, url_prefix="/api/enterprise/members")
+    app.register_blueprint(startup_bp, url_prefix="/api/startups")
+    app.register_blueprint(vp_bp,    url_prefix="/api/virtual-portfolios")
+    app.register_blueprint(sims_bp,  url_prefix="/api/simulations")
+    app.register_blueprint(game_bp,  url_prefix="/api/gamification")
+    app.register_blueprint(recs_bp,  url_prefix="/api/market-recs")
     app.register_blueprint(webhooks_bp, url_prefix="/stripe")
 
     # Static files

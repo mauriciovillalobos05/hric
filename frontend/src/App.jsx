@@ -10,6 +10,8 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
+import Portfolio from "./pages/Portfolio/Portfolio";
+import Analysis from "./pages/AnalysisMonteCarlo/Analysis";
 import InvestorProfile from "./pages/complete-profile/InvestorProfile";
 import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import EmailPendingSecondary from "./pages/emailPendingSecondary";
@@ -64,6 +66,25 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+
+        
+        <Route
+          path="/portfolio"
+          element={
+            <ProtectedRoute>
+              <Portfolio />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/analysis"
+          element={
+            <ProtectedRoute>
+              <Analysis />
+            </ProtectedRoute>
+          }
+        />
+
 
         {/* Secondary Email pending confirmation route */}
         <Route

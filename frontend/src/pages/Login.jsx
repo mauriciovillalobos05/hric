@@ -23,6 +23,20 @@ function Login() {
     e.preventDefault();
     setError(null);
 
+    // 🚨 TEMPORARY: Skip Supabase login and hardcode a role
+    const role = "entrepreneur"; // change to "entrepreneur" or "user" for testing
+
+    if (role === "investor") {
+      navigate("/dashboard/investor");
+    } else if (role === "entrepreneur") {
+      navigate("/dashboard/entrepreneur");
+    } else {
+      navigate("/dashboard/user");
+    }
+
+    return; // stop execution so Supabase login is skipped
+
+    // ---- ORIGINAL LOGIN FLOW BELOW ----
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -35,7 +49,6 @@ function Login() {
 
     const sessionUser = data.user;
 
-    // Now fetch from your custom 'user' table
     const { data: userProfile, error: profileError } = await supabase
       .from("user")
       .select("role")
@@ -48,12 +61,11 @@ function Login() {
       return;
     }
 
-    const role = userProfile.user_type;
+    const roleFromDb = userProfile.user_type;
 
-    // Navigate based on role
-    if (role === "investor") {
+    if (roleFromDb === "investor") {
       navigate("/dashboard/investor");
-    } else if (role === "entrepreneur") {
+    } else if (roleFromDb === "entrepreneur") {
       navigate("/dashboard/entrepreneur");
     } else {
       navigate("/dashboard/user");

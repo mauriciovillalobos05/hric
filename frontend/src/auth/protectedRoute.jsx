@@ -7,23 +7,29 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
+
 function ProtectedRoute({ children, redirectPath = "/login", isAllowed }) {
   const [checking, setChecking] = useState(true);
   const [session, setSession] = useState(null);
 
   useEffect(() => {
+    if (DEMO_MODE) {
+      setChecking(false);
+      return;
+    }
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setChecking(false);
     });
   }, []);
 
-  if (checking) return null; // or a spinner
+  if (checking) return null;
 
-  // Require a signed-in, confirmed user
+  if (DEMO_MODE) return children ?? <Outlet />; // <-- bypass guard entirely
+
+  // For real auth:
   const signedInAndConfirmed = !!session?.user?.email_confirmed_at;
-
-  // If isAllowed is provided, enforce it in addition to sign-in
   const allowed = signedInAndConfirmed && (isAllowed ?? true);
 
   return allowed ? (children ?? <Outlet />) : <Navigate to={redirectPath} replace />;

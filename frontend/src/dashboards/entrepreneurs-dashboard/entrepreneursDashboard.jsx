@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button.jsx";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
-import DashboardShortcuts from "./dashboard-components/components/directAccessButtons/DashboardShortcuts.jsx";
+import EntrepreneurTabs from "./dashboard-components/components/entrepreneurTabs.jsx";
 import MessagesPreview from "./dashboard-components/components/messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./dashboard-components/components/messagesComponents/messagesDock.jsx";
 import MatchesDashboard from "./dashboard-components/components/matchComponents/matchesDashboard.jsx";
@@ -50,27 +50,70 @@ function EntrepreneurDashboard() {
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [filters, setFilters] = useState({
-    userType: "vc",
-    stagePreference: "All",
-    locationPreference: "All",
-    industryPreference: "All",
-    checkSizeRange: "All",
+    // hard filters
+    stage: "All",
+    industry: "All",
+    geo: "All",
+    investorType: "Any", // "VC" | "Angel" | "Corporate" | "Any"
+    checkMin: 0, // dollars
+    checkMax: Infinity,
+    followOnMin: 0, // %
+    boardSeat: "any", // "any" | "willing" | "avoid"
+    syndication: "any", // "any" | "lead" | "co-lead"
+    dealTimeMaxDays: 999, // cap on avg deal time
 
-    // sliders
-    roiWeight: 20,
-    technicalFoundersWeight: 15,
-    previousExitsWeight: 15,
-    revenueWeight: 20,
-    teamSizeWeight: 15,
-    currentlyRaisingWeight: 15,
+    // soft weights (0–100 or normalized in transformFilters)
+    wTraction: 25,
+    wTeam: 20,
+    wMarket: 20,
+    wGrowth: 20,
+    wTechFounders: 15,
   });
 
   const navigate = useNavigate();
-
+  const HARDCODE_MODE = true;
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
     // Optional: run matching logic here based on updated filters
   };
+
+  // Budget parsing function
+  function parseCheckRange(str = "") {
+    // "$5M - $50M" | "$250k–$1.5M" | "$10M" | "Undisclosed"
+    if (!str || /undisclosed/i.test(str)) return [0, Infinity];
+    // grab all numbers with optional decimals, k/m/b suffix
+    const parts = [...str.matchAll(/(\d+(\.\d+)?)(\s*[kmb])?/gi)].map((m) => {
+      const n = parseFloat(m[1]);
+      const suf = (m[3] || "").trim().toLowerCase();
+      const mult =
+        suf === "k" ? 1e3 : suf === "m" ? 1e6 : suf === "b" ? 1e9 : 1;
+      return n * mult;
+    });
+    if (parts.length === 1) return [parts[0], parts[0]];
+    if (parts.length >= 2)
+      return [Math.min(parts[0], parts[1]), Math.max(parts[0], parts[1])];
+    return [0, Infinity];
+  }
+
+  // Average deal time parsing function
+  function parseAvgDealTime(str = "") {
+    // "3-6 months" | "45-90 days" | "8 weeks" | "3 months"
+    if (!str) return 999;
+    const range = [...str.matchAll(/(\d+(\.\d+)?)/g)].map((m) =>
+      parseFloat(m[1])
+    );
+    const hasMonths = /month/i.test(str);
+    const hasWeeks = /week/i.test(str);
+    const hasDays = /day/i.test(str);
+
+    const avg = range.length
+      ? range.reduce((a, b) => a + b, 0) / range.length
+      : 0;
+    if (hasMonths) return Math.round(avg * 30);
+    if (hasWeeks) return Math.round(avg * 7);
+    if (hasDays) return Math.round(avg);
+    return 999;
+  }
 
   //
   // Example matcher function
@@ -78,28 +121,58 @@ function EntrepreneurDashboard() {
 
   useEffect(() => {
     const matcher = new InvestorMatcher();
-    const simFilters = transformFilters(filters);
 
     const filteredAndScored = mockMatches
       .filter((inv) => {
-        const matchesStage =
-          filters.stagePreference === "All" ||
-          inv.stage.includes(filters.stagePreference);
-        const matchesIndustry =
-          filters.industryPreference === "All" ||
-          inv.industries.includes(filters.industryPreference);
-        const matchesLocation =
-          filters.locationPreference === "All" ||
-          inv.location.includes(filters.locationPreference);
-        return matchesStage && matchesIndustry && matchesLocation;
+        const stageOk =
+          filters.stage === "All" || inv.stage?.includes(filters.stage);
+        const industryOk =
+          filters.industry === "All" ||
+          inv.industries?.includes(filters.industry);
+        const geoOk =
+          filters.geo === "All" || inv.location?.includes(filters.geo);
+        const typeOk =
+          filters.investorType === "Any" || inv.type === filters.investorType;
+
+        const [min, max] = parseCheckRange(inv.checkSize); // "$5M - $50M" -> [5_000_000, 50_000_000]
+        const checkOk = max >= filters.checkMin && min <= filters.checkMax;
+
+        const followOk = (inv.followOnRate ?? 0) >= filters.followOnMin;
+
+        const boardOk =
+          filters.boardSeat === "any" ||
+          (filters.boardSeat === "willing" &&
+            /board/i.test(inv.boardSeats || "")) ||
+          (filters.boardSeat === "avoid" &&
+            !/board/i.test(inv.boardSeats || ""));
+
+        const syndOk =
+          filters.syndication === "any" ||
+          inv.investmentBehavior?.syndicationPreference === filters.syndication;
+
+        const avgDealDays = parseAvgDealTime(inv.avgDealTime); // "3-6 months" -> ~135–180d avg; pick mid
+        const ddDays = inv.investmentBehavior?.dueDiligenceTime ?? avgDealDays;
+        const timeOk = Math.min(avgDealDays, ddDays) <= filters.dealTimeMaxDays;
+
+        return (
+          stageOk &&
+          industryOk &&
+          geoOk &&
+          typeOk &&
+          checkOk &&
+          followOk &&
+          boardOk &&
+          syndOk &&
+          timeOk
+        );
       })
       .map((investor) => {
-        const sim = matcher.runMonteCarloSimulation(investor, simFilters);
-        return {
-          ...investor,
-          matchScore: sim.mean, // or baseScore if you want the raw weighted average
-          simulation: sim,
-        };
+        // transform weights into your sim input
+        const sim = matcher.runMonteCarloSimulation(
+          investor,
+          transformFilters(filters)
+        );
+        return { ...investor, matchScore: sim.mean, simulation: sim };
       });
 
     setMatchedInvestors(filteredAndScored);
@@ -141,6 +214,72 @@ function EntrepreneurDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        if (HARDCODE_MODE) {
+          // ---- Hardcoded demo data (no backend required) ----
+          setEntrepreneurName("Alex Rivera");
+          setUserRole("entrepreneur");
+          setAvatarUrl(defaultAvatar);
+
+          setEnterprise({
+            name: "NeoCart AI",
+            industry: "Artificial Intelligence",
+            stage: "Seed",
+            location: "Guadalajara",
+            team_size: 8,
+            funding_needed: 350000,
+            pitch_deck_url: "https://example.com/deck.pdf",
+            financials: true,
+            business_model: "SaaS",
+          });
+
+          setMessages([
+            {
+              sender: "Investor JP",
+              preview: "Interested in your KPIs...",
+              time: "10:14",
+              read: false,
+            },
+            {
+              sender: "Ana (HRIC)",
+              preview: "Event reminder for Thu",
+              time: "09:21",
+              read: true,
+            },
+          ]);
+
+          const upcoming = [
+            {
+              id: "evt_1",
+              title: "HRIC Pitch Night",
+              description: "3 startups, panel Q&A",
+              date: new Date(Date.now() + 3 * 24 * 3600e3).toISOString(),
+              agenda: ["Networking", "Pitches", "Q&A"],
+              presenters: ["Panel A", "Panel B"],
+              registration_status: null, // will turn "registered" after clicking the button
+            },
+            {
+              id: "evt_2",
+              title: "Investor Roundtable",
+              description: "Sector: AI/Fintech",
+              date: new Date(Date.now() + 10 * 24 * 3600e3).toISOString(),
+              agenda: ["Roundtable", "Breakouts"],
+              presenters: ["VC Group"],
+              registration_status: "registered",
+            },
+          ];
+          setEvents(upcoming);
+
+          setNotifications([
+            {
+              title: "You have a new investor match",
+              time: "Just now",
+              read: false,
+            },
+          ]);
+
+          setLoading(false);
+          return; // <-- IMPORTANT: skip the Supabase branch below
+        }
         const {
           data: { session },
         } = await supabase.auth.getSession();
@@ -388,11 +527,6 @@ function EntrepreneurDashboard() {
         />
       </div>
 
-      {/* Shortcut navigation */}
-      <div className="px-6 mt-4">
-        <DashboardShortcuts />
-      </div>
-
       {/* Profile Completion */}
       <div id="profile-completion">
         <ProfileStatusCard
@@ -402,39 +536,38 @@ function EntrepreneurDashboard() {
         />
       </div>
 
-      {/* Matches */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* LEFT: Filter Panel */}
-        <div className="w-full lg:w-1/4 space-y-4 sticky top-6">
-          <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
-          <Button
-            variant="outline"
-            className="w-full flex items-center justify-center"
-            onClick={resetFilters}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reset Filters
-          </Button>
-        </div>
+      <EntrepreneurTabs
+        selectedTab="matches"
+        onTabChange={() => {}}
+        // filters
+        filters={filters}
+        onFilterChange={handleFilterChange}
+        onResetFilters={resetFilters}
+        // matches
+        matchedInvestors={matchedInvestors}
+        selectedInvestors={selectedInvestors}
+        onInvestorSelect={handleInvestorSelect}
+        simulationResults={simulationResults}
+        // overview
+        enterprise={enterprise}
+        events={events}
+        onRegisterClick={handleOpenRegister}
+        registerModalOpen={showRegisterModal}
+        onCloseRegisterModal={() => setShowRegisterModal(false)}
+        selectedEvent={selectedEvent}
+        onSubmitRegistration={handleSubmitRegistration}
+        userRole={userRole}
+        // messages
+        messages={messages}
+        onOpenChat={handleOpenChat}
+        openChats={openChats}
+        onCloseChat={handleCloseChat}
+      />
 
-        {/* RIGHT: Dashboard */}
-        <div className="w-full lg:w-3/4">
-          <MatchesDashboard
-            matchedInvestors={matchedInvestors}
-            selectedInvestors={selectedInvestors}
-            onInvestorSelect={handleInvestorSelect}
-            simulationResults={simulationResults}
-          />
-        </div>
-      </div>
+      
 
       {/* Events */}
       <div id="events">
-        <EventList
-          events={events}
-          role={userRole}
-          onRegisterClick={handleOpenRegister}
-        />
         <RegisterModal
           open={showRegisterModal}
           onClose={() => setShowRegisterModal(false)}
@@ -442,17 +575,6 @@ function EntrepreneurDashboard() {
           role={userRole}
           onSubmit={handleSubmitRegistration}
         />
-      </div>
-
-      {/* Documents */}
-      <div id="documents">
-        <DocumentStatus />
-      </div>
-
-      {/* Messages */}
-      <div id="messages">
-        <MessagesPreview messages={messages} onOpenChat={handleOpenChat} />
-        <MessagesDock openChats={openChats} onCloseChat={handleCloseChat} />
       </div>
 
       {/* Insights */}

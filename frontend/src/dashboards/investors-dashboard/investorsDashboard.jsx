@@ -1,3 +1,4 @@
+// src/pages/InvestorsDashboard.jsx
 import React, { useState, useEffect, useRef } from "react";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
 import { Loader2 } from "lucide-react";
@@ -5,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import defaultAvatar from "../../assets/default_user_image.png";
 import InvestorTabs from "./dashboard-components/components/investorTabs.jsx";
 import { makeApi } from "@/lib/apiClient.js";
+import transformFilters from "./dashboard-components/components/matchComponents/FilterPanel/transformFilters.jsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -28,10 +30,21 @@ function InvestorsDashboard() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [selectedTab, setSelectedTab] = useState("matches");
 
-  // keep token & userId handy for follow-up actions (e.g. event registration)
+  // multi-select filters state
+  const [filters, setFilters] = useState({
+    stagePreferences: [],
+    locationPreferences: [],
+    industryPreferences: [],
+    roiWeight: 20,
+    technicalFoundersWeight: 15,
+    previousExitsWeight: 10,
+    revenueWeight: 25,
+    teamSizeWeight: 10,
+    currentlyRaisingWeight: 20,
+  });
+
   const authRef = useRef({ token: null, userId: null });
 
-  // ---------- Mappers from API -> UI ----------
   const mapMessages = (items) =>
     (Array.isArray(items) ? items : []).map((m) => ({
       id: m.id,
@@ -45,210 +58,175 @@ function InvestorsDashboard() {
       id: it.match_id || it.id,
       startup_id: it.startup_enterprise_id || it.startup?.id,
       startup_name: it.startup?.name || it.startup_name || "Startup",
-      industry:
-        it.startup?.profile?.industry?.name ||
-        it.industry ||
-        it.startup_industry ||
-        "",
-      funding_stage:
-        it.startup?.profile?.stage?.name || it.stage || it.funding_stage || "",
+      industry: it.startup?.profile?.industry || it.industry || it.startup_industry || "",
+      funding_stage: it.startup?.profile?.stage || it.stage || it.funding_stage || "",
+      location: it.startup?.location || it.location || "",
       score: Number(it.overall_score ?? 0),
       badges: it.badges || [],
       _raw: it,
     }));
 
-  const mapEvents = (items = [], userId) =>
-    items.map((e) => ({
-      id: e.id,
-      title: e.title,
-      description: e.description,
-      date: e.start_time || e.date, // your API might send start_time
-      agenda: e.agenda || [],
-      presenters: e.speakers || e.presenters || [],
-      registration_status:
-        e.registration?.status || e.registration_status || null,
-      _raw: e,
-    }));
+  const filtersActive = (f) =>
+    (f.stagePreferences?.length > 0) ||
+    (f.industryPreferences?.length > 0) ||
+    (f.locationPreferences?.length > 0);
+
+  const applyLocalMultiFilter = (allMatches, f) => {
+    const lower = (s) => (s || "").toString().trim().toLowerCase();
+    const has = (arr, x) => arr.includes(x);
+
+    const wantStages = (f.stagePreferences || []).map(lower);
+    const wantIndustries = (f.industryPreferences || []).map(lower);
+    const wantLocs = (f.locationPreferences || []).map(lower);
+
+    return (filtersActive(f) ? allMatches.filter((m) => {
+      const stage = lower(m.funding_stage);
+      const ind = lower(m.industry);
+      const loc = lower(m.location || m._raw?.startup?.location || "");
+
+      if (wantStages.length && !has(wantStages, stage)) return false;          // exact
+      if (wantIndustries.length && !has(wantIndustries, ind)) return false;    // exact
+      if (wantLocs.length && !wantLocs.some((w) => loc.includes(w))) return false; // substring any
+      return true;
+    }) : allMatches);
+  };
+
+  const fetchMatchesWithFilters = async (raw) => {
+    const { token } = authRef.current || {};
+    if (!token) return;
+
+    const f = transformFilters(raw); // gives arrays + back-compat singles
+    try {
+      const res = await fetchMatchesApi(
+        {
+          filters: {
+            stagePreferences: f.stagePreferences,
+            industryPreferences: f.industryPreferences,
+            locationPreferences: f.locationPreferences,
+            // back-compat singles if your server still reads them
+            stagePreference: f.stagePreference,
+            industryPreference: f.industryPreference,
+            locationPreference: f.locationPreference,
+          },
+          weights: {
+            roiWeight: f.roiWeight,
+            technicalFoundersWeight: f.technicalFoundersWeight,
+            previousExitsWeight: f.previousExitsWeight,
+            revenueWeight: f.revenueWeight,
+            teamSizeWeight: f.teamSizeWeight,
+            currentlyRaisingWeight: f.currentlyRaisingWeight,
+          },
+        },
+        token
+      );
+
+      const mMatches = mapMatches(res?.matches || []);
+      setMatches(mMatches);
+      setFilteredMatches(filtersActive(f) && mMatches.length === 0 ? [] : mMatches);
+    } catch (err) {
+      console.warn("Server match fetch failed, falling back locally:", err);
+      setFilteredMatches(applyLocalMultiFilter(matches, f));
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
 
-    const fetchData = async () => {
+    const bootstrap = async () => {
       setLoading(true);
       try {
-        // 1) Auth via Supabase (we use its JWT for your API)
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.user) {
-          setLoading(false);
-          return;
-        }
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) { setLoading(false); return; }
 
         const token = session.access_token;
         const userId = session.user.id;
         authRef.current = { token, userId };
         const api = makeApi(token);
-        const inboxRes = await api.messages(5);
-        const inboxItems = Array.isArray(inboxRes?.items)
-          ? inboxRes.items
-          : Array.isArray(inboxRes?.messages)
-          ? inboxRes.messages
-          : Array.isArray(inboxRes)
-          ? inboxRes
-          : [];
 
-        setInbox(mapMessages(inboxItems));
-
-        const notifRes = await api.notifications(20);
-        const notifItems = Array.isArray(notifRes?.items)
-          ? notifRes.items
-          : Array.isArray(notifRes?.messages)
-          ? notifRes.messages
-          : Array.isArray(notifRes)
-          ? notifRes
-          : [];
-
-        setNotifications(mapMessages(notifItems));
-        // 2) Load everything in parallel from your endpoints
-        const [me, investorData, inbox, recs, upcoming, notifs] =
-          await Promise.all([
-            api.me(), // { first_name, last_name, profile_image_url, role, ... }
-            api.investorMe(), // investor profile
-            api.messages(5), // inbox preview
-            api.matches({ limit: 50, mode: "investor" }), // recommendations
-            api.events(20), // upcoming + registration status
-            api.notifications(20).catch(() => []), // best-effort
-          ]);
-
+        // Fetch basic stuff
+        const [me, investorData, inbox, upcoming, notifs] = await Promise.all([
+          api.me(),
+          api.investorMe(),
+          api.messages(5),
+          api.events(20),
+          api.notifications(20).catch(() => []),
+        ]);
         if (cancelled) return;
 
-        // 3) Apply to UI state
         const firstName = me?.first_name || "Investor";
         const lastName = me?.last_name || "";
-        setInvestorName(
-          me?.full_name || `${firstName}${lastName ? " " + lastName : ""}`
-        );
+        setInvestorName(me?.full_name || `${firstName}${lastName ? " " + lastName : ""}`);
         setUserRole(me?.role || me?.user_role || "");
         setAvatarUrl(me?.profile_image_url || defaultAvatar);
         setInvestor(investorData || null);
 
-        const mMsgs = mapMessages(inbox);
-        setMessages(mMsgs);
+        setMessages(mapMessages(inbox?.items || inbox?.messages || inbox || []));
+        setNotifications(mapMessages(notifs?.items || notifs?.messages || notifs || []));
 
-        const mMatches = mapMatches(recs?.matches || []);
-        setMatches(mMatches);
-        setFilteredMatches(mMatches);
+        setEvents((upcoming || []).map((e) => ({
+          id: e.id,
+          title: e.title,
+          description: e.description,
+          date: e.start_time || e.date,
+          agenda: e.agenda || [],
+          presenters: e.speakers || e.presenters || [],
+          registration_status: e.registration?.status || e.registration_status || null,
+          _raw: e,
+        })));
 
-        const mEvents = mapEvents(upcoming, userId);
-        setEvents(mEvents);
+        // Seed from sessionStorage if you like
+        const stored = JSON.parse(sessionStorage.getItem("investmentPreferences") || "null");
+        const initial = {
+          ...filters,
+          stagePreferences: stored?.investment_stages || stored?.stagePreferences || [],
+          industryPreferences: stored?.industries || stored?.industryPreferences || [],
+          locationPreferences: stored?.geographic_focus || stored?.locationPreferences || [],
+        };
+        setFilters(initial);
 
-        setNotifications(
-          Array.isArray(notifs) && notifs.length
-            ? notifs.map((n) => ({
-                title: n.title || n.type || "Notification",
-                time: new Date(
-                  n.created_at || n.sent_at || Date.now()
-                ).toLocaleString(),
-                read: !!n.read_at,
-                _raw: n,
-              }))
-            : []
-        );
-      } catch (err) {
-        console.error("Investor dashboard fetch error (API):", err);
-
-        // ---- Fallback demo events, like you had before ----
-        const now = Date.now();
-        const plusDays = (d) =>
-          new Date(now + d * 24 * 60 * 60 * 1000).toISOString();
-        setEvents([
-          {
-            id: "evt_demo_err_001",
-            title: "Fallback Event",
-            description: "Shown because event fetch failed.",
-            date: plusDays(5),
-            agenda: ["Intro", "Session"],
-            presenters: ["TBD"],
-            registration_status: null,
-          },
-          {
-            id: "evt_demo_err_002",
-            title: "Backup Pitch Night",
-            description: "Backup list for local testing without a database.",
-            date: plusDays(10),
-            agenda: ["Welcome", "Pitches", "Networking"],
-            presenters: ["Startup A", "Startup B"],
-            registration_status: null,
-          },
-        ]);
+        await fetchMatchesWithFilters(initial);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    fetchData();
-    return () => {
-      cancelled = true;
-    };
+    bootstrap();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleOpenRegister = (event) => {
-    setSelectedEvent(event);
-    setShowRegisterModal(true);
-  };
+  const handleOpenRegister = (event) => { setSelectedEvent(event); setShowRegisterModal(true); };
 
   const handleSubmitRegistration = async (answers) => {
     try {
       const { token, userId } = authRef.current || {};
       if (!token || !userId) throw new Error("Not authenticated");
       const api = makeApi(token);
-
       await api.registerToEvent(selectedEvent.id, answers);
-
       setEvents((prev) =>
-        prev.map((e) =>
-          e.id === selectedEvent.id
-            ? { ...e, registration_status: "registered" }
-            : e
-        )
+        prev.map((e) => e.id === selectedEvent.id ? { ...e, registration_status: "registered" } : e)
       );
       setShowRegisterModal(false);
-    } catch (e) {
-      console.error("Event registration failed:", e);
-    }
+    } catch (e) { console.error("Event registration failed:", e); }
   };
 
-  const handleSearchClick = ({ industry, stage }) => {
-    const filtered = matches.filter((match) => {
-      const matchesIndustry = industry
-        ? String(match.industry || "")
-            .toLowerCase()
-            .includes(industry.toLowerCase())
-        : true;
-      const matchesStage = stage
-        ? String(match.funding_stage || "")
-            .toLowerCase()
-            .includes(stage.toLowerCase())
-        : true;
-      return matchesIndustry && matchesStage;
-    });
-    setFilteredMatches(filtered);
+  // Called by Tools/Search – accept arrays or strings
+  const handleSearchClick = (payload = {}) => {
+    const ensureArr = (v) => Array.isArray(v) ? v : (v ? [v] : []);
+    const nextRaw = {
+      ...filters,
+      stagePreferences: ensureArr(payload.stages ?? payload.stage ?? filters.stagePreferences),
+      industryPreferences: ensureArr(payload.industries ?? payload.industry ?? filters.industryPreferences),
+      locationPreferences: ensureArr(payload.locations ?? payload.location ?? filters.locationPreferences),
+    };
+    setFilters(nextRaw);
+    fetchMatchesWithFilters(nextRaw);
   };
 
   const handleOpenChat = (msg) => {
-    setOpenChats((prev) => {
-      const alreadyOpen = prev.some((chat) => chat.sender === msg.sender);
-      return alreadyOpen
-        ? prev
-        : [...prev, { sender: msg.sender, history: [msg] }];
-    });
+    setOpenChats((prev) => prev.some((c) => c.sender === msg.sender) ? prev : [...prev, { sender: msg.sender, history: [msg] }]);
   };
-
-  const handleCloseChat = (sender) => {
-    setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
-  };
+  const handleCloseChat = (sender) => setOpenChats((prev) => prev.filter((c) => c.sender !== sender));
 
   if (loading) {
     return (
@@ -268,23 +246,20 @@ function InvestorsDashboard() {
         messages={messages}
         onOpenChat={handleOpenChat}
       />
-
       <InvestorTabs
         matches={matches}
         filteredMatches={filteredMatches}
-        onSearchClick={handleSearchClick}
+        onSearchClick={handleSearchClick} // accepts { industries, stages, locations }
         selectedTab={selectedTab}
-        onTabChange={(value) => setSelectedTab(value)}
-        // Overview content
+        onTabChange={setSelectedTab}
         events={events}
         userRole={userRole}
-        onRegisterClick={handleOpenRegister}
+        onRegisterClick={setShowRegisterModal}
         registerModalOpen={showRegisterModal}
         onCloseRegisterModal={() => setShowRegisterModal(false)}
         selectedEvent={selectedEvent}
         onSubmitRegistration={handleSubmitRegistration}
         onMetricsLoaded={() => {}}
-        // Messages content
         messages={messages}
         onOpenChat={handleOpenChat}
         openChats={openChats}

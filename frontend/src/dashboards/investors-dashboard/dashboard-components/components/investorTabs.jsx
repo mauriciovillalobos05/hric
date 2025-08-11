@@ -320,8 +320,11 @@ function InvestorTabs({
               // Compare uses sidebar w/ SpiderChart
               <SidebarLayout>
                 {selectedInvestors.length === 0 ? (
-                  <div className="border rounded-lg p-6 text-sm text-muted-foreground">
+                  
+                  <div className="border rounded-lg p-6">
+                    <p className="text-muted-foreground">
                     Select one or more items in <span className="font-medium">Matches</span> to visualize in the radar chart.
+                    </p>
                   </div>
                 ) : (
                   <SpiderChart investors={matchedInvestors} selectedInvestors={selectedInvestors} />
@@ -393,8 +396,11 @@ function InvestorTabs({
       <TabsContent value="montecarlo" className="mt-4">
         <SidebarLayout>
           {selectedInvestors.length === 0 ? (
-            <div className="border rounded-lg p-6 text-sm text-muted-foreground">
+            
+            <div className="border rounded-lg p-6">
+              <p className="text-muted-foreground">
               Select one item in <span className="font-medium">Matches</span> to run the Monte Carlo simulation.
+              </p>
             </div>
           ) : (
             <div className="w-full">
@@ -402,13 +408,16 @@ function InvestorTabs({
                 <div className="text-sm text-muted-foreground">
                   Showing simulation for: <span className="font-medium">{selectedInvestors[0]?.name}</span>
                 </div>
-                <Button onClick={() => rerunSimulationForSelected()} size="sm" variant="outline">
-                  Re-run Simulation
-                </Button>
+                {
+                  //<Button onClick={() => rerunSimulationForSelected()} size="sm" variant="outline">
+                  //  Re-run Simulation
+                  //</Button> add when it works lol
+                }
+                
               </div>
               <MonteCarloResults
-                selectedStartup={selectedInvestors[0]}
-                simulationResults={simulationResults || selectedInvestors[0]?.simulation}
+                selectedStartup={selectedInvestors[selectedInvestors.length - 1]}
+                simulationResults={simulationResults || selectedInvestors[selectedInvestors.length - 1]?.simulation}
               />
             </div>
           )}

@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  MessageSquare,
 } from "lucide-react";
 
 // Core dashboard pieces
@@ -32,11 +33,26 @@ import FilterPanel from "./matchComponents/FilterPanel/filterPanel.jsx";
 import mockMatches from "./matchComponents/mockInvestors.js";
 import StartupCard from "./matchComponents/FilterPanel/StartupCard.jsx";
 
+import SpiderChart from "./matchComponents/SpiderChart.jsx";
+
 // Tabs to keep: matches, analytics, compare, mont carlo, overview, messages
 const TABS = [
   { value: "matches", label: "Matches", icon: Users },
-  { value: "analytics", label: "Analytics", icon: BarChart3 },
-  { value: "compare", label: "Compare", icon: Radar },
+  {
+    value: "analytics",
+    label: "Analytics",
+    icon: BarChart3,
+    // We render Analytics explicitly in the return (sidebar layout, placeholder only)
+  },
+  {
+    value: "compare",
+    label: "Compare",
+    icon: Radar,
+    // Render SpiderChart here (moved from Analytics)
+    render: ({ matchedInvestors, selectedInvestors }) => (
+      <SpiderChart investors={matchedInvestors} selectedInvestors={selectedInvestors} />
+    ),
+  },
   { value: "montecarlo", label: "Monte Carlo", icon: BarChart3 },
   {
     value: "overview",
@@ -54,42 +70,37 @@ const TABS = [
       onSubmitRegistration,
     }) => (
       <>
-      
-      <InvestorOverview onMetricsLoaded={onMetricsLoaded ?? (() => {})} />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left column */}
-        <div className="space-y-4">
-          <PortfolioSummary />
+        <InvestorOverview onMetricsLoaded={onMetricsLoaded ?? (() => {})} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Left column */}
+          <div className="space-y-4">
+            <PortfolioSummary />
+          </div>
+
+          {/* Right column */}
+          <div className="space-y-4">
+            <InvestorTools onSearchClick={onSearchClick} />
+          </div>
         </div>
 
-        {/* Right column */}
-        <div className="space-y-4">
-          <InvestorTools onSearchClick={onSearchClick} />
-          
+        {/* Events */}
+        <div id="events">
+          <EventList events={events} role={userRole} onRegisterClick={onRegisterClick} />
+          <RegisterModal
+            open={registerModalOpen}
+            onClose={onCloseRegisterModal}
+            event={selectedEvent}
+            role={userRole}
+            onSubmit={onSubmitRegistration}
+          />
         </div>
-      </div>
-      {/* Events */}
-      <div id="events">
-            <EventList
-              events={events}
-              role={userRole}
-              onRegisterClick={onRegisterClick}
-            />
-            <RegisterModal
-              open={registerModalOpen}
-              onClose={onCloseRegisterModal}
-              event={selectedEvent}
-              role={userRole}
-              onSubmit={onSubmitRegistration}
-            />
-          </div>
       </>
     ),
   },
   {
     value: "messages",
     label: "Messages",
-    icon: Users,
+    icon: MessageSquare,
     render: ({ messages, onOpenChat, openChats, onCloseChat }) => (
       <>
         <MessagesPreview messages={messages} onOpenChat={onOpenChat} />
@@ -163,7 +174,7 @@ function InvestorTabs({
       currentlyRaisingWeight: 15,
     });
 
-  // Compute matched investors whenever filters change
+  // Compute matched entities whenever filters change
   useEffect(() => {
     const matcher = new InvestorMatcher();
     const simFilters = transformFilters(filters);
@@ -171,30 +182,25 @@ function InvestorTabs({
     const filteredAndScored = (mockMatches || [])
       .filter((inv) => {
         const matchesStage =
-          filters.stagePreference === "All" ||
-          inv.stage?.includes?.(filters.stagePreference);
+          filters.stagePreference === "All" || inv.stage?.includes?.(filters.stagePreference);
         const matchesIndustry =
-          filters.industryPreference === "All" ||
-          inv.industries?.includes?.(filters.industryPreference);
+          filters.industryPreference === "All" || inv.industries?.includes?.(filters.industryPreference);
         const matchesLocation =
-          filters.locationPreference === "All" ||
-          inv.location?.includes?.(filters.locationPreference);
+          filters.locationPreference === "All" || inv.location?.includes?.(filters.locationPreference);
         return matchesStage && matchesIndustry && matchesLocation;
       })
-      .map((investor) => {
-        const sim = matcher.runMonteCarloSimulation(investor, simFilters);
-        return { ...investor, matchScore: sim.mean, simulation: sim };
+      .map((entity) => {
+        const sim = matcher.runMonteCarloSimulation(entity, simFilters);
+        return { ...entity, matchScore: sim.mean, simulation: sim };
       });
 
     setMatchedInvestors(filteredAndScored);
   }, [filters]);
 
-  const handleInvestorSelect = (investor) => {
+  const handleInvestorSelect = (entity) => {
     setSelectedInvestors((prev) => {
-      const isSelected = prev.some((i) => i.id === investor.id);
-      return isSelected
-        ? prev.filter((i) => i.id !== investor.id)
-        : [...prev, investor];
+      const isSelected = prev.some((i) => i.id === entity.id);
+      return isSelected ? prev.filter((i) => i.id !== entity.id) : [...prev, entity];
     });
   };
 
@@ -241,11 +247,7 @@ function InvestorTabs({
   );
 
   return (
-    <Tabs
-      defaultValue={selectedTab}
-      onValueChange={onTabChange}
-      className="w-full px-4 py-2"
-    >
+    <Tabs defaultValue={selectedTab} onValueChange={onTabChange} className="w-full px-4 py-2">
       {/* Tab Bar with Arrows */}
       <div className="relative w-full flex items-center justify-center">
         {isOverflowing && (
@@ -257,17 +259,10 @@ function InvestorTabs({
           </button>
         )}
 
-        <div
-          ref={scrollRef}
-          className="overflow-x-auto no-scrollbar w-full px-6"
-        >
+        <div ref={scrollRef} className="overflow-x-auto no-scrollbar w-full px-6">
           <TabsList className="flex w-max min-w-full gap-2 bg-muted text-muted-foreground h-9 items-center rounded-lg p-[3px]">
             {TABS.map(({ value, label, icon: Icon }) => (
-              <TabsTrigger
-                key={value}
-                value={value}
-                className="flex items-center justify-center h-full gap-2 flex-shrink-0"
-              >
+              <TabsTrigger key={value} value={value} className="flex items-center justify-center h-full gap-2 flex-shrink-0">
                 {Icon ? <Icon className="w-4 h-4" /> : null}
                 {label}
               </TabsTrigger>
@@ -285,33 +280,47 @@ function InvestorTabs({
         )}
       </div>
 
-      {/* Config-driven panels (Overview + Messages) */}
+      {/* Config-driven panels (Overview + Messages + Compare/SpiderChart) */}
       {TABS.map(({ value, render, placeholder }) =>
-        value === "overview" || value === "messages" ? (
+        value === "overview" || value === "messages" || value === "compare" ? (
           <TabsContent key={value} value={value} className="mt-4">
-            {render
-              ? render({
-                  matches,
-                  filteredMatches,
-                  onSearchClick,
-                  onMetricsLoaded,
-                  // overview
-                  events,
-                  userRole,
-                  onRegisterClick,
-                  registerModalOpen,
-                  onCloseRegisterModal,
-                  selectedEvent,
-                  onSubmitRegistration,
-                  // messages
-                  messages,
-                  onOpenChat,
-                  openChats,
-                  onCloseChat,
-                })
-              : placeholder && (
-                  <p className="text-muted text-center py-4">{placeholder}</p>
+            {value === "compare" ? (
+              // Compare uses sidebar w/ SpiderChart
+              <SidebarLayout>
+                {selectedInvestors.length === 0 ? (
+                  <div className="border rounded-lg p-6 text-sm text-muted-foreground">
+                    Select one or more items in <span className="font-medium">Matches</span> to visualize in the radar chart.
+                  </div>
+                ) : (
+                  <SpiderChart investors={matchedInvestors} selectedInvestors={selectedInvestors} />
                 )}
+              </SidebarLayout>
+            ) : render ? (
+              render({
+                matches,
+                filteredMatches,
+                onSearchClick,
+                onMetricsLoaded,
+                // overview
+                events,
+                userRole,
+                onRegisterClick,
+                registerModalOpen,
+                onCloseRegisterModal,
+                selectedEvent,
+                onSubmitRegistration,
+                // messages
+                messages,
+                onOpenChat,
+                openChats,
+                onCloseChat,
+                // compare props if a custom render is ever used
+                matchedInvestors,
+                selectedInvestors,
+              })
+            ) : (
+              placeholder && <p className="text-muted text-center py-4">{placeholder}</p>
+            )}
           </TabsContent>
         ) : null
       )}
@@ -319,32 +328,25 @@ function InvestorTabs({
       {/* Matches: sidebar layout */}
       <TabsContent value="matches" className="mt-4">
         <SidebarLayout>
-          {/* Use cards grid; fallback to filteredMatches if no simulation yet */}
+          {/* Cards grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {(matchedInvestors && matchedInvestors.length
-              ? matchedInvestors
-              : filteredMatches
-            ).map((investor, index) =>
-              investor ? (
-                <StartupCard
-                  key={(investor.id || investor.name || "inv") + index}
-                  investor={investor}
-                  matchScore={investor.matchScore}
-                  onSelect={handleInvestorSelect}
-                  isSelected={selectedInvestors.some((i) => i.id === investor.id)}
-                />
-              ) : null
+            {(matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches).map(
+              (entity, index) =>
+                entity ? (
+                  <StartupCard
+                    key={(entity.id || entity.name || "ent") + index}
+                    investor={entity}
+                    matchScore={entity.matchScore}
+                    onSelect={handleInvestorSelect}
+                    isSelected={selectedInvestors.some((i) => i.id === entity.id)}
+                  />
+                ) : null
             )}
           </div>
-
-          {/* If you still want the old list view somewhere */}
-          {/* <div className="mt-6">
-            <MatchFeed matches={matchedInvestors.length ? matchedInvestors : filteredMatches} />
-          </div> */}
         </SidebarLayout>
       </TabsContent>
 
-      {/* Analytics: sidebar layout, right now placeholder content */}
+      {/* Analytics: sidebar layout (placeholder now) */}
       <TabsContent value="analytics" className="mt-4">
         <SidebarLayout>
           <div className="border rounded-lg p-6">
@@ -355,18 +357,7 @@ function InvestorTabs({
         </SidebarLayout>
       </TabsContent>
 
-      {/* Compare: sidebar layout, placeholder */}
-      <TabsContent value="compare" className="mt-4">
-        <SidebarLayout>
-          <div className="border rounded-lg p-6">
-            <p className="text-muted-foreground">
-              Comparison tool coming soon. Select investors with the filters to compare.
-            </p>
-          </div>
-        </SidebarLayout>
-      </TabsContent>
-
-      {/* Monte Carlo: sidebar layout, placeholder */}
+      {/* Monte Carlo: sidebar layout (placeholder) */}
       <TabsContent value="montecarlo" className="mt-4">
         <SidebarLayout>
           <div className="border rounded-lg p-6">

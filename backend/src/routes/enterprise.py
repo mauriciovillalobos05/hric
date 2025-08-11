@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 import os
 import uuid
 from functools import wraps
-from decimal import Decimal, InvalidOperation
-
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 import requests
 from flask import Blueprint, jsonify, request, g
 from sqlalchemy import func
@@ -27,6 +27,7 @@ from src.models.user import (
 # -------------------------------------------------
 enterprise_bp = Blueprint("enterprise", __name__)
 entrepreneur_bp = Blueprint("entrepreneur", __name__)
+matchinginvestors_bp = Blueprint("match", __name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -109,6 +110,8 @@ def is_admin_like(user: User):
     )
     return exists is not None
 
+def dec4(x: float | int) -> Decimal:
+    return Decimal(str(x)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 # -------------------------------------------------
 # Shared utils
@@ -262,6 +265,14 @@ def _to_str_list(v):
         return [x.strip() for x in v.split(",") if x.strip()]
     return []
 
+def _norm_list(v):
+    """Normalize a string or list into a clean list. 'All' or empty -> []."""
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    if isinstance(v, str):
+        s = v.strip()
+        return [] if not s or s.lower() == "all" else [s]
+    return []
 
 # -------------------------------------------------
 # Enterprise routes (startup creation, explore, admin, etc.)
@@ -973,7 +984,6 @@ def get_startup_profile():
                 "team_size": sp.team_size if sp else None,
                 "target_market": sp.target_market if sp else None,
                 "traction_metrics": sp.traction_metrics if sp else {},
-                "traction_metrics": sp.traction_metrics if sp else {},
                 "competitive_advantages": sp.competitive_advantages if sp and sp.competitive_advantages else [],
                 "current_revenue": float(sp.current_revenue or 0) if sp else None,
                 "monthly_growth_rate": float(sp.monthly_growth_rate or 0) if sp else None,
@@ -1180,7 +1190,25 @@ def delete_startup_profile():
 # -------------------------------------------------
 # Matching routes (investor preferences + trigger matches)
 # -------------------------------------------------
-matchinginvestors_bp = Blueprint("match", __name__)
+
+def _get_investor_enterprise(user: User) -> Enterprise | None:
+    """
+    Return the first investor enterprise for the user (owner/admin).
+    """
+    eu = (
+        db.session.query(EnterpriseUser)
+        .join(Enterprise, Enterprise.id == EnterpriseUser.enterprise_id)
+        .filter(
+            EnterpriseUser.user_id == user.id,
+            EnterpriseUser.role.in_(["owner", "admin"]),
+            EnterpriseUser.is_active.is_(True),
+            Enterprise.enterprise_type.in_(["investor", "both"]),
+        )
+        .first()
+    )
+    if eu:
+        return db.session.get(Enterprise, eu.enterprise_id)
+    return None
 
 def _clamp_int(v, lo=0, hi=100):
     try:
@@ -1189,29 +1217,13 @@ def _clamp_int(v, lo=0, hi=100):
         return 0
     return max(lo, min(hi, i))
 
-def _get_investor_enterprise(user: User) -> Enterprise | None:
-    """
-    Find an enterprise where user is owner/admin and enterprise_type in ('investor','both').
-    """
-    eu = (
-        db.session.query(EnterpriseUser)
-        .join(Enterprise, Enterprise.id == EnterpriseUser.enterprise_id)
-        .filter(
-            EnterpriseUser.user_id == user.id,
-            EnterpriseUser.is_active.is_(True),
-            EnterpriseUser.role.in_(["owner", "admin"]),
-            Enterprise.enterprise_type.in_(["investor", "both"]),
-        )
-        .first()
-    )
-    return db.session.get(Enterprise, eu.enterprise_id) if eu else None
-
 
 @matchinginvestors_bp.route("/preferences", methods=["GET", "POST"])
 def investor_preferences():
     """
-    Save or fetch an investor's matching preferences (weights + simple filters).
-    Stored under EnterpriseProfile.key_metrics.matching_weights / matching_filters.
+    Save or fetch an investor's matching preferences (weights + filters).
+    Arrays are supported for stages/industries/locations, and we also keep
+    single-string back-compat keys (stagePreference, etc.).
     """
     user, token, err = require_auth()
     if err:
@@ -1237,6 +1249,29 @@ def investor_preferences():
 
     data = request.get_json(silent=True) or {}
 
+    # arrays (preferred)
+    stages_arr    = _norm_list(data.get("stagePreferences", data.get("stagePreference")))
+    industries_arr= _norm_list(data.get("industryPreferences", data.get("industryPreference")))
+    locs_arr      = _norm_list(data.get("locationPreferences", data.get("locationPreference")))
+
+    # single-string back-compat (only if exactly one picked; else "All")
+    stages_single    = stages_arr[0] if len(stages_arr) == 1 else "All"
+    industries_single= industries_arr[0] if len(industries_arr) == 1 else "All"
+    locs_single      = locs_arr[0] if len(locs_arr) == 1 else "All"
+
+    filters = {
+        # arrays
+        "stagePreferences": stages_arr,
+        "industryPreferences": industries_arr,
+        "locationPreferences": locs_arr,
+        # singles (legacy/back-compat)
+        "stagePreference": stages_single,
+        "industryPreference": industries_single,
+        "locationPreference": locs_single,
+        # passthrough optional field
+        "userType": (data.get("userType") or None),
+    }
+
     weights = {
         "roiWeight":                 _clamp_int(data.get("roiWeight")),
         "technicalFoundersWeight":   _clamp_int(data.get("technicalFoundersWeight")),
@@ -1244,12 +1279,6 @@ def investor_preferences():
         "revenueWeight":             _clamp_int(data.get("revenueWeight")),
         "teamSizeWeight":            _clamp_int(data.get("teamSizeWeight")),
         "currentlyRaisingWeight":    _clamp_int(data.get("currentlyRaisingWeight")),
-    }
-    filters = {
-        "userType":            (data.get("userType") or None),
-        "stagePreference":     data.get("stagePreference") or "All",
-        "locationPreference":  data.get("locationPreference") or "All",
-        "industryPreference":  data.get("industryPreference") or "All",
     }
 
     km = ep.key_metrics or {}
@@ -1291,7 +1320,10 @@ def compute_matches():
     Body accepts:
       {
         investor_enterprise_id?: uuid (defaults to user's investor enterprise),
-        weights?: {...}, filters?: {...}
+        weights?: {...}, filters?: {
+          stagePreferences?: string[], industryPreferences?: string[], locationPreferences?: string[],
+          stagePreference?: string, industryPreference?: string, locationPreference?: string
+        }
       }
     """
     user, token, err = require_auth()
@@ -1318,10 +1350,15 @@ def compute_matches():
     W = {k: max(0, min(100, int(weights.get(k, 0)))) for k in keys}
     denom = sum(W.values()) or 1
 
-    # Optional gating filters
-    stage_pref     = (filters.get("stagePreference") or "All").lower()
-    industry_pref  = (filters.get("industryPreference") or "All").lower()
-    location_pref  = (filters.get("locationPreference") or "All").lower()
+    # Gating filters: arrays preferred; fall back to single strings
+    stage_list     = _norm_list(filters.get("stagePreferences", filters.get("stagePreference")))
+    industry_list  = _norm_list(filters.get("industryPreferences", filters.get("industryPreference")))
+    loc_list       = _norm_list(filters.get("locationPreferences", filters.get("locationPreference")))
+
+    # lowercase variants for comparison
+    stage_list_lc    = [s.lower() for s in stage_list]
+    industry_list_lc = [s.lower() for s in industry_list]
+    loc_list_lc      = [s.lower() for s in loc_list]
 
     # Query active startups
     q = (
@@ -1334,15 +1371,20 @@ def compute_matches():
 
     rows = q.all()
     matches = []
+    upserts = []
 
-    def clamp01(x): 
+    now = datetime.utcnow()
+    expires_at = now + timedelta(days=30)
+    algo_version = "v1"
+
+    def clamp01(x):
         try:
             return max(0.0, min(1.0, float(x)))
-        except: 
+        except:
             return 0.0
 
     for ent, ep, sp in rows:
-        # Gating
+        # --- Gating (empty list == no filter) ---
         stage_name = None
         industry_name = None
         if ep and ep.stage_id:
@@ -1351,15 +1393,16 @@ def compute_matches():
         if ep and ep.industry_id:
             ind = db.session.get(Industry, ep.industry_id)
             industry_name = (ind.name or "").lower() if ind else None
+        ent_loc_lc = (ent.location or "").lower()
 
-        if stage_pref != "all" and (stage_name or "") != stage_pref:
+        if stage_list_lc and (stage_name or "") not in stage_list_lc:
             continue
-        if industry_pref != "all" and (industry_name or "") != industry_pref:
+        if industry_list_lc and (industry_name or "") not in industry_list_lc:
             continue
-        if location_pref != "all" and (ent.location or "").lower().find(location_pref) < 0:
+        if loc_list_lc and not any(l in ent_loc_lc for l in loc_list_lc):
             continue
 
-        # Features
+        # --- Features ---
         mrr = float(sp.mrr_usd or sp.current_revenue or 0)           # monthly
         arr = float(sp.arr_usd or (mrr * 12)) if (sp.arr_usd or mrr) else 0
         val = float(sp.current_valuation_usd or 0)
@@ -1371,13 +1414,10 @@ def compute_matches():
         currently_raising = 1.0 if (funding_needed is not None and float(funding_needed) > 0) else 0.0
 
         # Component scores (0..1)
-        # ROI: simple proxy ARR/Valuation capped (graceful if valuation missing)
         roi = clamp01((arr / val) / 0.2) if val > 0 else clamp01(arr / 1_000_000.0)
-
         revenue_perf = clamp01(mrr / 100_000.0)  # 100k MRR caps
         team_size = clamp01(team / 100.0)        # 100 ppl caps
 
-        # Weighted sum
         total = (
             roi * W["roiWeight"] +
             tech_pct * W["technicalFoundersWeight"] +
@@ -1388,9 +1428,22 @@ def compute_matches():
         )
         overall = total / denom  # 0..1
 
-        # Minimal response compatible with your UI mappers
+        breakdown = {
+            "components": {
+                "roi": roi,
+                "technical_founders": tech_pct,
+                "previous_exits":    exits_pct,
+                "revenue_perf":      revenue_perf,
+                "team_size":         team_size,
+                "currently_raising": currently_raising,
+            },
+            "weights": W,
+            "filters": filters,
+        }
+
+        # Response item (UI)
         matches.append({
-            "match_id": f"{inv_ent_id}-{ent.id}",
+            "match_id": f"{inv_ent_id}-{ent.id}",                # legacy synthetic id your UI already uses
             "investor_enterprise_id": inv_ent_id,
             "startup_enterprise_id": str(ent.id),
             "overall_score": overall,  # 0..1; UI multiplies by 100
@@ -1414,5 +1467,62 @@ def compute_matches():
                 },
             },
         })
+
+        # DB upsert row
+        upserts.append({
+            "investor_enterprise_id": uuid.UUID(inv_ent_id),
+            "startup_enterprise_id":  ent.id,
+            "compatibility_score":    None,
+            "fit_score":              None,
+            "overall_score":          dec4(overall),
+            "score_breakdown":        breakdown,
+            "algorithm_version":      algo_version,
+            "confidence_level":       dec4(0.90),     # heuristic; tweak if you want
+            "calculated_at":          now,
+            "expires_at":             expires_at,
+            "is_active":              True,
+            "notes":                  None,
+        })
+
+    # --- Persist (bulk upsert) ---
+    db_ids_by_startup: dict[str, str] = {}
+    if upserts:
+        stmt = pg_insert(MatchScore.__table__).values(upserts)
+
+        stmt = stmt.on_conflict_do_update(
+            constraint="unique_match",
+            set_={
+                "overall_score":    stmt.excluded.overall_score,
+                "score_breakdown":  stmt.excluded.score_breakdown,
+                "algorithm_version":stmt.excluded.algorithm_version,
+                "confidence_level": stmt.excluded.confidence_level,
+                "calculated_at":    stmt.excluded.calculated_at,
+                "expires_at":       stmt.excluded.expires_at,
+                "is_active":        True,
+                "notes":            stmt.excluded.notes,
+            },
+        ).returning(
+            MatchScore.id,
+            MatchScore.startup_enterprise_id
+        )
+
+        result = db.session.execute(stmt)
+        rows = result.fetchall()
+        db_ids_by_startup = {str(r.startup_enterprise_id): str(r.id) for r in rows}
+
+        # Soft-deactivate stale matches for this investor not in current run
+        active_startup_ids = [u["startup_enterprise_id"] for u in upserts]
+        db.session.query(MatchScore).filter(
+            MatchScore.investor_enterprise_id == uuid.UUID(inv_ent_id),
+            ~MatchScore.startup_enterprise_id.in_(active_startup_ids)
+        ).update({"is_active": False}, synchronize_session=False)
+
+        db.session.commit()
+
+    # Attach DB ids to response so UI can use real match IDs later
+    for m in matches:
+        sid = m["startup_enterprise_id"]
+        if sid in db_ids_by_startup:
+            m["db_match_id"] = db_ids_by_startup[sid]
 
     return jsonify({"matches": matches, "count": len(matches)}), 200

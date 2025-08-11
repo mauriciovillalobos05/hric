@@ -3,22 +3,25 @@ import { Settings, Search, Star } from "lucide-react";
 import Button from "./matchComponents/uiComponents/button.jsx";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import LocationAutocomplete from "@/pages/cmpnnts/Location.jsx";
 
-function InvestorTools({ onSearchClick }) {
-  const [showSearchModal, setShowSearchModal] = useState(false);
-  const [showPreferencesModal, setShowPreferencesModal] = useState(false);
-  const [showWatchlistModal, setShowWatchlistModal] = useState(false);
+// Defaults for dropdowns
+const stageOptionsDefault = [
+  "Idea","Pre-seed","Seed","Series A","Series B","Series C","Growth","IPO",
+];
+const industryOptionsDefault = [
+  "Technology","Healthcare","Finance","Education","Agriculture",
+  "Energy","E-commerce","Transportation","Media","Real Estate",
+];
 
-  const [industry, setIndustry] = useState("");
-  const [stage, setStage] = useState("");
-  const [region, setRegion] = useState("");
-  const [searchIndustry, setSearchIndustry] = useState("");
-  const [searchStage, setSearchStage] = useState("");
-  const defaultFilters = {
-  userType: 'vc',
-  stagePreference: 'All',
-  locationPreference: 'All',
-  industryPreference: 'All',
+// Backend-aligned default filters
+const defaultFilters = {
+  stagePreference: "All",
+  locationPreference: "All",
+  industryPreference: "All",
   roiWeight: 20,
   technicalFoundersWeight: 15,
   previousExitsWeight: 10,
@@ -26,42 +29,61 @@ function InvestorTools({ onSearchClick }) {
   teamSizeWeight: 10,
   currentlyRaisingWeight: 20,
 };
-const [filters, setFilters] = useState(defaultFilters);
+
+function InvestorTools({ onSearchClick }) {
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showPreferencesModal, setShowPreferencesModal] = useState(false);
+  const [showWatchlistModal, setShowWatchlistModal] = useState(false);
+
+  // Preferences (aligned with backend keys)
+  const [industryPreference, setIndustryPreference] = useState("All");
+  const [stagePreference, setStagePreference] = useState("All");
+  const [locationPreference, setLocationPreference] = useState("All");
+
+  // Optional, ad-hoc search inputs
+  const [searchIndustry, setSearchIndustry] = useState("");
+  const [searchStage, setSearchStage] = useState("");
+
+  const [filters, setFilters] = useState(defaultFilters);
+
   const dummyWatchlist = [
-    {
-      company: "GreenTech AI",
-      founder: "Maria López",
-      stage: "Seed",
-      industry: "CleanTech",
-      location: "Guadalajara, MX",
-    },
-    {
-      company: "BioLogix",
-      founder: "Carlos Rivera",
-      stage: "Series A",
-      industry: "HealthTech",
-      location: "CDMX, MX",
-    },
+    { company: "GreenTech AI", founder: "Maria López", stage: "Seed", industry: "CleanTech", location: "Guadalajara, MX" },
+    { company: "BioLogix", founder: "Carlos Rivera", stage: "Series A", industry: "HealthTech", location: "CDMX, MX" },
   ];
 
   useEffect(() => {
     const stored = JSON.parse(sessionStorage.getItem("investmentPreferences"));
     if (stored) {
-      setIndustry(stored.industry || "");
-      setStage(stored.stage || "");
-      setRegion(stored.region || "");
+      setIndustryPreference(stored.industryPreference ?? "All");
+      setStagePreference(stored.stagePreference ?? "All");
+      setLocationPreference(stored.locationPreference ?? "All");
+      setFilters((prev) => ({
+        ...prev,
+        industryPreference: stored.industryPreference ?? "All",
+        stagePreference: stored.stagePreference ?? "All",
+        locationPreference: stored.locationPreference ?? "All",
+      }));
     }
   }, []);
 
   const handlePreferencesSave = () => {
-    const updated = { industry, stage, region };
-    sessionStorage.setItem("investmentPreferences", JSON.stringify(updated));
+    const normalized = {
+      industryPreference,
+      stagePreference,
+      locationPreference: locationPreference?.trim() ? locationPreference : "All",
+    };
+    sessionStorage.setItem("investmentPreferences", JSON.stringify(normalized));
+    setFilters((prev) => ({ ...prev, ...normalized }));
     setShowPreferencesModal(false);
   };
 
   const handleSearch = () => {
+    // Pass backend-shaped keys if parent triggers a match search
     if (onSearchClick) {
-      onSearchClick({ industry: searchIndustry, stage: searchStage });
+      onSearchClick({
+        stagePreference: searchStage?.trim() || "All",
+        industryPreference: searchIndustry?.trim() || "All",
+      });
     }
     setShowSearchModal(false);
   };
@@ -74,7 +96,7 @@ const [filters, setFilters] = useState(defaultFilters);
           <ToolCard
             title="Investment Preferences"
             icon={<Settings className="w-6 h-6 text-blue-600" />}
-            description="Update your stage, industry, and region focus"
+            description="Update your preferred stage, industry, and location"
             onClick={() => setShowPreferencesModal(true)}
           />
 
@@ -98,17 +120,48 @@ const [filters, setFilters] = useState(defaultFilters);
       {showPreferencesModal && (
         <Modal title="Investment Preferences" onClose={() => setShowPreferencesModal(false)}>
           <div className="space-y-3">
-            <div>
+            <div className="space-y-2">
               <Label>Preferred Industry</Label>
-              <Input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. FinTech" />
+              <Select
+                value={industryPreference}
+                onValueChange={setIndustryPreference}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select industry" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All</SelectItem>
+                  {industryOptionsDefault.map((opt) => (
+                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div>
+
+            <div className="space-y-2">
               <Label>Funding Stage</Label>
-              <Input value={stage} onChange={(e) => setStage(e.target.value)} placeholder="e.g. Series A" />
+              <Select
+                value={stagePreference}
+                onValueChange={setStagePreference}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select stage" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All</SelectItem>
+                  {stageOptionsDefault.map((opt) => (
+                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <Label>Region</Label>
-              <Input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="e.g. LATAM" />
+
+            <div className="space-y-2">
+              <Label>Location</Label>
+              <LocationAutocomplete
+                value={locationPreference === "All" ? "" : locationPreference}
+                onChange={(v) => setLocationPreference(v?.trim() ? v : "All")}
+              />
             </div>
           </div>
           <div className="mt-4 flex justify-end gap-2">
@@ -122,13 +175,40 @@ const [filters, setFilters] = useState(defaultFilters);
       {showSearchModal && (
         <Modal title="Search Startups" onClose={() => setShowSearchModal(false)}>
           <div className="space-y-3">
-            <div>
+            <div className="space-y-2">
               <Label>Industry</Label>
-              <Input value={searchIndustry} onChange={(e) => setSearchIndustry(e.target.value)} placeholder="e.g. CleanTech" />
+              <Select
+                value={searchIndustry || "All"}
+                onValueChange={(v) => setSearchIndustry(v === "All" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select industry" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All</SelectItem>
+                  {industryOptionsDefault.map((opt) => (
+                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div>
+
+            <div className="space-y-2">
               <Label>Funding Stage</Label>
-              <Input value={searchStage} onChange={(e) => setSearchStage(e.target.value)} placeholder="e.g. Seed" />
+              <Select
+                value={searchStage || "All"}
+                onValueChange={(v) => setSearchStage(v === "All" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select stage" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All</SelectItem>
+                  {stageOptionsDefault.map((opt) => (
+                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="mt-4 flex justify-end gap-2">

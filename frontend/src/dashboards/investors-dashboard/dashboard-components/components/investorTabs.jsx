@@ -17,6 +17,7 @@ import InvestorOverview from "./investorOverview.jsx";
 import MatchFeed from "./matchComponents/matchFeed.jsx";
 import PortfolioSummary from "./portfolioSummary.jsx";
 import InvestorTools from "./investorTools.jsx";
+import AnalyticsDashboard from "./analyticComponents/AnalyticsDashboard.jsx";
 
 // Events + Registration
 import EventList from "@/pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
@@ -29,27 +30,24 @@ import MessagesDock from "./messagesComponents/messagesDock.jsx";
 // Matching & Filters
 import { InvestorMatcher } from "./matchComponents/algorithms/matchingAlgorithm.js";
 import transformFilters from "./matchComponents/FilterPanel/transformFilters.jsx";
+// NOTE: keep your path; if you moved the panel to /pages/.../FilterPanel/FilterPanel.jsx,
+// just change this import to that file.
 import FilterPanel from "./matchComponents/FilterPanel/filterPanel.jsx";
+
 import mockMatches from "./matchComponents/mockInvestors.js";
 import StartupCard from "./matchComponents/FilterPanel/StartupCard.jsx";
 
 import SpiderChart from "./matchComponents/SpiderChart.jsx";
 import MonteCarloResults from "./matchComponents/MonteCarloResults.jsx";
 
-// Tabs to keep: matches, analytics, compare, mont carlo, overview, messages
+// Tabs to keep: matches, analytics, compare, monte carlo, overview, messages
 const TABS = [
   { value: "matches", label: "Matches", icon: Users },
-  {
-    value: "analytics",
-    label: "Analytics",
-    icon: BarChart3,
-    // We render Analytics explicitly in the return (sidebar layout, placeholder only)
-  },
+  { value: "analytics", label: "Analytics", icon: BarChart3 },
   {
     value: "compare",
     label: "Compare",
     icon: Radar,
-    // Render SpiderChart here (moved from Analytics)
     render: ({ matchedInvestors, selectedInvestors }) => (
       <SpiderChart investors={matchedInvestors} selectedInvestors={selectedInvestors} />
     ),
@@ -112,7 +110,6 @@ const TABS = [
 ];
 
 function InvestorTabs({
-  // matches are available if you want them later
   matches,
   filteredMatches,
   onSearchClick,
@@ -143,11 +140,12 @@ function InvestorTabs({
   const [selectedInvestors, setSelectedInvestors] = useState([]);
   const [simulationResults, setSimulationResults] = useState(null);
 
+  // NEW: arrays for multi-selects. Empty arrays mean "ALL".
   const [filters, setFilters] = useState({
     userType: "vc",
-    stagePreference: "All",
-    locationPreference: "All",
-    industryPreference: "All",
+    stagePreferences: [],
+    locationPreferences: [],
+    industryPreferences: [],
     checkSizeRange: "All",
 
     // sliders
@@ -164,9 +162,9 @@ function InvestorTabs({
   const resetFilters = () =>
     setFilters({
       userType: "vc",
-      stagePreference: "All",
-      locationPreference: "All",
-      industryPreference: "All",
+      stagePreferences: [],
+      locationPreferences: [],
+      industryPreferences: [],
       checkSizeRange: "All",
       roiWeight: 20,
       technicalFoundersWeight: 15,
@@ -176,20 +174,42 @@ function InvestorTabs({
       currentlyRaisingWeight: 15,
     });
 
+  // helpers for array-based filters (case-insensitive)
+  const norm = (s) => (s ?? "").toString().toLowerCase();
+  const hasAny = (arr, testFn) => !arr?.length || arr.some(testFn);
+  const listOverlap = (candidateList, selectedList) => {
+    if (!selectedList?.length) return true;
+    const arr = Array.isArray(candidateList)
+      ? candidateList
+      : candidateList
+      ? [candidateList]
+      : [];
+    const lower = arr.map(norm);
+    return selectedList.some((sel) => {
+      const s = norm(sel);
+      return lower.some((v) => v === s || v.includes(s));
+    });
+  };
+
   // Compute matched entities whenever filters change
   useEffect(() => {
     const matcher = new InvestorMatcher();
-    const simFilters = transformFilters(filters);
+    const simFilters =
+      typeof transformFilters === "function" ? transformFilters(filters) : filters;
 
     const filteredAndScored = (mockMatches || [])
       .filter((inv) => {
-        const matchesStage =
-          filters.stagePreference === "All" || inv.stage?.includes?.(filters.stagePreference);
-        const matchesIndustry =
-          filters.industryPreference === "All" || inv.industries?.includes?.(filters.industryPreference);
-        const matchesLocation =
-          filters.locationPreference === "All" || inv.location?.includes?.(filters.locationPreference);
-        return matchesStage && matchesIndustry && matchesLocation;
+        const stageOk = hasAny(filters.stagePreferences, (sel) =>
+          norm(inv.stage).includes(norm(sel))
+        );
+
+        const industryOk = listOverlap(inv.industries ?? inv.industry, filters.industryPreferences);
+
+        const locationOk = hasAny(filters.locationPreferences, (sel) =>
+          norm(inv.location).includes(norm(sel))
+        );
+
+        return stageOk && industryOk && locationOk;
       })
       .map((entity) => {
         const sim = matcher.runMonteCarloSimulation(entity, simFilters);
@@ -203,6 +223,7 @@ function InvestorTabs({
       const sel = filteredAndScored.find((x) => x.id === selectedInvestors[0].id);
       setSimulationResults(sel ? sel.simulation : null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
   const handleInvestorSelect = (entity) => {
@@ -240,21 +261,8 @@ function InvestorTabs({
     };
     checkOverflow();
     window.addEventListener("resize", checkOverflow);
-  // re-run sim for the currently selected item
-  const rerunSimulationForSelected = () => {
-    if (!selectedInvestors.length) return;
-    const matcher = new InvestorMatcher();
-    const sim = matcher.runMonteCarloSimulation(
-      selectedInvestors[0],
-      transformFilters(filters)
-    );
-    setSimulationResults(sim);
-    const id = selectedInvestors[0].id;
-    setMatchedInvestors((prev) => prev.map((x) => (x.id === id ? { ...x, simulation: sim, matchScore: sim.mean } : x)));
-    setSelectedInvestors((prev) => prev.map((x) => (x.id === id ? { ...x, simulation: sim, matchScore: sim.mean } : x)));
-  };
 
-  return () => window.removeEventListener("resize", checkOverflow);
+    return () => window.removeEventListener("resize", checkOverflow);
   }, []);
 
   // Reusable layout with sidebar
@@ -294,7 +302,11 @@ function InvestorTabs({
         <div ref={scrollRef} className="overflow-x-auto no-scrollbar w-full px-6">
           <TabsList className="flex w-max min-w-full gap-2 bg-muted text-muted-foreground h-9 items-center rounded-lg p-[3px]">
             {TABS.map(({ value, label, icon: Icon }) => (
-              <TabsTrigger key={value} value={value} className="flex items-center justify-center h-full gap-2 flex-shrink-0">
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="flex items-center justify-center h-full gap-2 flex-shrink-0"
+              >
                 {Icon ? <Icon className="w-4 h-4" /> : null}
                 {label}
               </TabsTrigger>
@@ -317,13 +329,12 @@ function InvestorTabs({
         value === "overview" || value === "messages" || value === "compare" ? (
           <TabsContent key={value} value={value} className="mt-4">
             {value === "compare" ? (
-              // Compare uses sidebar w/ SpiderChart
               <SidebarLayout>
                 {selectedInvestors.length === 0 ? (
-                  
                   <div className="border rounded-lg p-6">
                     <p className="text-muted-foreground">
-                    Select one or more items in <span className="font-medium">Matches</span> to visualize in the radar chart.
+                      Select one or more items in <span className="font-medium">Matches</span> to
+                      visualize in the radar chart.
                     </p>
                   </div>
                 ) : (
@@ -363,7 +374,6 @@ function InvestorTabs({
       {/* Matches: sidebar layout */}
       <TabsContent value="matches" className="mt-4">
         <SidebarLayout>
-          {/* Cards grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {(matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches).map(
               (entity, index) =>
@@ -381,14 +391,14 @@ function InvestorTabs({
         </SidebarLayout>
       </TabsContent>
 
-      {/* Analytics: sidebar layout (placeholder now) */}
+      {/* Analytics: sidebar layout */}
       <TabsContent value="analytics" className="mt-4">
         <SidebarLayout>
-          <div className="border rounded-lg p-6">
-            <p className="text-muted-foreground">
-              Analytics coming soon. Use the filters on the left to scope your analytics.
-            </p>
-          </div>
+          <AnalyticsDashboard
+            matches={
+              matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches
+            }
+          />
         </SidebarLayout>
       </TabsContent>
 
@@ -396,28 +406,25 @@ function InvestorTabs({
       <TabsContent value="montecarlo" className="mt-4">
         <SidebarLayout>
           {selectedInvestors.length === 0 ? (
-            
             <div className="border rounded-lg p-6">
               <p className="text-muted-foreground">
-              Select one item in <span className="font-medium">Matches</span> to run the Monte Carlo simulation.
+                Select one item in <span className="font-medium">Matches</span> to run the Monte
+                Carlo simulation.
               </p>
             </div>
           ) : (
             <div className="w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="text-sm text-muted-foreground">
-                  Showing simulation for: <span className="font-medium">{selectedInvestors[0]?.name}</span>
+                  Showing simulation for:{" "}
+                  <span className="font-medium">{selectedInvestors[0]?.name}</span>
                 </div>
-                {
-                  //<Button onClick={() => rerunSimulationForSelected()} size="sm" variant="outline">
-                  //  Re-run Simulation
-                  //</Button> add when it works lol
-                }
-                
               </div>
               <MonteCarloResults
                 selectedStartup={selectedInvestors[selectedInvestors.length - 1]}
-                simulationResults={simulationResults || selectedInvestors[selectedInvestors.length - 1]?.simulation}
+                simulationResults={
+                  simulationResults || selectedInvestors[selectedInvestors.length - 1]?.simulation
+                }
               />
             </div>
           )}

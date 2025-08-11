@@ -34,6 +34,7 @@ import mockMatches from "./matchComponents/mockInvestors.js";
 import StartupCard from "./matchComponents/FilterPanel/StartupCard.jsx";
 
 import SpiderChart from "./matchComponents/SpiderChart.jsx";
+import MonteCarloResults from "./matchComponents/MonteCarloResults.jsx";
 
 // Tabs to keep: matches, analytics, compare, mont carlo, overview, messages
 const TABS = [
@@ -140,6 +141,7 @@ function InvestorTabs({
   // --- Matching & Filters state/logic (shared sidebar for 4 tabs) ---
   const [matchedInvestors, setMatchedInvestors] = useState([]);
   const [selectedInvestors, setSelectedInvestors] = useState([]);
+  const [simulationResults, setSimulationResults] = useState(null);
 
   const [filters, setFilters] = useState({
     userType: "vc",
@@ -195,12 +197,28 @@ function InvestorTabs({
       });
 
     setMatchedInvestors(filteredAndScored);
+
+    // keep Monte Carlo panel in sync if exactly one selection
+    if (selectedInvestors.length === 1) {
+      const sel = filteredAndScored.find((x) => x.id === selectedInvestors[0].id);
+      setSimulationResults(sel ? sel.simulation : null);
+    }
   }, [filters]);
 
   const handleInvestorSelect = (entity) => {
     setSelectedInvestors((prev) => {
       const isSelected = prev.some((i) => i.id === entity.id);
-      return isSelected ? prev.filter((i) => i.id !== entity.id) : [...prev, entity];
+      const updated = isSelected ? prev.filter((i) => i.id !== entity.id) : [...prev, entity];
+
+      if (updated.length === 1) {
+        const only = updated[0];
+        const withSim = matchedInvestors.find((m) => m.id === only.id) || only;
+        setSimulationResults(withSim.simulation || null);
+      } else if (updated.length === 0) {
+        setSimulationResults(null);
+      }
+
+      return updated;
     });
   };
 
@@ -222,7 +240,21 @@ function InvestorTabs({
     };
     checkOverflow();
     window.addEventListener("resize", checkOverflow);
-    return () => window.removeEventListener("resize", checkOverflow);
+  // re-run sim for the currently selected item
+  const rerunSimulationForSelected = () => {
+    if (!selectedInvestors.length) return;
+    const matcher = new InvestorMatcher();
+    const sim = matcher.runMonteCarloSimulation(
+      selectedInvestors[0],
+      transformFilters(filters)
+    );
+    setSimulationResults(sim);
+    const id = selectedInvestors[0].id;
+    setMatchedInvestors((prev) => prev.map((x) => (x.id === id ? { ...x, simulation: sim, matchScore: sim.mean } : x)));
+    setSelectedInvestors((prev) => prev.map((x) => (x.id === id ? { ...x, simulation: sim, matchScore: sim.mean } : x)));
+  };
+
+  return () => window.removeEventListener("resize", checkOverflow);
   }, []);
 
   // Reusable layout with sidebar
@@ -357,14 +389,29 @@ function InvestorTabs({
         </SidebarLayout>
       </TabsContent>
 
-      {/* Monte Carlo: sidebar layout (placeholder) */}
+      {/* Monte Carlo: sidebar layout with results */}
       <TabsContent value="montecarlo" className="mt-4">
         <SidebarLayout>
-          <div className="border rounded-lg p-6">
-            <p className="text-muted-foreground">
-              Monte Carlo analysis coming soon. Adjust weights in the filters to simulate outcomes.
-            </p>
-          </div>
+          {selectedInvestors.length === 0 ? (
+            <div className="border rounded-lg p-6 text-sm text-muted-foreground">
+              Select one item in <span className="font-medium">Matches</span> to run the Monte Carlo simulation.
+            </div>
+          ) : (
+            <div className="w-full">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-sm text-muted-foreground">
+                  Showing simulation for: <span className="font-medium">{selectedInvestors[0]?.name}</span>
+                </div>
+                <Button onClick={() => rerunSimulationForSelected()} size="sm" variant="outline">
+                  Re-run Simulation
+                </Button>
+              </div>
+              <MonteCarloResults
+                selectedStartup={selectedInvestors[0]}
+                simulationResults={simulationResults || selectedInvestors[0]?.simulation}
+              />
+            </div>
+          )}
         </SidebarLayout>
       </TabsContent>
     </Tabs>

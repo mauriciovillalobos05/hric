@@ -31,6 +31,8 @@ function InvestorsDashboard() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [selectedTab, setSelectedTab] = useState("matches");
 
+  const [simulationResults, setSimulationResults] = useState(null);
+
   useEffect(() => {
     const fetchData = async () => {
       try {

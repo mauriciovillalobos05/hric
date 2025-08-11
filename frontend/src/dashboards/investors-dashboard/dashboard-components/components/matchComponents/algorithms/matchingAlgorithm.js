@@ -46,16 +46,10 @@ export class InvestorMatcher {
    *   revenueWeight, teamSizeWeight, currentlyRaisingWeight
    * }
    */
-  // Replace ONLY this method inside InvestorMatcher
-// Replace ONLY this method inside InvestorMatcher
-// Usage: matcher.calculateBaseScore(startup, filters, { debug: true })
-
-// Inside InvestorMatcher
-calculateBaseScore(startup, filters = {}) {
-    // helpers
+  calculateBaseScore(startup, filters = {}) {
     const clamp01 = (x) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
     const norm01 = (v, min, max) => clamp01(((Number(v) || 0) - min) / (max - min));
-  
+
     // weights (0..100)
     const {
       roiWeight = 0,
@@ -65,7 +59,7 @@ calculateBaseScore(startup, filters = {}) {
       teamSizeWeight = 0,
       currentlyRaisingWeight = 0,
     } = filters || {};
-  
+
     const totalW =
       roiWeight +
       technicalFoundersWeight +
@@ -73,32 +67,31 @@ calculateBaseScore(startup, filters = {}) {
       revenueWeight +
       teamSizeWeight +
       currentlyRaisingWeight;
-  
+
     if (!totalW) return 0;
-  
+
     const km = startup?.keyMetrics || {};
-  
+
     // components (0..1)
-    // ROI proxy = 60% revenue growth + 40% gross margin
     const roi =
       0.6 * clamp01(km.revenueGrowthYoY ?? 0) +
       0.4 * clamp01(km.grossMargin ?? 0);
-  
+
     const techFounders = clamp01(km.technicalFounders ?? 0);
     const prevExits = clamp01(km.previousExits ?? 0);
-  
+
     // normalize revenue to 10k..300k USD/mo -> 0..1
     const revenue = norm01(startup?.revenueMonthlyUSD ?? 0, 10_000, 300_000);
     // normalize team size to 5..150 employees -> 0..1
     const teamSize = norm01(startup?.employees ?? 0, 5, 150);
-  
+
     // currently raising via tag
     const currentlyRaising =
       Array.isArray(startup?.tags) &&
       startup.tags.some((t) => typeof t === "string" && /raising/i.test(t))
         ? 1
         : 0;
-  
+
     // weighted average -> 0..100
     const weightedSum =
       roi * roiWeight +
@@ -107,73 +100,146 @@ calculateBaseScore(startup, filters = {}) {
       revenue * revenueWeight +
       teamSize * teamSizeWeight +
       currentlyRaising * currentlyRaisingWeight;
-  
+
     const score01 = weightedSum / totalW;
     const score = +(score01 * 100).toFixed(2);
-  
+
     return Number.isFinite(score) ? score : 0;
   }
-  
-  
 
-  // ---------- Monte Carlo ----------
-  runMonteCarloSimulation(startup, filters) {
+  // ---------- Monte Carlo (precise; startup-aware; scenario-based) ----------
+
+  /**
+   * Run Monte Carlo on a startup with the current filters (weights).
+   * Options:
+   *  - scenario: 'bull' | 'neutral' | 'bear' (default from filters.marketScenario or 'neutral')
+   *  - includeSamples: whether to return raw samples for charts (default true)
+   *  - sampleLimit: cap number of samples stored to avoid big payloads (default 1200)
+   */
+  runMonteCarloSimulation(startup, filters, options = {}) {
+    const scenarioKey = (filters && filters.marketScenario) || options.scenario || "neutral";
+    const scenario = InvestorMatcher.SCENARIOS[scenarioKey] || InvestorMatcher.SCENARIOS.neutral;
+
     const n = this.simulationRuns;
-    const results = new Array(n);
+    const samples = options.includeSamples !== false ? [] : null;
+    const sampleLimit = options.sampleLimit ?? 1200;
+    const stride = samples ? Math.max(1, Math.ceil(n / sampleLimit)) : 1;
+
+    // Base SDs (intuitive, per-metric) scaled by scenario volatility
+    const volScale = 1 + scenario.vol; // bear has bigger vol
+    const SD = {
+      technicalFounders: 0.03 * volScale, // fairly stable
+      previousExits: 0.08 * volScale,     // mildly uncertain
+      revenueGrowthYoY: 0.12 * volScale,  // volatile
+      grossMargin: 0.05 * volScale,       // moderate
+      revenueRel: 0.20 * volScale,        // 20% rel noise on revenue
+      employeesRel: 0.10 * volScale,      // 10% rel noise on headcount
+    };
+
+    // Sim loop
+    let sum = 0;
+    let sumSq = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    const arr = new Array(n);
 
     for (let i = 0; i < n; i++) {
-      const s = this.addRandomVariation(startup);
-      results[i] = this.calculateBaseScore(s, filters);
+      const s = this._perturbStartup(startup, SD, scenario);
+      const score = this.calculateBaseScore(s, filters);
+
+      arr[i] = score;
+      sum += score;
+      sumSq += score * score;
+      if (score < min) min = score;
+      if (score > max) max = score;
+
+      if (samples && i % stride === 0) samples.push(score);
     }
 
-    results.sort((a, b) => a - b);
-    const mean = results.reduce((a, b) => a + b, 0) / n;
-    const variance = results.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n;
-    const stdDev = Math.sqrt(variance);
-    const at = (p) => results[Math.max(0, Math.min(n - 1, Math.floor(p * n)))];
+    // Stats
+    arr.sort((a, b) => a - b);
+    const mean = sum / n;
+    const variance = sumSq / n - mean * mean;
+    const stdDev = Math.sqrt(Math.max(0, variance));
+    const at = (p) => arr[Math.max(0, Math.min(n - 1, Math.floor(p * n)))];
 
-    return {
+    const out = {
       mean: +mean.toFixed(2),
       stdDev: +stdDev.toFixed(2),
-      min: +results[0].toFixed(2),
-      max: +results[n - 1].toFixed(2),
+      min: +min.toFixed(2),
+      max: +max.toFixed(2),
       percentile25: +at(0.25).toFixed(2),
       percentile75: +at(0.75).toFixed(2),
       confidence95Lower: +at(0.025).toFixed(2),
       confidence95Upper: +at(0.975).toFixed(2),
       riskLevel: this.calculateRiskLevel(stdDev),
     };
+
+    if (samples) out.samples = samples;
+    return out;
   }
 
-  // add realistic noise to inputs used by the score
-  addRandomVariation(startup) {
-    const gauss = this.gauss;
-
-    const noise01 = (v, pct = 0.07) => {
-      const val = (v ?? 0) + gauss() * pct;
-      return this.clamp01(val);
-    };
-
-    const noiseAbsPct = (v, pct = 0.1, floor = 0) => {
-      const base = v ?? 0;
-      const perturbed = base + base * gauss() * pct;
-      return Math.max(floor, perturbed);
-    };
-
+  /**
+   * Perturb a startup for a single simulation draw, applying:
+   *  - bounded Gaussian noise on 0..1 metrics
+   *  - lognormal-ish relative noise on revenue
+   *  - discrete noise on headcount
+   *  - market scenario shocks (growth/margin/revenue)
+   */
+  _perturbStartup(startup, SD, scenario) {
+    const clamp01 = (x) => Math.max(0, Math.min(1, x));
     const km = startup?.keyMetrics || {};
+
+    // 0..1 metrics (bounded gaussians)
+    const g = this.gauss;
+    const bump01 = (v, sd) => clamp01((v ?? 0) + g() * sd);
+
+    let technicalFounders = bump01(km.technicalFounders ?? 0, SD.technicalFounders);
+    let previousExits = bump01(km.previousExits ?? 0, SD.previousExits);
+
+    // Growth / margin with scenario mean shock
+    let revenueGrowthYoY = bump01(
+      (km.revenueGrowthYoY ?? 0) * scenario.growthMul,
+      SD.revenueGrowthYoY
+    );
+    let grossMargin = clamp01(
+      bump01(km.grossMargin ?? 0, SD.grossMargin) + scenario.marginShift
+    );
+
+    // Revenue (absolute), multiplicative noise + scenario revenueMul
+    const baseRevenue = Math.max(0, startup?.revenueMonthlyUSD ?? 0);
+    const revNoise = 1 + g() * SD.revenueRel; // lognormal-ish small noise
+    const revenueMonthlyUSD = Math.max(0, baseRevenue * revNoise * scenario.revenueMul);
+
+    // Employees (discrete)
+    const baseEmp = Math.max(1, Math.round(startup?.employees ?? 1));
+    const empNoise = Math.round(baseEmp * (1 + g() * SD.employeesRel));
+    const employees = Math.max(1, empNoise);
+
+    // Tags / raising preserved
+    const tags = Array.isArray(startup?.tags) ? [...startup.tags] : startup?.tags;
+
     return {
       ...startup,
+      employees,
+      revenueMonthlyUSD,
       keyMetrics: {
         ...km,
-        technicalFounders: noise01(km.technicalFounders, 0.06),
-        previousExits: noise01(km.previousExits, 0.06),
-        revenueGrowthYoY: noise01(km.revenueGrowthYoY, 0.08),
-        grossMargin: noise01(km.grossMargin, 0.05),
+        technicalFounders,
+        previousExits,
+        revenueGrowthYoY,
+        grossMargin,
       },
-      revenueMonthlyUSD: noiseAbsPct(startup?.revenueMonthlyUSD, 0.1, 0),
-      employees: Math.max(1, Math.round(noiseAbsPct(startup?.employees, 0.1, 1))),
+      tags,
     };
   }
+
+  // Scenario presets (you can tweak)
+  static SCENARIOS = {
+    bull:    { growthMul: 1.15, marginShift: +0.03, revenueMul: 1.20, vol: 0.15 },
+    neutral: { growthMul: 1.00, marginShift:  0.00, revenueMul: 1.00, vol: 0.25 },
+    bear:    { growthMul: 0.85, marginShift: -0.03, revenueMul: 0.90, vol: 0.35 },
+  };
 
   // Box–Muller
   gauss() {
@@ -196,18 +262,15 @@ calculateBaseScore(startup, filters = {}) {
     const indPref = filters.industryPreference ?? "All";
 
     return (startups || []).filter((s) => {
-      // stage check (string)
       if (stagePref !== "All") {
         const st = (s.stage || "").toString();
         if (!(st === stagePref || st.includes(stagePref))) return false;
       }
 
-      // location check (substring, case-insensitive)
       if (locPref !== "All") {
         if (!s.location?.toLowerCase().includes(locPref.toLowerCase())) return false;
       }
 
-      // industry check (array or single)
       if (indPref !== "All") {
         const inds = Array.isArray(s.industries) ? s.industries : [s.industry].filter(Boolean);
         if (!inds.some((x) => (x || "").toLowerCase() === indPref.toLowerCase())) return false;

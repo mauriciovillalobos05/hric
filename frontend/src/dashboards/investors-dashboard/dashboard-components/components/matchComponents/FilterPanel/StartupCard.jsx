@@ -30,7 +30,7 @@ const formatCheckSize = (checkSize) =>
 
 const getMatchColor = (score) => {
   if (score >= 80) return "text-green-600 bg-green-50 border-green-200";
-  if (score >= 60) return "text-blue-600 bg-blue-50 border-blue-200";
+  if (score >= 60) return "text-blue-600 bg-blue-100 border-blue-200";
   if (score >= 40) return "text-yellow-600 bg-yellow-50 border-yellow-200";
   return "text-red-600 bg-red-50 border-red-200";
 };
@@ -42,13 +42,12 @@ const getMatchLabel = (score) => {
   return "Poor Match";
 };
 
-// ---- normalization helpers (fix your crash) ----
+// ---- normalization helpers (unchanged) ----
 const toArray = (val) => (Array.isArray(val) ? val : val == null ? [] : [val]);
 const industriesArray = (entity) => {
   const arr = Array.isArray(entity?.industries)
     ? entity.industries
     : toArray(entity?.industry);
-  // ensure array of strings
   return arr.filter((x) => typeof x === "string");
 };
 
@@ -56,19 +55,34 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
   const isStartup = !!startup;
   const entity = startup || investor;
 
-  const inds = industriesArray(entity); // <-- safe array
-  const stages = isStartup ? toArray(entity?.stage) : toArray(entity?.stage); // investor has array already, but safe anyway
+  const inds = industriesArray(entity);
+  const stages = isStartup ? toArray(entity?.stage) : toArray(entity?.stage);
 
   const handleClick = () => {
     if (onSelect) onSelect(entity);
   };
+  const handleKey = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  // ✨ Selected background styling (light blue). Swap bg-blue-50 -> bg-slate-50 if you prefer gray.
+  const containerClasses = `cursor-pointer transition-all duration-200 border ${
+    isSelected
+      ? "bg-blue-50 border-blue-500 ring-2 ring-blue-200 shadow-md"
+      : "bg-white border-slate-200 hover:bg-slate-50 hover:shadow-md"
+  }`;
 
   return (
     <Card
-      className={`cursor-pointer transition-all duration-200 hover:shadow-lg ${
-        isSelected ? "ring-2 ring-blue-500 shadow-lg" : ""
-      }`}
+      role="button"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={handleKey}
+      aria-pressed={!!isSelected}
+      className={containerClasses}
     >
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start">
@@ -309,9 +323,7 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
           <div>
             <div className="flex justify-between items-center mb-1">
               <span className="text-sm text-gray-600">Investment Likelihood</span>
-              <span className="text-sm font-medium">
-                {Math.round(matchScore)}%
-              </span>
+              <span className="text-sm font-medium">{Math.round(matchScore)}%</span>
             </div>
             <Progress value={matchScore} className="h-2" />
           </div>

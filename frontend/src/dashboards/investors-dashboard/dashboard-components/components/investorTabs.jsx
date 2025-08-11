@@ -2,45 +2,30 @@ import React, { useRef, useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
-  Users,
-  Target,
-  BarChart3,
-  Radar,
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  MessageSquare,
+  Users, Target, BarChart3, Radar,
+  ChevronLeft, ChevronRight, RefreshCw, MessageSquare,
 } from "lucide-react";
 
-// Core dashboard pieces
 import InvestorOverview from "./investorOverview.jsx";
-import MatchFeed from "./matchComponents/matchFeed.jsx";
 import PortfolioSummary from "./portfolioSummary.jsx";
 import InvestorTools from "./investorTools.jsx";
 import AnalyticsDashboard from "./analyticComponents/AnalyticsDashboard.jsx";
 
-// Events + Registration
 import EventList from "@/pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import RegisterModal from "@/pages/eventShowcaseComponents/RegisterModal.jsx";
 
-// Messaging
-import MessagesPreview from "./messagesComponents/messagesPreview.jsx";
-import MessagesDock from "./messagesComponents/messagesDock.jsx";
+import MessagesDashboard from "./messagesComponents/MessagesDashboard.jsx";
+import { mockMessages } from "./messagesComponents/mockMessages.js";
 
-// Matching & Filters
 import { InvestorMatcher } from "./matchComponents/algorithms/matchingAlgorithm.js";
 import transformFilters from "./matchComponents/FilterPanel/transformFilters.jsx";
-// NOTE: keep your path; if you moved the panel to /pages/.../FilterPanel/FilterPanel.jsx,
-// just change this import to that file.
 import FilterPanel from "./matchComponents/FilterPanel/filterPanel.jsx";
 
 import mockMatches from "./matchComponents/mockInvestors.js";
 import StartupCard from "./matchComponents/FilterPanel/StartupCard.jsx";
-
 import SpiderChart from "./matchComponents/SpiderChart.jsx";
 import MonteCarloResults from "./matchComponents/MonteCarloResults.jsx";
 
-// Tabs to keep: matches, analytics, compare, monte carlo, overview, messages
 const TABS = [
   { value: "matches", label: "Matches", icon: Users },
   { value: "analytics", label: "Analytics", icon: BarChart3 },
@@ -58,31 +43,16 @@ const TABS = [
     label: "Overview",
     icon: Target,
     render: ({
-      onMetricsLoaded,
-      onSearchClick,
-      events,
-      userRole,
-      onRegisterClick,
-      registerModalOpen,
-      onCloseRegisterModal,
-      selectedEvent,
-      onSubmitRegistration,
+      onMetricsLoaded, onSearchClick, events, userRole,
+      onRegisterClick, registerModalOpen, onCloseRegisterModal,
+      selectedEvent, onSubmitRegistration,
     }) => (
       <>
         <InvestorOverview onMetricsLoaded={onMetricsLoaded ?? (() => {})} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Left column */}
-          <div className="space-y-4">
-            <PortfolioSummary />
-          </div>
-
-          {/* Right column */}
-          <div className="space-y-4">
-            <InvestorTools onSearchClick={onSearchClick} />
-          </div>
+          <div className="space-y-4"><PortfolioSummary /></div>
+          <div className="space-y-4"><InvestorTools onSearchClick={onSearchClick} /></div>
         </div>
-
-        {/* Events */}
         <div id="events">
           <EventList events={events} role={userRole} onRegisterClick={onRegisterClick} />
           <RegisterModal
@@ -100,12 +70,7 @@ const TABS = [
     value: "messages",
     label: "Messages",
     icon: MessageSquare,
-    render: ({ messages, onOpenChat, openChats, onCloseChat }) => (
-      <>
-        <MessagesPreview messages={messages} onOpenChat={onOpenChat} />
-        <MessagesDock openChats={openChats} onCloseChat={onCloseChat} />
-      </>
-    ),
+    render: ({ messages }) => <MessagesDashboard messages={messages} />,
   },
 ];
 
@@ -126,29 +91,22 @@ function InvestorTabs({
   selectedEvent,
   onSubmitRegistration,
 
-  // Messages props
-  messages,
-  onOpenChat,
-  openChats,
-  onCloseChat,
+  // Optional incoming messages
+  messages: incomingMessages,
 }) {
   const scrollRef = useRef(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
 
-  // --- Matching & Filters state/logic (shared sidebar for 4 tabs) ---
   const [matchedInvestors, setMatchedInvestors] = useState([]);
   const [selectedInvestors, setSelectedInvestors] = useState([]);
   const [simulationResults, setSimulationResults] = useState(null);
 
-  // NEW: arrays for multi-selects. Empty arrays mean "ALL".
   const [filters, setFilters] = useState({
     userType: "vc",
     stagePreferences: [],
     locationPreferences: [],
     industryPreferences: [],
     checkSizeRange: "All",
-
-    // sliders
     roiWeight: 20,
     technicalFoundersWeight: 15,
     previousExitsWeight: 15,
@@ -174,16 +132,11 @@ function InvestorTabs({
       currentlyRaisingWeight: 15,
     });
 
-  // helpers for array-based filters (case-insensitive)
   const norm = (s) => (s ?? "").toString().toLowerCase();
   const hasAny = (arr, testFn) => !arr?.length || arr.some(testFn);
   const listOverlap = (candidateList, selectedList) => {
     if (!selectedList?.length) return true;
-    const arr = Array.isArray(candidateList)
-      ? candidateList
-      : candidateList
-      ? [candidateList]
-      : [];
+    const arr = Array.isArray(candidateList) ? candidateList : candidateList ? [candidateList] : [];
     const lower = arr.map(norm);
     return selectedList.some((sel) => {
       const s = norm(sel);
@@ -191,24 +144,15 @@ function InvestorTabs({
     });
   };
 
-  // Compute matched entities whenever filters change
   useEffect(() => {
     const matcher = new InvestorMatcher();
-    const simFilters =
-      typeof transformFilters === "function" ? transformFilters(filters) : filters;
+    const simFilters = typeof transformFilters === "function" ? transformFilters(filters) : filters;
 
     const filteredAndScored = (mockMatches || [])
       .filter((inv) => {
-        const stageOk = hasAny(filters.stagePreferences, (sel) =>
-          norm(inv.stage).includes(norm(sel))
-        );
-
+        const stageOk = hasAny(filters.stagePreferences, (sel) => norm(inv.stage).includes(norm(sel)));
         const industryOk = listOverlap(inv.industries ?? inv.industry, filters.industryPreferences);
-
-        const locationOk = hasAny(filters.locationPreferences, (sel) =>
-          norm(inv.location).includes(norm(sel))
-        );
-
+        const locationOk = hasAny(filters.locationPreferences, (sel) => norm(inv.location).includes(norm(sel)));
         return stageOk && industryOk && locationOk;
       })
       .map((entity) => {
@@ -218,7 +162,6 @@ function InvestorTabs({
 
     setMatchedInvestors(filteredAndScored);
 
-    // keep Monte Carlo panel in sync if exactly one selection
     if (selectedInvestors.length === 1) {
       const sel = filteredAndScored.find((x) => x.id === selectedInvestors[0].id);
       setSimulationResults(sel ? sel.simulation : null);
@@ -238,20 +181,14 @@ function InvestorTabs({
       } else if (updated.length === 0) {
         setSimulationResults(null);
       }
-
       return updated;
     });
   };
 
-  // --- Tabs horizontal scroll logic ---
   const scrollTabs = (direction) => {
     const container = scrollRef.current;
     if (!container) return;
-    const scrollAmount = 150;
-    container.scrollBy({
-      left: direction === "left" ? -scrollAmount : scrollAmount,
-      behavior: "smooth",
-    });
+    container.scrollBy({ left: direction === "left" ? -150 : 150, behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -261,29 +198,12 @@ function InvestorTabs({
     };
     checkOverflow();
     window.addEventListener("resize", checkOverflow);
-
     return () => window.removeEventListener("resize", checkOverflow);
   }, []);
 
-  // Reusable layout with sidebar
-  const SidebarLayout = ({ children }) => (
-    <div className="flex flex-col lg:flex-row gap-6">
-      {/* LEFT: Filter Panel */}
-      <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
-        <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
-        <Button
-          variant="outline"
-          className="w-full flex items-center justify-center"
-          onClick={resetFilters}
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Reset Filters
-        </Button>
-      </div>
-
-      {/* RIGHT: Content */}
-      <div className="w-full lg:w-3/4">{children}</div>
-    </div>
+  // messages for the Messages tab (fallback to mocks)
+  const [messages] = useState(
+    incomingMessages && incomingMessages.length ? incomingMessages : mockMessages
   );
 
   return (
@@ -291,10 +211,7 @@ function InvestorTabs({
       {/* Tab Bar with Arrows */}
       <div className="relative w-full flex items-center justify-center">
         {isOverflowing && (
-          <button
-            className="absolute left-0 z-10 bg-white rounded-full shadow-md p-1"
-            onClick={() => scrollTabs("left")}
-          >
+          <button className="absolute left-0 z-10 bg-white rounded-full shadow-md p-1" onClick={() => scrollTabs("left")}>
             <ChevronLeft className="w-5 h-5" />
           </button>
         )}
@@ -302,11 +219,7 @@ function InvestorTabs({
         <div ref={scrollRef} className="overflow-x-auto no-scrollbar w-full px-6">
           <TabsList className="flex w-max min-w-full gap-2 bg-muted text-muted-foreground h-9 items-center rounded-lg p-[3px]">
             {TABS.map(({ value, label, icon: Icon }) => (
-              <TabsTrigger
-                key={value}
-                value={value}
-                className="flex items-center justify-center h-full gap-2 flex-shrink-0"
-              >
+              <TabsTrigger key={value} value={value} className="flex items-center justify-center h-full gap-2 flex-shrink-0">
                 {Icon ? <Icon className="w-4 h-4" /> : null}
                 {label}
               </TabsTrigger>
@@ -315,32 +228,43 @@ function InvestorTabs({
         </div>
 
         {isOverflowing && (
-          <button
-            className="absolute right-0 z-10 bg-white rounded-full shadow-md p-1"
-            onClick={() => scrollTabs("right")}
-          >
+          <button className="absolute right-0 z-10 bg-white rounded-full shadow-md p-1" onClick={() => scrollTabs("right")}>
             <ChevronRight className="w-5 h-5" />
           </button>
         )}
       </div>
 
-      {/* Config-driven panels (Overview + Messages + Compare/SpiderChart) */}
+      {/* Overview / Messages / Compare */}
       {TABS.map(({ value, render, placeholder }) =>
         value === "overview" || value === "messages" || value === "compare" ? (
           <TabsContent key={value} value={value} className="mt-4">
             {value === "compare" ? (
-              <SidebarLayout>
-                {selectedInvestors.length === 0 ? (
-                  <div className="border rounded-lg p-6">
-                    <p className="text-muted-foreground">
-                      Select one or more items in <span className="font-medium">Matches</span> to
-                      visualize in the radar chart.
-                    </p>
-                  </div>
-                ) : (
-                  <SpiderChart investors={matchedInvestors} selectedInvestors={selectedInvestors} />
-                )}
-              </SidebarLayout>
+              <div className="flex flex-col lg:flex-row gap-6">
+                {/* LEFT: Filters */}
+                <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
+                  <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+                  <Button
+                    variant="outline"
+                    className="w-full flex items-center justify-center"
+                    onClick={resetFilters}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Reset Filters
+                  </Button>
+                </div>
+                {/* RIGHT: Chart */}
+                <div className="w-full lg:w-3/4">
+                  {selectedInvestors.length === 0 ? (
+                    <div className="border rounded-lg p-6">
+                      <p className="text-muted-foreground">
+                        Select one or more items in <span className="font-medium">Matches</span> to visualize in the radar chart.
+                      </p>
+                    </div>
+                  ) : (
+                    <SpiderChart investors={matchedInvestors} selectedInvestors={selectedInvestors} />
+                  )}
+                </div>
+              </div>
             ) : render ? (
               render({
                 matches,
@@ -357,10 +281,7 @@ function InvestorTabs({
                 onSubmitRegistration,
                 // messages
                 messages,
-                onOpenChat,
-                openChats,
-                onCloseChat,
-                // compare props if a custom render is ever used
+                // compare
                 matchedInvestors,
                 selectedInvestors,
               })
@@ -371,64 +292,87 @@ function InvestorTabs({
         ) : null
       )}
 
-      {/* Matches: sidebar layout */}
+      {/* Matches */}
       <TabsContent value="matches" className="mt-4">
-        <SidebarLayout>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {(matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches).map(
-              (entity, index) =>
-                entity ? (
-                  <StartupCard
-                    key={(entity.id || entity.name || "ent") + index}
-                    investor={entity}
-                    matchScore={entity.matchScore}
-                    onSelect={handleInvestorSelect}
-                    isSelected={selectedInvestors.some((i) => i.id === entity.id)}
-                  />
-                ) : null
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
+            <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+            <Button variant="outline" className="w-full flex items-center justify-center" onClick={resetFilters}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reset Filters
+            </Button>
+          </div>
+          <div className="w-full lg:w-3/4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches).map(
+                (entity, index) =>
+                  entity ? (
+                    <StartupCard
+                      key={(entity.id || entity.name || "ent") + index}
+                      investor={entity}
+                      matchScore={entity.matchScore}
+                      onSelect={handleInvestorSelect}
+                      isSelected={selectedInvestors.some((i) => i.id === entity.id)}
+                    />
+                  ) : null
+              )}
+            </div>
+          </div>
+        </div>
+      </TabsContent>
+
+      {/* Analytics */}
+      <TabsContent value="analytics" className="mt-4">
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
+            <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+            <Button variant="outline" className="w-full flex items-center justify-center" onClick={resetFilters}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reset Filters
+            </Button>
+          </div>
+          <div className="w-full lg:w-3/4">
+            <AnalyticsDashboard
+              matches={matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches}
+            />
+          </div>
+        </div>
+      </TabsContent>
+
+      {/* Monte Carlo */}
+      <TabsContent value="montecarlo" className="mt-4">
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
+            <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+            <Button variant="outline" className="w-full flex items-center justify-center" onClick={resetFilters}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reset Filters
+            </Button>
+          </div>
+          <div className="w-full lg:w-3/4">
+            {selectedInvestors.length === 0 ? (
+              <div className="border rounded-lg p-6">
+                <p className="text-muted-foreground">
+                  Select one item in <span className="font-medium">Matches</span> to run the Monte Carlo simulation.
+                </p>
+              </div>
+            ) : (
+              <div className="w-full">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing simulation for: <span className="font-medium">{selectedInvestors[0]?.name}</span>
+                  </div>
+                </div>
+                <MonteCarloResults
+                  selectedStartup={selectedInvestors[selectedInvestors.length - 1]}
+                  simulationResults={
+                    simulationResults || selectedInvestors[selectedInvestors.length - 1]?.simulation
+                  }
+                />
+              </div>
             )}
           </div>
-        </SidebarLayout>
-      </TabsContent>
-
-      {/* Analytics: sidebar layout */}
-      <TabsContent value="analytics" className="mt-4">
-        <SidebarLayout>
-          <AnalyticsDashboard
-            matches={
-              matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches
-            }
-          />
-        </SidebarLayout>
-      </TabsContent>
-
-      {/* Monte Carlo: sidebar layout with results */}
-      <TabsContent value="montecarlo" className="mt-4">
-        <SidebarLayout>
-          {selectedInvestors.length === 0 ? (
-            <div className="border rounded-lg p-6">
-              <p className="text-muted-foreground">
-                Select one item in <span className="font-medium">Matches</span> to run the Monte
-                Carlo simulation.
-              </p>
-            </div>
-          ) : (
-            <div className="w-full">
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-sm text-muted-foreground">
-                  Showing simulation for:{" "}
-                  <span className="font-medium">{selectedInvestors[0]?.name}</span>
-                </div>
-              </div>
-              <MonteCarloResults
-                selectedStartup={selectedInvestors[selectedInvestors.length - 1]}
-                simulationResults={
-                  simulationResults || selectedInvestors[selectedInvestors.length - 1]?.simulation
-                }
-              />
-            </div>
-          )}
-        </SidebarLayout>
+        </div>
       </TabsContent>
     </Tabs>
   );

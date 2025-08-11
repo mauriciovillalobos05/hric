@@ -1,4 +1,3 @@
-// src/pages/.../FilterPanel/FilterPanel.jsx
 import React, { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -63,12 +62,12 @@ const FilterPanel = ({
       <CardHeader>
         <CardTitle className="text-lg font-semibold">Investment Preferences</CardTitle>
         <p className="text-sm text-gray-600">
-          Multi-select any stage, industry, or locations.
+          Select stages, industries, and locations. Leave any section empty to include all.
         </p>
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* Stages */}
+        {/* Stages (checkboxes) */}
         <MultiSelectChips
           label="Preferred Stages"
           options={stageOptions}
@@ -88,7 +87,7 @@ const FilterPanel = ({
           </p>
         </div>
 
-        {/* Industries */}
+        {/* Industries (checkboxes) */}
         <MultiSelectChips
           label="Industry Focus"
           options={industryOptions}

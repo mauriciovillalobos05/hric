@@ -23,7 +23,7 @@ from src.routes.gamification import game_bp
 from src.routes.market_recs import recs_bp
 from src.socketio import socketio
 from src.routes.stripe_webhook import webhooks_bp
-from src.routes.enterprise import entrepreneur_bp, enterprise_bp
+from src.routes.enterprise import entrepreneur_bp, enterprise_bp, matchinginvestors_bp
 load_dotenv()
 
 def create_app():
@@ -64,6 +64,7 @@ def create_app():
     app.register_blueprint(enterprise_bp, url_prefix="/api/enterprise")
     app.register_blueprint(entrepreneur_bp, url_prefix="/api/entrepreneur")
     app.register_blueprint(matching_bp, url_prefix='/api/matching')
+    app.register_blueprint(matchinginvestors_bp, url_prefix="/api/match/investors")
     app.register_blueprint(events_bp, url_prefix='/api/events')
     app.register_blueprint(documents_bp, url_prefix='/api/documents')
     app.register_blueprint(messages_bp, url_prefix='/api/messages')

@@ -14,7 +14,19 @@ function InvestorTools({ onSearchClick }) {
   const [region, setRegion] = useState("");
   const [searchIndustry, setSearchIndustry] = useState("");
   const [searchStage, setSearchStage] = useState("");
-
+  const defaultFilters = {
+  userType: 'vc',
+  stagePreference: 'All',
+  locationPreference: 'All',
+  industryPreference: 'All',
+  roiWeight: 20,
+  technicalFoundersWeight: 15,
+  previousExitsWeight: 10,
+  revenueWeight: 25,
+  teamSizeWeight: 10,
+  currentlyRaisingWeight: 20,
+};
+const [filters, setFilters] = useState(defaultFilters);
   const dummyWatchlist = [
     {
       company: "GreenTech AI",

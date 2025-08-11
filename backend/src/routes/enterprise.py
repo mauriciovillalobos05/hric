@@ -54,7 +54,7 @@ def require_auth():
     except Exception as e:
         return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return None, None, (jsonify({"error": "User not found in database"}), 404)
     return user, token, None
@@ -130,18 +130,18 @@ def _enterprise_summary(ent: Enterprise):
 
 
 def _enterprise_detail(ent: Enterprise):
-    profile = EnterpriseProfile.query.filter_by(enterprise_id=ent.id).first()
-    startup = StartupProfile.query.filter_by(enterprise_id=ent.id).first()
-    owner_membership = EnterpriseUser.query.filter_by(
+    profile = db.session.query(EnterpriseProfile).filter_by(enterprise_id=ent.id).first()
+    startup = db.session.query(StartupProfile).filter_by(enterprise_id=ent.id).first()
+    owner_membership = db.session.query(EnterpriseUser).filter_by(
         enterprise_id=ent.id, role="owner", is_active=True
     ).first()
 
     industry = Stage_ = None
     if profile and profile.industry_id:
-        ind = Industry.query.get(profile.industry_id)
+        ind = db.session.get(Industry, profile.industry_id)
         industry = ind.name if ind else None
     if profile and profile.stage_id:
-        st = Stage.query.get(profile.stage_id)
+        st = db.session.get(Stage, profile.stage_id)
         Stage_ = st.name if st else None
 
     return {
@@ -187,7 +187,7 @@ def _resolve_industry_stage(industry_id=None, industry_name=None, stage_id=None,
         except Exception:
             iid = None
     elif industry_name:
-        ind = Industry.query.filter(func.lower(Industry.name) == industry_name.lower()).first()
+        ind = db.session.query(Industry).filter(func.lower(Industry.name) == industry_name.lower()).first()
         if ind:
             iid = ind.id
 
@@ -197,7 +197,7 @@ def _resolve_industry_stage(industry_id=None, industry_name=None, stage_id=None,
         except Exception:
             sid = None
     elif stage_name:
-        st = Stage.query.filter(func.lower(Stage.name) == stage_name.lower()).first()
+        st = db.session.query(Stage).filter(func.lower(Stage.name) == stage_name.lower()).first()
         if st:
             sid = st.id
     return iid, sid
@@ -455,7 +455,7 @@ def list_explorable_enterprises():
 @enterprise_bp.route("/enterprises/<uuid:enterprise_id>", methods=["GET"])
 def get_enterprise_detail(enterprise_id):
     try:
-        ent = Enterprise.query.get(enterprise_id)
+        ent = db.session.get(Enterprise, enterprise_id)
         if not ent or ent.status not in ("active", "pending"):
             return jsonify({"error": "Enterprise not found or inactive"}), 404
         return jsonify({"enterprise": _enterprise_detail(ent)}), 200
@@ -481,7 +481,7 @@ def update_enterprise_core_data(enterprise_id):
     """
     try:
         data = request.get_json() or {}
-        ent = Enterprise.query.get(enterprise_id)
+        ent = db.session.get(Enterprise, enterprise_id)
         if not ent:
             return jsonify({"error": "Enterprise not found"}), 404
 
@@ -493,7 +493,7 @@ def update_enterprise_core_data(enterprise_id):
             ent.employee_count = _team_size_to_int(data.get("employee_count", data.get("team_size")))
 
         # EnterpriseProfile
-        prof = EnterpriseProfile.query.filter_by(enterprise_id=enterprise_id).first()
+        prof = db.session.query(EnterpriseProfile).filter_by(enterprise_id=enterprise_id).first()
         if not prof:
             prof = EnterpriseProfile(enterprise_id=enterprise_id)
             db.session.add(prof)
@@ -520,9 +520,9 @@ def update_enterprise_core_data(enterprise_id):
         # NEW: headline_tags
         if "headline_tags" in data or "tags" in data:
             prof.headline_tags = _to_str_list(data.get("headline_tags") or data.get("tags"))
-
+        
         # StartupProfile
-        sp = StartupProfile.query.filter_by(enterprise_id=enterprise_id).first()
+        sp = db.session.query(StartupProfile).filter_by(enterprise_id=enterprise_id).first()
         if not sp:
             sp = StartupProfile(enterprise_id=enterprise_id)
             db.session.add(sp)
@@ -638,7 +638,7 @@ def get_entrepreneur_stats():
     if not ent:
         return jsonify({"error": "No startup enterprise found for user"}), 404
 
-    total_matches = MatchScore.query.filter(MatchScore.startup_enterprise_id == ent.id).count()
+    total_matches = db.session.query(MatchScore).filter(MatchScore.startup_enterprise_id == ent.id).count()
 
     investor_interest = db.session.query(func.count(MatchInteraction.id)).join(
         MatchScore, MatchInteraction.match_id == MatchScore.id
@@ -647,7 +647,7 @@ def get_entrepreneur_stats():
         MatchInteraction.interaction_type == "investment_interest",
     ).scalar() or 0
 
-    recent_30d = MatchScore.query.filter(
+    recent_30d = db.session.query(MatchScore).filter(
         MatchScore.startup_enterprise_id == ent.id,
         MatchScore.calculated_at >= (datetime.utcnow() - timedelta(days=30)),
     ).count()
@@ -675,17 +675,17 @@ def get_enterprise_analytics():
     if not is_admin_like(user):
         return jsonify({"error": "Admin access required"}), 403
 
-    total = Enterprise.query.count()
+    total = db.session.query(Enterprise).count()
     by_type = {
-        "investor": Enterprise.query.filter(Enterprise.enterprise_type == "investor").count(),
-        "startup": Enterprise.query.filter(Enterprise.enterprise_type == "startup").count(),
-        "both": Enterprise.query.filter(Enterprise.enterprise_type == "both").count(),
+        "investor": db.session.query(Enterprise).filter(Enterprise.enterprise_type == "investor").count(),
+        "startup":  db.session.query(Enterprise).filter(Enterprise.enterprise_type == "startup").count(),
+        "both":     db.session.query(Enterprise).filter(Enterprise.enterprise_type == "both").count(),
     }
     by_status = {
-        "active": Enterprise.query.filter(Enterprise.status == "active").count(),
-        "inactive": Enterprise.query.filter(Enterprise.status == "inactive").count(),
-        "pending": Enterprise.query.filter(Enterprise.status == "pending").count(),
-        "suspended": Enterprise.query.filter(Enterprise.status == "suspended").count(),
+        "active":    db.session.query(Enterprise).filter(Enterprise.status == "active").count(),
+        "inactive":  db.session.query(Enterprise).filter(Enterprise.status == "inactive").count(),
+        "pending":   db.session.query(Enterprise).filter(Enterprise.status == "pending").count(),
+        "suspended": db.session.query(Enterprise).filter(Enterprise.status == "suspended").count(),
     }
 
     # Industry distribution via EnterpriseProfile
@@ -790,7 +790,8 @@ def upsert_startup_profile():
 
         # Link lookups
         if "industry" in data:
-            ind = Industry.query.filter(Industry.name.ilike(data["industry"].strip())).first()
+            ind = db.session.query(Industry).filter(Industry.name.ilike(data["industry"].strip())).first()
+
             if not ind:
                 ind = Industry(name=data["industry"].strip(), is_active=True)
                 db.session.add(ind)
@@ -798,7 +799,7 @@ def upsert_startup_profile():
             ep.industry_id = ind.id
 
         if "stage" in data:
-            st = Stage.query.filter(Stage.name.ilike(data["stage"].strip())).first()
+            st = db.session.query(Stage).filter(Stage.name.ilike(data["stage"].strip())).first()
             if not st:
                 # simple append; order sequence handled by your seeds/migrations
                 st = Stage(name=data["stage"].strip(), order_sequence=99, stage_type="both", is_active=True)
@@ -816,7 +817,8 @@ def upsert_startup_profile():
         # Headline tags (NEW)
         if "headline_tags" in data or "tags" in data:
             ep.headline_tags = _to_str_list(data.get("headline_tags") or data.get("tags"))
-
+        if "competitive_advantages" in data:
+           ep.competitive_advantages = _to_str_list(data.get("competitive_advantages"))
         # Key metrics
         km = (ep.key_metrics or {}).copy()
         if "funding_needed" in data:
@@ -837,6 +839,7 @@ def upsert_startup_profile():
             db.session.add(sp)
 
         sp.business_model = data.get("business_model")
+        sp.revenue_model = data.get("revenue_model")
         sp.value_proposition = data.get("problem_solved") or data.get("value_proposition") or sp.value_proposition
         sp.team_size = _team_size_to_int(data.get("team_size"))
         sp.target_market = data.get("target_market")
@@ -847,6 +850,23 @@ def upsert_startup_profile():
         arr = _to_decimal(data.get("arr_usd")) or (mrr * 12 if mrr is not None else None)
         sp.mrr_usd = mrr if mrr is not None else sp.mrr_usd
         sp.arr_usd = arr if arr is not None else sp.arr_usd
+        if "current_revenue" in data:
+            sp.current_revenue = _to_decimal(data.get("current_revenue"))
+        # accept alias monthly_grow_rate
+        _mgr = data.get("monthly_growth_rate", data.get("monthly_grow_rate"))
+        if _mgr is not None:
+            sp.monthly_growth_rate = _to_decimal(_mgr)
+        if "customer_count" in data:
+            sp.customer_count = int(data.get("customer_count")) if data.get("customer_count") not in (None, "") else None
+        if "market_size" in data:
+            sp.market_size = _to_decimal(data.get("market_size"))
+        if "addressable_market" in data:
+            sp.addressable_market = _to_decimal(data.get("addressable_market"))
+        if "competitive_advantages" in data:
+            sp.competitive_advantages = _to_str_list(data.get("competitive_advantages"))
+        if "intellectual_property" in data:
+            ip = data.get("intellectual_property")
+            sp.intellectual_property = _json_safe({"notes": ip}) if isinstance(ip, str) else _json_safe(ip)
         if "current_valuation_usd" in data:
             sp.current_valuation_usd = _to_decimal(data.get("current_valuation_usd"))
         if "current_investors" in data:
@@ -943,14 +963,24 @@ def get_startup_profile():
                 "key_metrics": ep.key_metrics if ep else {},
                 "social_media": ep.social_media if ep else {},
                 # NEW
+                "competitive_advantages": ep.competitive_advantages if ep and ep.competitive_advantages else [],
                 "headline_tags": ep.headline_tags if ep and ep.headline_tags else [],
             },
             "startup_profile": {
                 "business_model": sp.business_model if sp else None,
+                "revenue_model": sp.revenue_model if sp else None,
                 "value_proposition": sp.value_proposition if sp else None,
                 "team_size": sp.team_size if sp else None,
                 "target_market": sp.target_market if sp else None,
                 "traction_metrics": sp.traction_metrics if sp else {},
+                "traction_metrics": sp.traction_metrics if sp else {},
+                "competitive_advantages": sp.competitive_advantages if sp and sp.competitive_advantages else [],
+                "current_revenue": float(sp.current_revenue or 0) if sp else None,
+                "monthly_growth_rate": float(sp.monthly_growth_rate or 0) if sp else None,
+                "customer_count": sp.customer_count if sp else None,
+                "market_size": float(sp.market_size or 0) if sp else None,
+                "addressable_market": float(sp.addressable_market or 0) if sp else None,
+                "intellectual_property": sp.intellectual_property if sp else {},
                 # NEW richer fields
                 "mrr_usd": float(sp.display_mrr_usd) if sp and sp.display_mrr_usd is not None else None,
                 "arr_usd": float(sp.arr_usd) if sp and sp.arr_usd is not None else None,
@@ -1011,7 +1041,7 @@ def update_startup_profile():
             db.session.add(ep)
 
         if "industry" in data:
-            ind = Industry.query.filter(Industry.name.ilike(data["industry"].strip())).first()
+            ind = db.session.query(Industry).filter(Industry.name.ilike(data["industry"].strip())).first()
             if not ind:
                 ind = Industry(name=data["industry"].strip(), is_active=True)
                 db.session.add(ind)
@@ -1019,7 +1049,7 @@ def update_startup_profile():
             ep.industry_id = ind.id
 
         if "stage" in data:
-            st = Stage.query.filter(Stage.name.ilike(data["stage"].strip())).first()
+            st = db.session.query(Stage).filter(Stage.name.ilike(data["stage"].strip())).first()
             if not st:
                 st = Stage(name=data["stage"].strip(), order_sequence=99, stage_type="both", is_active=True)
                 db.session.add(st)
@@ -1077,7 +1107,22 @@ def update_startup_profile():
             sp.arr_usd = _to_decimal(data.get("arr_usd"))
         if sp.arr_usd is None and sp.mrr_usd is not None:
             sp.arr_usd = (sp.mrr_usd or Decimal(0)) * 12
-
+        if "current_revenue" in data:
+            sp.current_revenue = _to_decimal(data.get("current_revenue"))
+        _mgr = data.get("monthly_growth_rate", data.get("monthly_grow_rate"))
+        if _mgr is not None:
+            sp.monthly_growth_rate = _to_decimal(_mgr)
+        if "customer_count" in data:
+            sp.customer_count = int(data.get("customer_count")) if data.get("customer_count") not in (None, "") else None
+        if "market_size" in data:
+            sp.market_size = _to_decimal(data.get("market_size"))
+        if "addressable_market" in data:
+            sp.addressable_market = _to_decimal(data.get("addressable_market"))
+        if "competitive_advantages" in data:
+            sp.competitive_advantages = _to_str_list(data.get("competitive_advantages"))
+        if "intellectual_property" in data:
+            ip = data.get("intellectual_property")
+            sp.intellectual_property = _json_safe({"notes": ip}) if isinstance(ip, str) else _json_safe(ip)
         if "current_valuation_usd" in data:
             sp.current_valuation_usd = _to_decimal(data.get("current_valuation_usd"))
         if "current_investors" in data:
@@ -1131,3 +1176,243 @@ def delete_startup_profile():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": f"Failed to delete entrepreneur profile: {str(e)}"}), 500
+
+# -------------------------------------------------
+# Matching routes (investor preferences + trigger matches)
+# -------------------------------------------------
+matchinginvestors_bp = Blueprint("match", __name__)
+
+def _clamp_int(v, lo=0, hi=100):
+    try:
+        i = int(v)
+    except (TypeError, ValueError):
+        return 0
+    return max(lo, min(hi, i))
+
+def _get_investor_enterprise(user: User) -> Enterprise | None:
+    """
+    Find an enterprise where user is owner/admin and enterprise_type in ('investor','both').
+    """
+    eu = (
+        db.session.query(EnterpriseUser)
+        .join(Enterprise, Enterprise.id == EnterpriseUser.enterprise_id)
+        .filter(
+            EnterpriseUser.user_id == user.id,
+            EnterpriseUser.is_active.is_(True),
+            EnterpriseUser.role.in_(["owner", "admin"]),
+            Enterprise.enterprise_type.in_(["investor", "both"]),
+        )
+        .first()
+    )
+    return db.session.get(Enterprise, eu.enterprise_id) if eu else None
+
+
+@matchinginvestors_bp.route("/preferences", methods=["GET", "POST"])
+def investor_preferences():
+    """
+    Save or fetch an investor's matching preferences (weights + simple filters).
+    Stored under EnterpriseProfile.key_metrics.matching_weights / matching_filters.
+    """
+    user, token, err = require_auth()
+    if err:
+        return err
+
+    ent = _get_investor_enterprise(user)
+    if not ent:
+        return jsonify({"error": "No investor enterprise found for user"}), 404
+
+    ep = db.session.query(EnterpriseProfile).filter_by(enterprise_id=ent.id).first()
+    if not ep:
+        ep = EnterpriseProfile(enterprise_id=ent.id)
+        db.session.add(ep)
+        db.session.flush()
+
+    if request.method == "GET":
+        km = ep.key_metrics or {}
+        return jsonify({
+            "enterprise_id": str(ent.id),
+            "preferences": km.get("matching_weights") or {},
+            "filters": km.get("matching_filters") or {},
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+
+    weights = {
+        "roiWeight":                 _clamp_int(data.get("roiWeight")),
+        "technicalFoundersWeight":   _clamp_int(data.get("technicalFoundersWeight")),
+        "previousExitsWeight":       _clamp_int(data.get("previousExitsWeight")),
+        "revenueWeight":             _clamp_int(data.get("revenueWeight")),
+        "teamSizeWeight":            _clamp_int(data.get("teamSizeWeight")),
+        "currentlyRaisingWeight":    _clamp_int(data.get("currentlyRaisingWeight")),
+    }
+    filters = {
+        "userType":            (data.get("userType") or None),
+        "stagePreference":     data.get("stagePreference") or "All",
+        "locationPreference":  data.get("locationPreference") or "All",
+        "industryPreference":  data.get("industryPreference") or "All",
+    }
+
+    km = ep.key_metrics or {}
+    km["matching_weights"] = weights
+    km["matching_filters"] = filters
+    ep.key_metrics = _json_safe(km)
+
+    db.session.commit()
+
+    # Optional: trigger your local matching service with these weights
+    try:
+        if LOCAL_API_BASE_URL:
+            requests.post(
+                f"{LOCAL_API_BASE_URL}/api/matching/matches",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "investor_enterprise_id": str(ent.id),
+                    "weights": weights,
+                    "filters": filters,
+                },
+                timeout=20,
+            )
+    except Exception:
+        pass  # fire-and-forget
+
+    return jsonify({
+        "message": "Preferences saved",
+        "enterprise_id": str(ent.id),
+        "preferences": weights,
+        "filters": filters,
+    }), 200
+
+
+@matchinginvestors_bp.route("/matches", methods=["POST"])
+def compute_matches():
+    """
+    If you run a separate matching service, this proxies to it.
+    Else, implement your scoring here using the provided weights/filters.
+    Body accepts:
+      {
+        investor_enterprise_id?: uuid (defaults to user's investor enterprise),
+        weights?: {...}, filters?: {...}
+      }
+    """
+    user, token, err = require_auth()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    inv_ent_id = data.get("investor_enterprise_id")
+
+    if not inv_ent_id:
+        ent = _get_investor_enterprise(user)
+        if not ent:
+            return jsonify({"error": "No investor enterprise found for user"}), 404
+        inv_ent_id = str(ent.id)
+
+    weights = (data.get("weights") or {})
+    filters = (data.get("filters") or {})
+
+    # Normalize weights and compute denominator
+    keys = [
+        "roiWeight","technicalFoundersWeight","previousExitsWeight",
+        "revenueWeight","teamSizeWeight","currentlyRaisingWeight"
+    ]
+    W = {k: max(0, min(100, int(weights.get(k, 0)))) for k in keys}
+    denom = sum(W.values()) or 1
+
+    # Optional gating filters
+    stage_pref     = (filters.get("stagePreference") or "All").lower()
+    industry_pref  = (filters.get("industryPreference") or "All").lower()
+    location_pref  = (filters.get("locationPreference") or "All").lower()
+
+    # Query active startups
+    q = (
+        db.session.query(Enterprise, EnterpriseProfile, StartupProfile)
+        .join(EnterpriseProfile, EnterpriseProfile.enterprise_id == Enterprise.id)
+        .join(StartupProfile, StartupProfile.enterprise_id == Enterprise.id)
+        .filter(Enterprise.enterprise_type.in_(["startup","both"]))
+        .filter(Enterprise.status.in_(["active","pending"]))
+    )
+
+    rows = q.all()
+    matches = []
+
+    def clamp01(x): 
+        try:
+            return max(0.0, min(1.0, float(x)))
+        except: 
+            return 0.0
+
+    for ent, ep, sp in rows:
+        # Gating
+        stage_name = None
+        industry_name = None
+        if ep and ep.stage_id:
+            st = db.session.get(Stage, ep.stage_id)
+            stage_name = (st.name or "").lower() if st else None
+        if ep and ep.industry_id:
+            ind = db.session.get(Industry, ep.industry_id)
+            industry_name = (ind.name or "").lower() if ind else None
+
+        if stage_pref != "all" and (stage_name or "") != stage_pref:
+            continue
+        if industry_pref != "all" and (industry_name or "") != industry_pref:
+            continue
+        if location_pref != "all" and (ent.location or "").lower().find(location_pref) < 0:
+            continue
+
+        # Features
+        mrr = float(sp.mrr_usd or sp.current_revenue or 0)           # monthly
+        arr = float(sp.arr_usd or (mrr * 12)) if (sp.arr_usd or mrr) else 0
+        val = float(sp.current_valuation_usd or 0)
+        tech_pct = float(sp.technical_founders_pct or 0) / 100.0
+        exits_pct = float(sp.previous_exits_pct or 0) / 100.0
+        team = float(sp.team_size or 0)
+        km = (ep.key_metrics or {})
+        funding_needed = km.get("funding_needed")
+        currently_raising = 1.0 if (funding_needed is not None and float(funding_needed) > 0) else 0.0
+
+        # Component scores (0..1)
+        # ROI: simple proxy ARR/Valuation capped (graceful if valuation missing)
+        roi = clamp01((arr / val) / 0.2) if val > 0 else clamp01(arr / 1_000_000.0)
+
+        revenue_perf = clamp01(mrr / 100_000.0)  # 100k MRR caps
+        team_size = clamp01(team / 100.0)        # 100 ppl caps
+
+        # Weighted sum
+        total = (
+            roi * W["roiWeight"] +
+            tech_pct * W["technicalFoundersWeight"] +
+            exits_pct * W["previousExitsWeight"] +
+            revenue_perf * W["revenueWeight"] +
+            team_size * W["teamSizeWeight"] +
+            currently_raising * W["currentlyRaisingWeight"]
+        )
+        overall = total / denom  # 0..1
+
+        # Minimal response compatible with your UI mappers
+        matches.append({
+            "match_id": f"{inv_ent_id}-{ent.id}",
+            "investor_enterprise_id": inv_ent_id,
+            "startup_enterprise_id": str(ent.id),
+            "overall_score": overall,  # 0..1; UI multiplies by 100
+            "startup": {
+                "id": str(ent.id),
+                "name": ent.name,
+                "location": ent.location,
+                "profile": {
+                    "industry": industry_name,
+                    "stage": stage_name,
+                    "headline_tags": (ep.headline_tags or []),
+                },
+                "startup_profile": {
+                    "mrr_usd": mrr,
+                    "arr_usd": arr,
+                    "current_valuation_usd": val,
+                    "team_size": sp.team_size,
+                    "technical_founders_pct": sp.technical_founders_pct,
+                    "previous_exits_pct": sp.previous_exits_pct,
+                    "current_investors": sp.current_investors or [],
+                },
+            },
+        })
+
+    return jsonify({"matches": matches, "count": len(matches)}), 200

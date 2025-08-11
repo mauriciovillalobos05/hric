@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
@@ -16,16 +16,58 @@ const API_BASE =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 // ---------- helpers ----------
-const teamSizeOptionsDefault = ["1-2","3-5","6-10","11-20","21-50","51-100","100+"];
-const stageOptionsDefault = ["Idea","Pre-seed","Seed","Series A","Series B","Series C","Growth","IPO"];
+const teamSizeOptionsDefault = [
+  "1-2",
+  "3-5",
+  "6-10",
+  "11-20",
+  "21-50",
+  "51-100",
+  "100+",
+];
+const stageOptionsDefault = [
+  "Idea",
+  "Pre-seed",
+  "Seed",
+  "Series A",
+  "Series B",
+  "Series C",
+  "Growth",
+  "IPO",
+];
 const industryOptionsDefault = [
-  "Technology","Healthcare","Finance","Education","Agriculture","Energy","E-commerce","Transportation","Media","Real Estate",
+  "Technology",
+  "Healthcare",
+  "Finance",
+  "Education",
+  "Agriculture",
+  "Energy",
+  "E-commerce",
+  "Transportation",
+  "Media",
+  "Real Estate",
 ];
 const targetMarketOptions = [
-  "Young Adults (18-25)","Adults (26-40)","Middle-aged (41-60)","Seniors (60+)",
-  "Parents","Students","Working Professionals","High-Income Individuals","Budget-Conscious Consumers",
-  "Urban Residents","Rural Communities","Tech-Savvy Users","Non-Tech-Savvy Users","Health-Conscious Consumers",
-  "Sustainability-Focused Consumers","Small Businesses","Enterprises","Freelancers / Creators","B2B (Business to Business)","B2C (Business to Consumer)",
+  "Young Adults (18-25)",
+  "Adults (26-40)",
+  "Middle-aged (41-60)",
+  "Seniors (60+)",
+  "Parents",
+  "Students",
+  "Working Professionals",
+  "High-Income Individuals",
+  "Budget-Conscious Consumers",
+  "Urban Residents",
+  "Rural Communities",
+  "Tech-Savvy Users",
+  "Non-Tech-Savvy Users",
+  "Health-Conscious Consumers",
+  "Sustainability-Focused Consumers",
+  "Small Businesses",
+  "Enterprises",
+  "Freelancers / Creators",
+  "B2B (Business to Business)",
+  "B2C (Business to Consumer)",
 ];
 
 const teamSizeToInt = (v) => {
@@ -34,7 +76,10 @@ const teamSizeToInt = (v) => {
   const s = String(v);
   if (s.endsWith("+")) return parseInt(s, 10) || null;
   if (s.includes("-")) {
-    const parts = s.split("-").map((x) => parseInt(x, 10)).filter(Number.isFinite);
+    const parts = s
+      .split("-")
+      .map((x) => parseInt(x, 10))
+      .filter(Number.isFinite);
     return parts.length ? Math.max(...parts) : null;
   }
   const n = parseInt(s, 10);
@@ -54,12 +99,14 @@ const toPct = (v) => {
 };
 
 const csvToArray = (s) =>
-  s.split(",").map((x) => x.trim()).filter(Boolean);
+  s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 const arrayToCSV = (arr) => (Array.isArray(arr) ? arr.join(", ") : "");
 
-const numberOrEmpty = (n) =>
-  n == null ? "" : String(n);
+const numberOrEmpty = (n) => (n == null ? "" : String(n));
 
 const pickTeamSizeOption = (n) => {
   if (n == null) return "";
@@ -82,7 +129,8 @@ const cleanPayload = (obj) => {
     const out = {};
     for (const [k, v] of Object.entries(obj)) {
       const cv = cleanPayload(v);
-      if (cv !== "" && cv !== null && !(Array.isArray(cv) && cv.length === 0)) out[k] = cv;
+      if (cv !== "" && cv !== null && !(Array.isArray(cv) && cv.length === 0))
+        out[k] = cv;
     }
     return out;
   }
@@ -95,9 +143,11 @@ export default function EntrepreneurProfile() {
 
   const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(null);
 
-  const [industryOptions, setIndustryOptions] = useState(industryOptionsDefault);
+  const [industryOptions, setIndustryOptions] = useState(
+    industryOptionsDefault
+  );
   const [stageOptions, setStageOptions] = useState(stageOptionsDefault);
   const [teamSizeOptions] = useState(teamSizeOptionsDefault);
 
@@ -116,6 +166,14 @@ export default function EntrepreneurProfile() {
     problem_solved: "",
     traction_summary: "",
     headline_tags: "", // CSV
+    revenue_model: "",
+    competitive_advantages: "", // CSV
+    current_revenue: "",
+    monthly_growth_rate: "",
+    customer_count: "",
+    market_size: "",
+    addressable_market: "",
+    intellectual_property: "", // freeform notes
     // NEW metrics
     mrr_usd: "",
     arr_usd: "",
@@ -139,9 +197,7 @@ export default function EntrepreneurProfile() {
     }
   }, [form.mrr_usd]); // eslint-disable-line
 
-  const handleChange = (
-    e
-  ) => {
+  const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
@@ -159,7 +215,8 @@ export default function EntrepreneurProfile() {
         const accessToken = sessionRes?.session?.access_token;
 
         if (user) {
-          const { stripe_customer_id, stripe_subscription_id, plan } = user.user_metadata || {};
+          const { stripe_customer_id, stripe_subscription_id, plan } =
+            user.user_metadata || {};
           setForm((prev) => ({
             ...prev,
             stripe_customer_id: stripe_customer_id ?? null,
@@ -172,15 +229,27 @@ export default function EntrepreneurProfile() {
         (async () => {
           try {
             const [inds, stages] = await Promise.allSettled([
-              fetch(`${API_BASE}/api/lookups/industries`).then((r) => r.ok ? r.json() : Promise.reject()),
-              fetch(`${API_BASE}/api/lookups/stages`).then((r) => r.ok ? r.json() : Promise.reject()),
+              fetch(`${API_BASE}/api/lookups/industries`).then((r) =>
+                r.ok ? r.json() : Promise.reject()
+              ),
+              fetch(`${API_BASE}/api/lookups/stages`).then((r) =>
+                r.ok ? r.json() : Promise.reject()
+              ),
             ]);
-            if (inds.status === "fulfilled" && Array.isArray(inds.value?.items)) {
+            if (
+              inds.status === "fulfilled" &&
+              Array.isArray(inds.value?.items)
+            ) {
               const names = inds.value.items.map((x) => x.name).filter(Boolean);
               if (names.length) setIndustryOptions(names);
             }
-            if (stages.status === "fulfilled" && Array.isArray(stages.value?.items)) {
-              const names = stages.value.items.map((x) => x.name).filter(Boolean);
+            if (
+              stages.status === "fulfilled" &&
+              Array.isArray(stages.value?.items)
+            ) {
+              const names = stages.value.items
+                .map((x) => x.name)
+                .filter(Boolean);
               if (names.length) setStageOptions(names);
             }
           } catch {
@@ -223,14 +292,29 @@ export default function EntrepreneurProfile() {
               financials: {
                 funding_goal: numberOrEmpty(km.funding_goal),
               },
+              revenue_model: sp.revenue_model || "",
+              competitive_advantages: arrayToCSV(
+                sp.competitive_advantages || prof.competitive_advantages
+              ),
+              current_revenue: numberOrEmpty(sp.current_revenue),
+              monthly_growth_rate: numberOrEmpty(sp.monthly_growth_rate),
+              customer_count: numberOrEmpty(sp.customer_count),
+              market_size: numberOrEmpty(sp.market_size),
+              addressable_market: numberOrEmpty(sp.addressable_market),
+              intellectual_property:
+                (sp.intellectual_property &&
+                  (sp.intellectual_property.notes ||
+                    JSON.stringify(sp.intellectual_property))) ||
+                "",
               target_market: tmFrom,
               business_model: sp.business_model || "",
               problem_solved: prof.description || sp.value_proposition || "",
-              traction_summary: (sp.traction_metrics && sp.traction_metrics.summary) || "",
+              traction_summary:
+                (sp.traction_metrics && sp.traction_metrics.summary) || "",
               headline_tags: arrayToCSV(prof.headline_tags),
 
               // NEW metrics
-              mrr_usd: numberOrEmpty(sp.mrr_usd ?? sp.mrr_usd), // display_mrr already used server-side; here use raw
+              mrr_usd: numberOrEmpty(sp.mrr_usd ?? sp.display_mrr_usd),
               arr_usd: numberOrEmpty(sp.arr_usd),
               current_valuation_usd: numberOrEmpty(sp.current_valuation_usd),
               current_investors: arrayToCSV(sp.current_investors),
@@ -240,7 +324,10 @@ export default function EntrepreneurProfile() {
           } else if (resp.status !== 404) {
             // 404 = no profile yet (totally fine)
             const err = await resp.json().catch(() => ({}));
-            console.warn("Prefill profile warning:", err?.error || resp.statusText);
+            console.warn(
+              "Prefill profile warning:",
+              err?.error || resp.statusText
+            );
           }
         }
       } catch (e) {
@@ -259,7 +346,9 @@ export default function EntrepreneurProfile() {
     setError(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("No session token found");
 
       const payloadRaw = {
@@ -276,7 +365,16 @@ export default function EntrepreneurProfile() {
         pitch_deck_url: form.pitch_deck_url,
         demo_url: form.demo_url,
         headline_tags: csvToArray(form.headline_tags),
-
+        revenue_model: form.revenue_model,
+        competitive_advantages: csvToArray(form.competitive_advantages),
+        current_revenue: toNumber(form.current_revenue),
+        monthly_growth_rate: toNumber(form.monthly_growth_rate),
+        customer_count: toNumber(form.customer_count),
+        market_size: toNumber(form.market_size),
+        addressable_market: toNumber(form.addressable_market),
+        intellectual_property: form.intellectual_property
+          ? { notes: form.intellectual_property }
+          : undefined,
         // key metrics / market / team
         team_size: teamSizeToInt(form.team_size),
         funding_needed: toNumber(form.funding_needed),
@@ -289,7 +387,9 @@ export default function EntrepreneurProfile() {
 
         // NEW numeric & list fields
         mrr_usd: toNumber(form.mrr_usd),
-        arr_usd: toNumber(form.arr_usd) ?? (toNumber(form.mrr_usd) ? Number(form.mrr_usd) * 12 : null),
+        arr_usd:
+          toNumber(form.arr_usd) ??
+          (toNumber(form.mrr_usd) ? Number(form.mrr_usd) * 12 : null),
         current_valuation_usd: toNumber(form.current_valuation_usd),
         current_investors: csvToArray(form.current_investors),
         technical_founders_pct: toPct(form.technical_founders_pct),
@@ -337,32 +437,70 @@ export default function EntrepreneurProfile() {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Entrepreneur Profile</CardTitle>
-          <p className="text-sm text-gray-500">Help investors understand your company</p>
+          <CardTitle className="text-2xl font-bold">
+            Entrepreneur Profile
+          </CardTitle>
+          <p className="text-sm text-gray-500">
+            Help investors understand your company
+          </p>
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input name="name" placeholder="Company Name" value={form.name} onChange={handleChange} />
+            <Input
+              name="name"
+              placeholder="Company Name"
+              value={form.name}
+              onChange={handleChange}
+            />
 
-            <select name="industry" value={form.industry} onChange={handleChange} className="w-full border rounded-md p-2">
+            <select
+              name="industry"
+              value={form.industry}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
               <option value="">Select Industry</option>
-              {industryOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+              {industryOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
             </select>
 
-            <select name="stage" value={form.stage} onChange={handleChange} className="w-full border rounded-md p-2">
+            <select
+              name="stage"
+              value={form.stage}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
               <option value="">Select Stage</option>
-              {stageOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+              {stageOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
             </select>
 
             <LocationAutocomplete
               value={form.location}
-              onChange={(value) => setForm((prev) => ({ ...prev, location: value }))}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, location: value }))
+              }
             />
 
-            <select name="team_size" value={form.team_size} onChange={handleChange} className="w-full border rounded-md p-2">
+            <select
+              name="team_size"
+              value={form.team_size}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
               <option value="">Select Team Size</option>
-              {teamSizeOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+              {teamSizeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
             </select>
 
             <Input
@@ -373,8 +511,18 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
 
-            <Input name="pitch_deck_url" placeholder="Pitch Deck URL" value={form.pitch_deck_url} onChange={handleChange} />
-            <Input name="demo_url" placeholder="Demo URL" value={form.demo_url} onChange={handleChange} />
+            <Input
+              name="pitch_deck_url"
+              placeholder="Pitch Deck URL"
+              value={form.pitch_deck_url}
+              onChange={handleChange}
+            />
+            <Input
+              name="demo_url"
+              placeholder="Demo URL"
+              value={form.demo_url}
+              onChange={handleChange}
+            />
 
             <Input
               name="funding_goal"
@@ -384,14 +532,26 @@ export default function EntrepreneurProfile() {
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  financials: { ...prev.financials, funding_goal: e.target.value },
+                  financials: {
+                    ...prev.financials,
+                    funding_goal: e.target.value,
+                  },
                 }))
               }
             />
 
-            <select name="target_market" value={form.target_market} onChange={handleChange} className="w-full border rounded-md p-2">
+            <select
+              name="target_market"
+              value={form.target_market}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
               <option value="">Select Target Market</option>
-              {targetMarketOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+              {targetMarketOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
             </select>
 
             <textarea
@@ -429,8 +589,68 @@ export default function EntrepreneurProfile() {
 
             {/* NEW — key metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Input name="mrr_usd" type="number" placeholder="MRR (USD)" value={form.mrr_usd} onChange={handleChange} />
-              <Input name="arr_usd" type="number" placeholder="ARR (USD)" value={form.arr_usd} onChange={handleChange} />
+              <Input
+                name="revenue_model"
+                placeholder="Revenue Model"
+                value={form.revenue_model}
+                onChange={handleChange}
+              />
+              <Input
+                name="competitive_advantages"
+                placeholder="Competitive advantages (comma-separated)"
+                value={form.competitive_advantages}
+                onChange={handleChange}
+              />
+              <Input
+                name="current_revenue"
+                type="number"
+                placeholder="Current revenue (USD/mo)"
+                value={form.current_revenue}
+                onChange={handleChange}
+              />
+              <Input
+                name="monthly_growth_rate"
+                type="number"
+                step="0.01"
+                placeholder="Monthly growth rate (%)"
+                value={form.monthly_growth_rate}
+                onChange={handleChange}
+              />
+              <Input
+                name="customer_count"
+                type="number"
+                placeholder="Customer count"
+                value={form.customer_count}
+                onChange={handleChange}
+              />
+              <Input
+                name="market_size"
+                type="number"
+                placeholder="Market size (USD)"
+                value={form.market_size}
+                onChange={handleChange}
+              />
+              <Input
+                name="addressable_market"
+                type="number"
+                placeholder="Addressable market (USD)"
+                value={form.addressable_market}
+                onChange={handleChange}
+              />
+              <Input
+                name="mrr_usd"
+                type="number"
+                placeholder="MRR (USD)"
+                value={form.mrr_usd}
+                onChange={handleChange}
+              />
+              <Input
+                name="arr_usd"
+                type="number"
+                placeholder="ARR (USD)"
+                value={form.arr_usd}
+                onChange={handleChange}
+              />
               <Input
                 name="current_valuation_usd"
                 type="number"
@@ -465,7 +685,14 @@ export default function EntrepreneurProfile() {
                 onChange={handleChange}
               />
             </div>
-
+            <textarea
+              name="intellectual_property"
+              placeholder="Intellectual property (patents, applications, trade secrets, notes)"
+              rows={3}
+              className="w-full border rounded-md p-2"
+              value={form.intellectual_property}
+              onChange={handleChange}
+            />
             <Button type="submit" disabled={saving} className="w-full">
               {saving ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
             </Button>

@@ -1,126 +1,143 @@
-import React, { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { userTypes, stagePreferences, locationPreferences, industryPreferences } from './preferences';
+import React, { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import {
+  userTypes,
+  stagePreferences,
+  industryPreferences,
+} from "./preferences";
 
-const FilterPanel = ({ filters, onFilterChange }) => {
+// Checkbox stages
+import MultiSelectChips from "./MultiSelectChips";
+
+// Location dropdown
+import LocationMultiSelect from "@/pages/cmpnnts/LocationMultiSelect";
+
+export default function FilterPanel({ filters, onFilterChange }) {
   const [localFilters, setLocalFilters] = useState(filters);
 
+  const investorTypeOptions = (userTypes || []).map((t) => t.label);
+  const stageOptions = (stagePreferences || []).map(
+    (s) => s.label ?? s.value ?? s
+  );
+  const industryOptions = (industryPreferences || []).map(
+    (i) => i.label ?? i.value ?? i
+  );
+
   useEffect(() => {
-    setLocalFilters(filters); // Sync local state with parent when filters reset
+    const toLabel = (x) =>
+      x && typeof x === "object" ? x.label ?? x.value : x;
+    setLocalFilters({
+      ...filters,
+      investorTypes: (filters.investorTypes || []).map(toLabel),
+      stagePreferences: (filters.stagePreferences || []).map(toLabel),
+      industryPreferences: (filters.industryPreferences || []).map(toLabel),
+      locationPreferences: Array.isArray(filters.locationPreferences)
+        ? filters.locationPreferences
+        : [], // keep as string array if your LocationMultiSelect returns strings
+    });
   }, [filters]);
 
-  const handleSliderChange = (key, value) => {
-    const updated = { ...localFilters, [key]: value[0] };
-    setLocalFilters(updated);
-    onFilterChange(updated);
+  const update = (patch) => {
+    const next = { ...localFilters, ...patch };
+    setLocalFilters(next);
+    onFilterChange?.(next);
   };
 
-  const handleSelectChange = (key, value) => {
-    const updated = { ...localFilters, [key]: value };
-    setLocalFilters(updated);
-    onFilterChange(updated);
-  };
+  const handleSlider = (key, value) => update({ [key]: value[0] });
 
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle className="text-lg font-semibold">Investment Preferences</CardTitle>
-        <p className="text-sm text-gray-600">Adjust the weights to find your ideal startups</p>
+        <CardTitle className="text-lg font-semibold">
+          Investment Preferences
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          Select stages, industries, and locations. Leave any section empty to
+          include all.
+        </p>
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* User Type Selection */}
+        {/* Investor type */}
+        <MultiSelectChips
+          label="Investor Type"
+          options={investorTypeOptions}
+          values={
+            Array.isArray(localFilters.investorTypes)
+              ? localFilters.investorTypes
+              : []
+          }
+          onChange={(vals) => update({ investorTypes: vals })}
+        />
+
+        {/* Stages (checkboxes) */}
+        <MultiSelectChips
+          label="Preferred Stages"
+          options={stageOptions}
+          values={
+            Array.isArray(localFilters.stagePreferences)
+              ? localFilters.stagePreferences
+              : []
+          }
+          onChange={(vals) => update({ stagePreferences: vals })}
+        />
+
+        {/* Locations — identical look/feel to investor */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Investor Type</Label>
-          <Select value={localFilters.userType} onValueChange={(value) => handleSelectChange('userType', value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select investor type" />
-            </SelectTrigger>
-            <SelectContent>
-              {userTypes.map((type) => (
-                <SelectItem key={type.value} value={type.value}>
-                  {type.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label className="text-sm font-medium">Locations</Label>
+          <LocationMultiSelect
+            values={localFilters.locationPreferences ?? []}
+            onChange={(vals) => update({ locationPreferences: vals })}
+          />
+          <p className="text-xs text-gray-500">
+            Leave empty to mean <Badge variant="outline">All locations</Badge>
+          </p>
         </div>
 
-        {/* Stage Preference */}
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Preferred Stage</Label>
-          <Select value={localFilters.stagePreference} onValueChange={(value) => handleSelectChange('stagePreference', value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select stage preference" />
-            </SelectTrigger>
-            <SelectContent>
-              {stagePreferences.map((stage) => (
-                <SelectItem key={stage.value} value={stage.value}>
-                  {stage.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Industries (checkboxes) */}
+        <MultiSelectChips
+          label="Industry Focus"
+          options={industryOptions}
+          values={
+            Array.isArray(localFilters.industryPreferences)
+              ? localFilters.industryPreferences
+              : []
+          }
+          onChange={(vals) => update({ industryPreferences: vals })}
+        />
 
-        {/* Location Preference */}
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Location Preference</Label>
-          <Select value={localFilters.locationPreference} onValueChange={(value) => handleSelectChange('locationPreference', value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select location" />
-            </SelectTrigger>
-            <SelectContent>
-              {locationPreferences.map((location) => (
-                <SelectItem key={location.value} value={location.value}>
-                  {location.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Industry Preference */}
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Industry Focus</Label>
-          <Select value={localFilters.industryPreference} onValueChange={(value) => handleSelectChange('industryPreference', value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select industry" />
-            </SelectTrigger>
-            <SelectContent>
-              {industryPreferences.map((industry) => (
-                <SelectItem key={industry.value} value={industry.value}>
-                  {industry.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
+        {/* Weights */}
         <div className="border-t pt-4">
           <h3 className="text-sm font-medium mb-4">Weight Preferences</h3>
-
-          {/* Reusable slider block */}
           {[
-            { key: 'roiWeight', label: 'ROI Importance' },
-            { key: 'technicalFoundersWeight', label: 'Technical Founders' },
-            { key: 'previousExitsWeight', label: 'Previous Exits' },
-            { key: 'revenueWeight', label: 'Revenue Performance' },
-            { key: 'teamSizeWeight', label: 'Team Size' },
-            { key: 'currentlyRaisingWeight', label: 'Currently Raising Priority' },
+            { key: "roiWeight", label: "ROI Importance" },
+            { key: "technicalFoundersWeight", label: "Technical Founders" },
+            { key: "previousExitsWeight", label: "Previous Exits" },
+            { key: "revenueWeight", label: "Revenue Performance" },
+            { key: "teamSizeWeight", label: "Team Size" },
+            {
+              key: "currentlyRaisingWeight",
+              label: "Currently Raising Priority",
+            },
           ].map(({ key, label }) => (
             <div key={key} className="space-y-3">
               <div className="flex justify-between items-center">
                 <Label className="text-sm">{label}</Label>
-                <Badge variant="outline">{localFilters[key]}%</Badge>
+                <Badge variant="outline">{localFilters[key] ?? 0}%</Badge>
               </div>
               <Slider
-                value={[localFilters[key]]}
-                onValueChange={(value) => handleSliderChange(key, value)}
+                value={[localFilters[key] ?? 0]}
+                onValueChange={(v) => handleSlider(key, v)}
                 max={100}
                 step={5}
                 className="w-full"
@@ -131,6 +148,4 @@ const FilterPanel = ({ filters, onFilterChange }) => {
       </CardContent>
     </Card>
   );
-};
-
-export default FilterPanel;
+}

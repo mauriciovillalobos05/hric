@@ -9,17 +9,15 @@ export const userTypes = [
 ];
 
 export const stagePreferences = [
-  { value: "Early", label: "Early Stage" },
+  { value: "Series A", label: "Series A" },
+  { value: "Series B", label: "Series B" },
+  { value: "Series C", label: "Series C" },
   { value: "Growth", label: "Growth Stage" },
-  { value: "Late", label: "Late Stage" }
-];
-
-export const locationPreferences = [
-  { value: "Mexico City", label: "Mexico City" },
-  { value: "Guadalajara", label: "Guadalajara" },
-  { value: "Monterrey", label: "Monterrey" },
-  { value: "Puebla", label: "Puebla" },
-  { value: "All", label: "All Locations" }
+  { value: "Late", label: "Late Stage" },
+  { value: "Early", label: "Early Stage" },
+  { value: "Pre-seed", label: "Pre-seed" },
+  { value: "Seed", label: "Seed" },
+  { value: "IPO", label: "IPO" },
 ];
 
 export const industryPreferences = [

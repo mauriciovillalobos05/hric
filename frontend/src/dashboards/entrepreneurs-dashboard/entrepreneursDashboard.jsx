@@ -49,6 +49,11 @@ function EntrepreneurDashboard() {
     locationPreference: "All",
     industryPreference: "All",
 
+    stagePreferences: [],
+    industryPreferences: [],
+    locationPreferences: [],
+    investorTypes: [],
+    
     // extra hard filters you added
     checkMin: 0,
     checkMax: Number.POSITIVE_INFINITY,
@@ -125,30 +130,53 @@ function EntrepreneurDashboard() {
           String(s || "")
             .toLowerCase()
             .trim();
-        const mapType = (v) => {
+
+        const arr = (v) => (Array.isArray(v) ? v : v && v !== "All" ? [v] : []);
+
+        // derive normalized selections (arrays)
+        const selectedStages = arr(
+          filters.stagePreferences ?? filters.stagePreference
+        ).map(norm);
+        const selectedIndustries = arr(
+          filters.industryPreferences ?? filters.industryPreference
+        ).map(norm);
+        const selectedLocations = arr(
+          filters.locationPreferences ?? filters.locationPreference
+        ).map(norm);
+        // --- TYPE filter (array-aware + legacy single) ---
+        const legacyTypeToLabel = (v) => {
           const x = norm(v);
-          if (x === "vc") return "venture capital";
-          if (x.startsWith("corporate")) return "corporate";
-          return x; // angel, any, etc.
+          if (x === "vc") return "Venture Capital";
+          if (x.startsWith("angel")) return "Angel";
+          if (x.startsWith("corporate")) return "Corporate";
+          if (x.startsWith("accelerator")) return "Accelerator";
+          if (x === "any") return null;
+          return v; // already a label or unknown; pass through
         };
-
-        const stageOk =
-          filters.stagePreference === "All" ||
-          inv.stage?.some((s) => norm(s) === norm(filters.stagePreference));
-
-        const industryOk =
-          filters.industryPreference === "All" ||
-          inv.industries?.some(
-            (i) => norm(i) === norm(filters.industryPreference)
-          );
-
-        const geoOk =
-          filters.locationPreference === "All" ||
-          norm(inv.location).includes(norm(filters.locationPreference));
-
+        // chip-based (labels) e.g. ["Angel Investor","Venture Capital"] -> normalize
+        const selectedTypes = arr(filters.investorTypes).map(norm);
+        // if no chips selected, fall back to legacy single-select
+        const legacyLabel = legacyTypeToLabel(filters.userType);
+        if (!selectedTypes.length && legacyLabel)
+          selectedTypes.push(norm(legacyLabel));
         const typeOk =
-          filters.userType === "any" ||
-          norm(inv.type).includes(mapType(filters.userType));
+          !selectedTypes.length ||
+          selectedTypes.some((t) => norm(inv.type).includes(t));
+
+        // Stage filter (array-aware)
+        const stageOk =
+          selectedStages.length === 0 ||
+          inv.stage?.some((s) => selectedStages.includes(norm(s)));
+
+        // Industry filter (array-aware; investor has industries[])
+        const industryOk =
+          selectedIndustries.length === 0 ||
+          inv.industries?.some((i) => selectedIndustries.includes(norm(i)));
+
+        // Geo filter (array-aware; allow partial match)
+        const geoOk =
+          selectedLocations.length === 0 ||
+          selectedLocations.some((loc) => norm(inv.location).includes(loc));
 
         const [min, max] = parseCheckRange(inv.checkSize); // "$5M - $50M" -> [5_000_000, 50_000_000]
         const checkOk = max >= filters.checkMin && min <= filters.checkMax;

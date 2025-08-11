@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.jsx";
 
@@ -16,10 +17,18 @@ import MatchesDashboard from "./matchComponents/matchesDashboard.jsx";
 import DocumentStatus from "./documentStatus.jsx";
 import EventList from "@/pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import FilterPanel from "./matchComponents/components/FilterPanel/FilterPanel.jsx";
+import InsightsPanel from "./insights/insightsPanel.jsx";
 
 // Messaging
 import MessagesPreview from "./messagesComponents/messagesPreview.jsx";
 import MessagesDock from "./messagesComponents/messagesDock.jsx";
+
+// Insights mock data
+import {
+  demoStats,
+  demoTimeseries,
+  demoViewers,
+} from "./insights/mockInsights.js";
 
 // Tabs to keep: matches, analytics, compare, mont carlo, overview, messages
 const ENTREPRENEUR_TABS = [
@@ -100,6 +109,24 @@ const ENTREPRENEUR_TABS = [
         <MessagesPreview messages={messages} onOpenChat={onOpenChat} />
         <MessagesDock openChats={openChats} onCloseChat={onCloseChat} />
       </>
+    ),
+  },
+  {
+    value: "insights",
+    label: "Insights",
+    icon: BarChart3,
+    render: () => (
+      <div className="mx-auto max-w-6xl">
+        <InsightsPanel
+          isPremium={true}
+          stats={demoStats}
+          timeseries={demoTimeseries}
+          viewers={demoViewers}
+          onUpgrade={() => {
+            /* navigate('/billing') */
+          }}
+        />
+      </div>
     ),
   },
 ];

@@ -10,7 +10,7 @@ import ProfileStatusCard from "./dashboard-components/components/profileStatusCo
 import EventList from "../../pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import RegisterModal from "../../pages/eventShowcaseComponents/registerModal.jsx";
 import DocumentStatus from "./dashboard-components/components/documentStatus.jsx";
-import InsightsPanel from "./dashboard-components/components/insightsPanel.jsx";
+import InsightsPanel from "./dashboard-components/components/insights/insightsPanel.jsx";
 import FilterPanel from "./dashboard-components/components/matchComponents/components/FilterPanel/FilterPanel.jsx";
 import { Loader2, RefreshCw } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
@@ -49,27 +49,32 @@ function EntrepreneurDashboard() {
   const [loading, setLoading] = useState(true);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
-  const [filters, setFilters] = useState({
-    // hard filters
-    stage: "All",
-    industry: "All",
-    geo: "All",
-    investorType: "Any", // "VC" | "Angel" | "Corporate" | "Any"
-    checkMin: 0, // dollars
-    checkMax: Infinity,
-    followOnMin: 0, // %
-    boardSeat: "any", // "any" | "willing" | "avoid"
-    syndication: "any", // "any" | "lead" | "co-lead"
-    dealTimeMaxDays: 999, // cap on avg deal time
 
-    // soft weights (0–100 or normalized in transformFilters)
-    wTraction: 25,
-    wTeam: 20,
-    wMarket: 20,
-    wGrowth: 20,
-    wTechFounders: 15,
-  });
+  const DEFAULT_FILTERS = {
+    // what FilterPanel already emits
+    userType: "vc", // "vc" | "angel" | "corporate" | "any"
+    stagePreference: "All",
+    locationPreference: "All",
+    industryPreference: "All",
 
+    // extra hard filters you added
+    checkMin: 0,
+    checkMax: Number.POSITIVE_INFINITY,
+    followOnMin: 0,
+    boardSeat: "any", // any | willing | avoid
+    syndication: "any", // any | lead | co-lead
+    dealTimeMaxDays: 999,
+
+    // sliders that transformFilters already expects
+    roiWeight: 25,
+    technicalFoundersWeight: 15,
+    previousExitsWeight: 15,
+    revenueWeight: 20,
+    teamSizeWeight: 20,
+    currentlyRaisingWeight: 10,
+  };
+
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const navigate = useNavigate();
   const HARDCODE_MODE = true;
   const handleFilterChange = (newFilters) => {
@@ -124,15 +129,34 @@ function EntrepreneurDashboard() {
 
     const filteredAndScored = mockMatches
       .filter((inv) => {
+        const norm = (s) =>
+          String(s || "")
+            .toLowerCase()
+            .trim();
+        const mapType = (v) => {
+          const x = norm(v);
+          if (x === "vc") return "venture capital";
+          if (x.startsWith("corporate")) return "corporate";
+          return x; // angel, any, etc.
+        };
+
         const stageOk =
-          filters.stage === "All" || inv.stage?.includes(filters.stage);
+          filters.stagePreference === "All" ||
+          inv.stage?.some((s) => norm(s) === norm(filters.stagePreference));
+
         const industryOk =
-          filters.industry === "All" ||
-          inv.industries?.includes(filters.industry);
+          filters.industryPreference === "All" ||
+          inv.industries?.some(
+            (i) => norm(i) === norm(filters.industryPreference)
+          );
+
         const geoOk =
-          filters.geo === "All" || inv.location?.includes(filters.geo);
+          filters.locationPreference === "All" ||
+          norm(inv.location).includes(norm(filters.locationPreference));
+
         const typeOk =
-          filters.investorType === "Any" || inv.type === filters.investorType;
+          filters.userType === "any" ||
+          norm(inv.type).includes(mapType(filters.userType));
 
         const [min, max] = parseCheckRange(inv.checkSize); // "$5M - $50M" -> [5_000_000, 50_000_000]
         const checkOk = max >= filters.checkMin && min <= filters.checkMax;
@@ -194,21 +218,7 @@ function EntrepreneurDashboard() {
   };
 
   // Reset filters to default
-  const resetFilters = () => {
-    setFilters({
-      userType: "vc",
-      stagePreference: "All",
-      locationPreference: "All",
-      industryPreference: "All",
-      checkSizeRange: "All",
-      roiWeight: 20,
-      technicalFoundersWeight: 15,
-      previousExitsWeight: 15,
-      revenueWeight: 20,
-      teamSizeWeight: 15,
-      currentlyRaisingWeight: 15,
-    });
-  };
+  const resetFilters = () => setFilters(DEFAULT_FILTERS);
 
   // Fetch user, enterprise, messages, matches, events on mount
   useEffect(() => {
@@ -562,9 +572,24 @@ function EntrepreneurDashboard() {
         onOpenChat={handleOpenChat}
         openChats={openChats}
         onCloseChat={handleCloseChat}
+        insightsProps={{
+          isPremium: userRole === "entrepreneur_pro",
+          onUpgrade: () => navigate("/billing"),
+          stats: { deckViews: 32, messages: 12, favorites: 7 },
+          timeseries: [
+            { label: "Jul 1", value: 5 },
+            { label: "Jul 8", value: 10 },
+            { label: "Jul 15", value: 20 },
+            { label: "Jul 22", value: 30 },
+          ],
+          viewers: matchedInvestors.slice(0, 3).map((m) => ({
+            id: m.id,
+            name: m.name,
+            title: m.type,
+            image: m.profile_image || defaultAvatar,
+          })),
+        }}
       />
-
-      
 
       {/* Events */}
       <div id="events">
@@ -575,11 +600,6 @@ function EntrepreneurDashboard() {
           role={userRole}
           onSubmit={handleSubmitRegistration}
         />
-      </div>
-
-      {/* Insights */}
-      <div id="insights">
-        <InsightsPanel role={userRole} />
       </div>
 
       <ScrollToTopButton />

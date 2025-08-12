@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import defaultAvatar from "../../assets/default_user_image.png";
 import InvestorTabs from "./dashboard-components/components/investorTabs.jsx";
+import ScrollToTopButton from "@/components/scrollToTopButton.jsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -233,6 +234,7 @@ function InvestorsDashboard() {
 
   return (
     <>
+    <div id="dashboard-top">
       <HeaderBar
         investorName={investorName}
         notifications={notifications}
@@ -240,7 +242,7 @@ function InvestorsDashboard() {
         messages={messages}
         onOpenChat={handleOpenChat}
       />
-
+    </div>
       <InvestorTabs
         matches={matches}
         filteredMatches={filteredMatches}
@@ -262,6 +264,7 @@ function InvestorsDashboard() {
         openChats={openChats}
         onCloseChat={handleCloseChat}
       />
+      <ScrollToTopButton />
     </>
   );
 }

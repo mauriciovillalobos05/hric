@@ -1,3 +1,4 @@
+// EntrepreneurTabs.jsx
 import React, { useRef, useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -11,6 +12,9 @@ import {
   BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.jsx";
+
+// KYC (same panel used in investor tabs)
+import EntrepreneurKycPanel from "./kycComponents/EntrepreneurKycPanel.jsx";
 
 // Entrepreneur components
 import MatchesDashboard from "./matchComponents/matchesDashboard.jsx";
@@ -85,6 +89,9 @@ const ENTREPRENEUR_TABS = [
       // registerModalOpen, onCloseRegisterModal, selectedEvent, onSubmitRegistration, userRole
     }) => (
       <>
+        {/* ✅ KYC panel added just like investorTabs.jsx */}
+        <EntrepreneurKycPanel />
+
         {/* Optional summary on top */}
         <EventList
           events={events}

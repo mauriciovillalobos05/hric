@@ -46,7 +46,7 @@ function readRoleFromSessionStorage() {
     }
     // Try simple scalar keys as a fallback
     const simpleRole =
-      window.sessionStorage.getItem("role") ||
+      window.sessionStorage.getItem("registrationRole") ||
       window.sessionStorage.getItem("userRole");
     return simpleRole || "Investor";
   } catch {

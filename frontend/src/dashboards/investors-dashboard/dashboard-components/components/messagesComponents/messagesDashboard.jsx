@@ -1,5 +1,4 @@
-// ./messagesComponents/MessagesDashboard.jsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +41,53 @@ export default function MessagesDashboard({ messages = [] }) {
   const [query, setQuery] = useState("");
   const [showUnread, setShowUnread] = useState(false);
   const [draft, setDraft] = useState("");
+
+  // 🚀 Auto-open thread when coming from "Contact" button
+  useEffect(() => {
+    const target = sessionStorage.getItem("startChatWith");
+    if (!target) return;
+
+    // clear so we don't re-run next time
+    sessionStorage.removeItem("startChatWith");
+
+    const time = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    // add placeholder to inbox if missing
+    setInbox((prev) => {
+      const exists = prev.some((m) => m.sender === target);
+      if (exists) return prev;
+      const placeholder = {
+        id: `m-${Date.now()}`,
+        sender: target,
+        preview: "New conversation",
+        time,
+        read: true,
+        created_at: new Date().toISOString(),
+      };
+      return [placeholder, ...prev];
+    });
+
+    // ensure a thread exists
+    setThreads((prev) => {
+      if (prev[target]) return prev;
+      return {
+        ...prev,
+        [target]: [
+          {
+            sender: target,
+            content: "— conversation started —",
+            time,
+          },
+        ],
+      };
+    });
+
+    // select it
+    setSelectedSender(target);
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -2,6 +2,8 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   MapPin,
   DollarSign,
@@ -11,6 +13,7 @@ import {
   Target,
   Award,
   Briefcase,
+  MessageSquare,
 } from "lucide-react";
 
 const formatMoneyShort = (n) => {
@@ -42,7 +45,20 @@ const getMatchLabel = (score) => {
   return "Poor Match";
 };
 
-// ---- normalization helpers (unchanged) ----
+// storage helpers
+const getRolePlan = () => {
+  const role =
+    sessionStorage.getItem("registrationRole") ||
+    localStorage.getItem("user_role") ||
+    "";
+  const plan =
+    sessionStorage.getItem("registrationPlanKey") ||
+    localStorage.getItem("user_plan") ||
+    "";
+  return { role, plan };
+};
+
+// ---- normalization helpers ----
 const toArray = (val) => (Array.isArray(val) ? val : val == null ? [] : [val]);
 const industriesArray = (entity) => {
   const arr = Array.isArray(entity?.industries)
@@ -51,12 +67,33 @@ const industriesArray = (entity) => {
   return arr.filter((x) => typeof x === "string");
 };
 
+// Heuristic: if parent didn't pass `startup`, still detect startup-ish objects
+const looksLikeStartup = (e) => {
+  if (!e) return false;
+  const signals = [
+    "revenueMonthlyUSD",
+    "employees",
+    "valuationUSD",
+    "currentInvestors",
+    "summary",
+    "tags",
+  ];
+  return signals.some((k) => e[k] != null);
+};
+
 const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) => {
-  const isStartup = !!startup;
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // entity can be a startup or investor depending on list
   const entity = startup || investor;
 
+  // Treat as startup if `startup` prop exists OR it "looks like" one
+  const isStartup =
+    !!startup || (!startup && !investor ? false : looksLikeStartup(entity));
+
   const inds = industriesArray(entity);
-  const stages = isStartup ? toArray(entity?.stage) : toArray(entity?.stage);
+  const stages = toArray(entity?.stage);
 
   const handleClick = () => {
     if (onSelect) onSelect(entity);
@@ -68,7 +105,23 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
     }
   };
 
-  // ✨ Selected background styling (light blue). Swap bg-blue-50 -> bg-slate-50 if you prefer gray.
+  // Contact button for INVESTORS viewing STARTUP cards
+  const { role } = getRolePlan();
+  const isInvestor =
+    role?.toLowerCase() === "investor" ||
+    location.pathname.includes("/dashboard/investor");
+  const showContact = isInvestor && isStartup && !!entity?.name;
+
+  const handleContact = (e) => {
+    e.stopPropagation();
+    if (!entity?.name) return;
+
+    // Tell Messages to open this conversation & switch to the Messages tab
+    sessionStorage.setItem("startChatWith", entity.name);
+    sessionStorage.setItem("goToTab", "messages");
+    navigate("/dashboard/investor?tab=messages");
+  };
+
   const containerClasses = `cursor-pointer transition-all duration-200 border ${
     isSelected
       ? "bg-blue-50 border-blue-500 ring-2 ring-blue-200 shadow-md"
@@ -215,7 +268,6 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
             </span>
           </div>
 
-          {/* Stages */}
           <div className="flex flex-wrap gap-1">
             {stages.slice(0, 4).map((stage, i) => (
               <Badge key={`st-${i}`} variant="secondary" className="text-xs">
@@ -224,16 +276,17 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
             ))}
           </div>
 
-          {/* Industries / Tags */}
           <div className="flex flex-wrap gap-1 mt-1">
-            {inds.slice(0, 3).map((x, i) => (
-              <Badge key={`ind-${i}`} variant="outline" className="text-xs">
-                {x}
-              </Badge>
-            ))}
-            {inds.length > 3 && (
+            {industriesArray(entity)
+              .slice(0, 3)
+              .map((x, i) => (
+                <Badge key={`ind-${i}`} variant="outline" className="text-xs">
+                  {x}
+                </Badge>
+              ))}
+            {industriesArray(entity).length > 3 && (
               <Badge variant="outline" className="text-xs">
-                +{inds.length - 3} more
+                +{industriesArray(entity).length - 3} more
               </Badge>
             )}
 
@@ -323,9 +376,21 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
           <div>
             <div className="flex justify-between items-center mb-1">
               <span className="text-sm text-gray-600">Investment Likelihood</span>
-              <span className="text-sm font-medium">{Math.round(matchScore)}%</span>
+              <span className="text-sm font-medium">
+                {Math.round(matchScore)}%
+              </span>
             </div>
             <Progress value={matchScore} className="h-2" />
+          </div>
+        )}
+
+        {/* Contact action — for INVESTORS on STARTUP cards */}
+        {showContact && (
+          <div className="pt-2 flex justify-end">
+            <Button size="sm" onClick={handleContact}>
+              <MessageSquare className="w-4 h-4 mr-2" />
+              Contact
+            </Button>
           </div>
         )}
       </CardContent>

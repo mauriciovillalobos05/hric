@@ -1,5 +1,6 @@
 // EntrepreneurTabs.jsx
 import React, { useRef, useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Users,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button.jsx";
 
-// KYC (same panel used in investor tabs)
+// KYC
 import EntrepreneurKycPanel from "./kycComponents/EntrepreneurKycPanel.jsx";
 
 // Entrepreneur components
@@ -23,9 +24,8 @@ import EventList from "@/pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
 import FilterPanel from "./matchComponents/components/FilterPanel/FilterPanel.jsx";
 import InsightsPanel from "./insights/insightsPanel.jsx";
 
-// Messaging
-import MessagesPreview from "./messagesComponents/messagesPreview.jsx";
-import MessagesDock from "./messagesComponents/messagesDock.jsx";
+// Messaging (single-pane with composer + freemium gating)
+import MessagesDashboard from "./messagesComponents/MessagesDashboard.jsx";
 
 // Insights mock data
 import {
@@ -34,7 +34,7 @@ import {
   demoViewers,
 } from "./insights/mockInsights.js";
 
-// Tabs to keep: matches, analytics, compare, mont carlo, overview, messages
+// Tabs config
 const ENTREPRENEUR_TABS = [
   {
     value: "matches",
@@ -82,17 +82,16 @@ const ENTREPRENEUR_TABS = [
     label: "Overview",
     icon: Target,
     render: ({
-      enterprise, // include if you want the card
+      enterprise,
       events,
       onRegisterClick,
-      // If rendering modal here, also take:
       // registerModalOpen, onCloseRegisterModal, selectedEvent, onSubmitRegistration, userRole
     }) => (
       <>
-        {/* ✅ KYC panel added just like investorTabs.jsx */}
+        {/* KYC panel */}
         <EntrepreneurKycPanel />
 
-        {/* Optional summary on top */}
+        {/* Events */}
         <EventList
           events={events}
           role="entrepreneur"
@@ -111,12 +110,7 @@ const ENTREPRENEUR_TABS = [
     value: "messages",
     label: "Messages",
     icon: MessageSquare,
-    render: ({ messages, onOpenChat, openChats, onCloseChat }) => (
-      <>
-        <MessagesPreview messages={messages} onOpenChat={onOpenChat} />
-        <MessagesDock openChats={openChats} onCloseChat={onCloseChat} />
-      </>
-    ),
+    render: ({ messages }) => <MessagesDashboard messages={messages} />,
   },
   {
     value: "insights",
@@ -164,13 +158,39 @@ function EntrepreneurTabs({
   userRole,
 
   // messages
-  messages,
-  onOpenChat,
-  openChats,
-  onCloseChat,
+  messages, // optional: MessagesDashboard falls back to mocks
 }) {
   const scrollRef = useRef(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // read tab from query (?tab=messages) so Contact button can deep-link here
+  const initialTab =
+    new URLSearchParams(location.search).get("tab") || selectedTab;
+  const [tab, setTab] = useState(initialTab);
+
+  // Keep internal tab in sync when URL query changes elsewhere
+  useEffect(() => {
+    const t = new URLSearchParams(location.search).get("tab");
+    if (t && t !== tab) setTab(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  // If a Contact action set a startChatWith but URL didn't include ?tab=messages,
+  // switch to messages tab on mount.
+  useEffect(() => {
+    const startWith = sessionStorage.getItem("startChatWith");
+    const urlTab = new URLSearchParams(location.search).get("tab");
+    if (startWith && urlTab !== "messages") {
+      const p = new URLSearchParams(location.search);
+      p.set("tab", "messages");
+      setTab("messages");
+      navigate({ search: p.toString() }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const scrollTabs = (direction) => {
     const container = scrollRef.current;
@@ -194,8 +214,14 @@ function EntrepreneurTabs({
 
   return (
     <Tabs
-      defaultValue={selectedTab}
-      onValueChange={onTabChange}
+      value={tab}
+      onValueChange={(v) => {
+        setTab(v);
+        onTabChange?.(v);
+        const p = new URLSearchParams(location.search);
+        p.set("tab", v);
+        navigate({ search: p.toString() }, { replace: true });
+      }}
       className="w-full px-4 py-2"
     >
       {/* Tab Bar with Arrows */}
@@ -262,9 +288,6 @@ function EntrepreneurTabs({
               userRole,
               // messages
               messages,
-              onOpenChat,
-              openChats,
-              onCloseChat,
             })
           ) : (
             <p className="text-muted text-center py-4">{placeholder}</p>

@@ -5,6 +5,7 @@ import {
   Users, Target, BarChart3, Radar,
   ChevronLeft, ChevronRight, RefreshCw, MessageSquare,
 } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
 import InvestorOverview from "./investorOverview.jsx";
 import PortfolioSummary from "./portfolioSummary.jsx";
@@ -97,8 +98,26 @@ function InvestorTabs({
   // Optional incoming messages
   messages: incomingMessages,
 }) {
+  const location = useLocation();
   const scrollRef = useRef(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
+
+  // 🔁 internal active tab, allowing URL switch & sessionStorage "goToTab"
+  const [activeTab, setActiveTab] = useState(selectedTab);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const queryTab = params.get("tab");
+    const stored = sessionStorage.getItem("goToTab");
+    const desired = queryTab || stored;
+
+    if (desired && desired !== activeTab) {
+      setActiveTab(desired);
+      onTabChange(desired);
+    }
+    if (stored) sessionStorage.removeItem("goToTab");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   const [matchedInvestors, setMatchedInvestors] = useState([]);
   const [selectedInvestors, setSelectedInvestors] = useState([]);
@@ -210,7 +229,7 @@ function InvestorTabs({
   );
 
   return (
-    <Tabs defaultValue={selectedTab} onValueChange={onTabChange} className="w-full px-4 py-2">
+    <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); onTabChange(v); }} className="w-full px-4 py-2">
       {/* Tab Bar with Arrows */}
       <div className="relative w-full flex items-center justify-center">
         {isOverflowing && (

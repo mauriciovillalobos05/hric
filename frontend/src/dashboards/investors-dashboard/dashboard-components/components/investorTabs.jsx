@@ -26,6 +26,8 @@ import StartupCard from "./matchComponents/FilterPanel/StartupCard.jsx";
 import SpiderChart from "./matchComponents/SpiderChart.jsx";
 import MonteCarloResults from "./matchComponents/MonteCarloResults.jsx";
 
+import InvestorKycPanel from "./kycComponents/InvestorKycPanel.jsx";
+
 const TABS = [
   { value: "matches", label: "Matches", icon: Users },
   { value: "analytics", label: "Analytics", icon: BarChart3 },
@@ -48,6 +50,7 @@ const TABS = [
       selectedEvent, onSubmitRegistration,
     }) => (
       <>
+        <InvestorKycPanel />
         <InvestorOverview onMetricsLoaded={onMetricsLoaded ?? (() => {})} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-4"><PortfolioSummary /></div>

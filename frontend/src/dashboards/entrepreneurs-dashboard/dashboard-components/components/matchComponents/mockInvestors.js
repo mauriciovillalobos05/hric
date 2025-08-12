@@ -39,7 +39,7 @@ const mockInvestors = [
     name: "Andreessen Horowitz",
     type: "Venture Capital",
     stage: ["Seed", "Series A", "Series B"],
-    industries: ["Technology", "Crypto", "Bio", "FinTech"],
+    industries: ["Technology", "Crypto", "Bio", "Financial Technology"],
     location: "Menlo Park, CA",
     checkSize: "$1M - $25M",
     portfolioSize: 400,
@@ -71,7 +71,7 @@ const mockInvestors = [
   {
     id: 3,
     name: "First Round Capital",
-    type: "Venture Capital",
+    type: "Corporate Investor",
     stage: ["Pre-seed", "Seed", "Series A"],
     industries: ["Technology", "Consumer", "Enterprise"],
     location: "San Francisco, CA",
@@ -105,9 +105,9 @@ const mockInvestors = [
   {
     id: 4,
     name: "Accel Partners",
-    type: "Venture Capital",
+    type: "Founder/Entrepreneur",
     stage: ["Series A", "Series B", "Growth"],
-    industries: ["Enterprise", "Consumer", "FinTech", "Healthcare"],
+    industries: ["Enterprise", "Consumer", "Financial Technology", "Healthcare"],
     location: "Palo Alto, CA",
     checkSize: "$2M - $100M",
     portfolioSize: 500,
@@ -139,7 +139,7 @@ const mockInvestors = [
   {
     id: 5,
     name: "Bessemer Venture Partners",
-    type: "Venture Capital",
+    type: "Accelerator",
     stage: ["Series A", "Series B", "Series C"],
     industries: ["Cloud", "Healthcare", "Consumer", "Infrastructure"],
     location: "Menlo Park, CA",

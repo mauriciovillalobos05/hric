@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useState, useCallback, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Users, Radar, BarChart3 } from "lucide-react";
 import Dashboard from "./components/Dashboard"; // from Dashboard.jsx
@@ -8,10 +8,29 @@ import InvestorCard from "../matchComponents/components/FilterPanel/InvestorCard
 
 const MatchesDashboard = ({
   matchedInvestors,
-  selectedInvestors,
-  onInvestorSelect,
+  activeInvestor,
   simulationResults,
+  onToggleCompare,
+  onSimulate,
+  compareIds,
 }) => {
+  const scrollerRef = useRef(null);
+  const [atBottom, setAtBottom] = useState(false);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const reached =
+      Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+    setAtBottom(reached);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    handleScroll(); // compute once on mount/resize
+  }, [handleScroll]);
+
   return (
     <Tabs defaultValue="matches" className="w-full">
       <TabsList className="grid w-full grid-cols-3">
@@ -29,19 +48,33 @@ const MatchesDashboard = ({
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent
-        value="matches"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4"
-      >
-        {matchedInvestors.map((investor, index) => (
-          <InvestorCard
-            key={investor.name + index}
-            investor={investor}
-            matchScore={investor.matchScore}
-            onSelect={onInvestorSelect}
-            isSelected={selectedInvestors.some((i) => i.id === investor.id)}
-          />
-        ))}
+      <TabsContent value="matches">
+        <div className="relative lg:h-[calc(100vh-6rem)]">
+          <div
+            ref={scrollerRef}
+            onScroll={handleScroll}
+            className="h-full overflow-y-auto pr-2"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {matchedInvestors.map((inv, index) => (
+                <InvestorCard
+                  key={inv.id ?? `${inv.name}-${index}`}
+                  investor={inv}
+                  matchScore={inv.matchScore}
+                  isActive={activeInvestor?.id === inv.id}
+                  isCompared={compareIds.includes(inv.id)}
+                  onSimulate={() => onSimulate(inv)}
+                  onToggleCompare={() => onToggleCompare(inv.id)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Show fade only when NOT at bottom */}
+          {!atBottom && (
+            <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-b from-transparent to-white" />
+          )}
+        </div>
       </TabsContent>
 
       <TabsContent value="analytics">
@@ -53,19 +86,20 @@ const MatchesDashboard = ({
 
       <TabsContent value="compare">
         <SpiderChart
-          investors={matchedInvestors}
-          selectedInvestors={selectedInvestors}
+          investors={
+            compareIds.length
+              ? matchedInvestors.filter((i) => compareIds.includes(i.id))
+              : matchedInvestors.slice(0, 3) // fallback if none picked
+          }
         />
       </TabsContent>
 
-      {simulationResults && selectedInvestors.length > 0 && (
-        <div className="mt-6">
-          <MonteCarloResults
-            selectedStartup={selectedInvestors[0]}
-            simulationResults={simulationResults}
-          />
-        </div>
-      )}
+      <div className="mt-6">
+        <MonteCarloResults
+          selectedStartup={activeInvestor}
+          simulationResults={activeInvestor?.simulation ?? simulationResults}
+        />
+      </div>
     </Tabs>
   );
 };

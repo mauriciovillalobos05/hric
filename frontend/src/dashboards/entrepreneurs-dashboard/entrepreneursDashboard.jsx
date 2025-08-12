@@ -33,7 +33,6 @@ function EntrepreneurDashboard() {
 
   // Matches state
   const [matchedInvestors, setMatchedInvestors] = useState([]);
-  const [selectedInvestors, setSelectedInvestors] = useState([]);
 
   // Simulation results state
   const [simulationResults, setSimulationResults] = useState(null);
@@ -41,6 +40,10 @@ function EntrepreneurDashboard() {
   const [loading, setLoading] = useState(true);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // Compare and Selected Investors
+  const [activeInvestor, setActiveInvestor] = useState(null); // for Monte Carlo
+  const [compareIds, setCompareIds] = useState([]);
 
   const DEFAULT_FILTERS = {
     // what FilterPanel already emits
@@ -53,7 +56,7 @@ function EntrepreneurDashboard() {
     industryPreferences: [],
     locationPreferences: [],
     investorTypes: [],
-    
+
     // extra hard filters you added
     checkMin: 0,
     checkMax: Number.POSITIVE_INFINITY,
@@ -77,6 +80,24 @@ function EntrepreneurDashboard() {
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
     // Optional: run matching logic here based on updated filters
+  };
+
+  // When user clicks "Simulate" on a card
+  const handleSimulate = (investor) => {
+    setActiveInvestor(investor);
+    setSimulationResults(investor.simulation); // you already compute sim
+  };
+
+  // When user toggles "Compare" on a card
+  const toggleCompare = (investorId) => {
+    setCompareIds(
+      (prev) =>
+        prev.includes(investorId)
+          ? prev.filter((id) => id !== investorId)
+          : prev.length >= 3
+          ? prev
+          : [...prev, investorId] // cap at 3
+    );
   };
 
   // Budget parsing function
@@ -143,22 +164,9 @@ function EntrepreneurDashboard() {
         const selectedLocations = arr(
           filters.locationPreferences ?? filters.locationPreference
         ).map(norm);
-        // --- TYPE filter (array-aware + legacy single) ---
-        const legacyTypeToLabel = (v) => {
-          const x = norm(v);
-          if (x === "vc") return "Venture Capital";
-          if (x.startsWith("angel")) return "Angel";
-          if (x.startsWith("corporate")) return "Corporate";
-          if (x.startsWith("accelerator")) return "Accelerator";
-          if (x === "any") return null;
-          return v; // already a label or unknown; pass through
-        };
+
         // chip-based (labels) e.g. ["Angel Investor","Venture Capital"] -> normalize
         const selectedTypes = arr(filters.investorTypes).map(norm);
-        // if no chips selected, fall back to legacy single-select
-        const legacyLabel = legacyTypeToLabel(filters.userType);
-        if (!selectedTypes.length && legacyLabel)
-          selectedTypes.push(norm(legacyLabel));
         const typeOk =
           !selectedTypes.length ||
           selectedTypes.some((t) => norm(inv.type).includes(t));
@@ -221,21 +229,6 @@ function EntrepreneurDashboard() {
 
     setMatchedInvestors(filteredAndScored);
   }, [filters]);
-
-  const handleInvestorSelect = (investor) => {
-    setSelectedInvestors((prev) => {
-      const isSelected = prev.some((i) => i.id === investor.id);
-      const updated = isSelected
-        ? prev.filter((i) => i.id !== investor.id)
-        : [...prev, investor];
-
-      if (!isSelected && updated.length === 1) {
-        setSimulationResults(investor.simulation); // ✅ set it here!
-      }
-
-      return updated;
-    });
-  };
 
   // Reset filters to default
   const resetFilters = () => setFilters(DEFAULT_FILTERS);
@@ -575,8 +568,10 @@ function EntrepreneurDashboard() {
         onResetFilters={resetFilters}
         // matches
         matchedInvestors={matchedInvestors}
-        selectedInvestors={selectedInvestors}
-        onInvestorSelect={handleInvestorSelect}
+        activeInvestor={activeInvestor}
+        compareIds={compareIds}
+        onSimulate={handleSimulate}
+        onToggleCompare={toggleCompare}
         simulationResults={simulationResults}
         // overview
         enterprise={enterprise}
@@ -592,23 +587,6 @@ function EntrepreneurDashboard() {
         onOpenChat={handleOpenChat}
         openChats={openChats}
         onCloseChat={handleCloseChat}
-        insightsProps={{
-          isPremium: userRole === "entrepreneur_pro",
-          onUpgrade: () => navigate("/billing"),
-          stats: { deckViews: 32, messages: 12, favorites: 7 },
-          timeseries: [
-            { label: "Jul 1", value: 5 },
-            { label: "Jul 8", value: 10 },
-            { label: "Jul 15", value: 20 },
-            { label: "Jul 22", value: 30 },
-          ],
-          viewers: matchedInvestors.slice(0, 3).map((m) => ({
-            id: m.id,
-            name: m.name,
-            title: m.type,
-            image: m.profile_image || defaultAvatar,
-          })),
-        }}
       />
 
       {/* Events */}

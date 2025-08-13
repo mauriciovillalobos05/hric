@@ -47,11 +47,13 @@ const ENTREPRENEUR_TABS = [
       onResetFilters,
       // matches-related
       matchedInvestors,
-      selectedInvestors,
-      onInvestorSelect,
+      activeInvestor,
       simulationResults,
+      onToggleCompare,
+      onSimulate,
+      compareIds,
     }) => (
-      <div className="flex flex-col lg:flex-row gap-6">
+      <div className="flex flex-col lg:flex-row gap-6 min-h-0">
         {/* LEFT: Filter Panel */}
         <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
           <FilterPanel filters={filters} onFilterChange={onFilterChange} />
@@ -66,11 +68,14 @@ const ENTREPRENEUR_TABS = [
         </div>
 
         {/* RIGHT: Results */}
-        <div className="w-full lg:w-3/4">
+        <div className="w-full lg:w-3/4 min-h-0">
+          {" "}
           <MatchesDashboard
             matchedInvestors={matchedInvestors}
-            selectedInvestors={selectedInvestors}
-            onInvestorSelect={onInvestorSelect}
+            activeInvestor={activeInvestor}
+            compareIds={compareIds}
+            onSimulate={onSimulate}
+            onToggleCompare={onToggleCompare}
             simulationResults={simulationResults}
           />
         </div>
@@ -119,7 +124,7 @@ const ENTREPRENEUR_TABS = [
     render: () => (
       <div className="mx-auto max-w-6xl">
         <InsightsPanel
-          isPremium={true}
+          isPremium={false}
           stats={demoStats}
           timeseries={demoTimeseries}
           viewers={demoViewers}
@@ -143,10 +148,11 @@ function EntrepreneurTabs({
 
   // matches
   matchedInvestors,
-  selectedInvestors,
-  onInvestorSelect,
+  activeInvestor,
+  compareIds,
+  onSimulate,
+  onToggleCompare,
   simulationResults,
-
   // overview
   enterprise,
   events,
@@ -274,9 +280,11 @@ function EntrepreneurTabs({
               onResetFilters,
               // matches
               matchedInvestors,
-              selectedInvestors,
-              onInvestorSelect,
+              activeInvestor,
               simulationResults,
+              onToggleCompare,
+              onSimulate,
+              compareIds,
               // overview
               enterprise,
               events,

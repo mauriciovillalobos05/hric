@@ -1,11 +1,11 @@
 // Create a new file: src/data/preferences.js
 
 export const userTypes = [
-  { value: "angel", label: "Angel Investor" },
-  { value: "vc", label: "Venture Capital" },
-  { value: "corporate", label: "Corporate Investor" },
-  { value: "accelerator", label: "Accelerator" },
-  { value: "founder", label: "Founder/Entrepreneur" }
+  { value: "Angel Investor", label: "Angel Investor" },
+  { value: "Venture Capital", label: "Venture Capital" },
+  { value: "Corporate Investor", label: "Corporate Investor" },
+  { value: "Accelerator", label: "Accelerator" },
+  { value: "Founder/Entrepreneur", label: "Founder/Entrepreneur" }
 ];
 
 export const stagePreferences = [
@@ -21,15 +21,20 @@ export const stagePreferences = [
 ];
 
 export const industryPreferences = [
-  { value: "AI/ML", label: "AI/Machine Learning" },
-  { value: "FinTech", label: "Financial Technology" },
-  { value: "HealthTech", label: "Health Technology" },
-  { value: "EdTech", label: "Education Technology" },
-  { value: "CleanTech", label: "Clean Technology" },
-  { value: "Logistics", label: "Logistics & Supply Chain" },
-  { value: "AgriTech", label: "Agriculture Technology" },
-  { value: "Mobility", label: "Mobility & Transportation" },
-  { value: "RetailTech", label: "Retail Technology" },
-  { value: "CyberSecurity", label: "Cybersecurity" },
-  { value: "All", label: "All Industries" }
+  { value: "AI/ML", label: "AI/ML" },
+  { value: "FinTech", label: "FinTech" },
+  { value: "HealthTech", label: "HealthTech" },
+  { value: "EdTech", label: "EdTech" },
+  { value: "CleanTech", label: "CleanTech" },
+  { value: "Logistics", label: "Logistics" },
+  { value: "AgriTech", label: "AgriTech" },
+  { value: "Mobility", label: "Mobility" },
+  { value: "RetailTech", label: "RetailTech" },
+  { value: "CyberSecurity", label: "CyberSecurity" },
+  { value: "SaaS", label: "SaaS" },
+  { value: "Healthcare", label: "Healthcare" },
+  { value: "Enterprise", label: "Enterprise" },
+  { value: "ClimateTech", label: "ClimateTech" },
+  { value: "IoT", label: "IoT" },
+  { value: "Hardware", label: "Hardware" },
 ];

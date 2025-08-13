@@ -5,8 +5,8 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-const SpiderChart = ({ investors, selectedInvestors = [] }) => {
-  const investorsToShow = selectedInvestors.length > 0 ? selectedInvestors : investors.slice(0, 3);
+const SpiderChart = ({ investors = [] }) => {
+  const investorsToShow =  investors;
 
   const prepareRadarData = () => {
     const metrics = [

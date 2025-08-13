@@ -89,14 +89,14 @@ const MatchesDashboard = ({
           investors={
             compareIds.length
               ? matchedInvestors.filter((i) => compareIds.includes(i.id))
-              : matchedInvestors.slice(0, 3) // fallback if none picked
+              : []
           }
         />
       </TabsContent>
 
       <div className="mt-6">
         <MonteCarloResults
-          selectedStartup={activeInvestor}
+          selectedInvestors={activeInvestor}
           simulationResults={activeInvestor?.simulation ?? simulationResults}
         />
       </div>

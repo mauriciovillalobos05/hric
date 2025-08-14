@@ -35,6 +35,7 @@ import {
 } from "./insights/mockInsights.js";
 
 // Tabs config
+const premium = sessionStorage.getItem("registrationPlanName");
 const ENTREPRENEUR_TABS = [
   {
     value: "matches",
@@ -124,7 +125,7 @@ const ENTREPRENEUR_TABS = [
     render: () => (
       <div className="mx-auto max-w-6xl">
         <InsightsPanel
-          isPremium={false}
+          isPremium={premium !== "Free"}
           stats={demoStats}
           timeseries={demoTimeseries}
           viewers={demoViewers}

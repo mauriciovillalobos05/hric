@@ -1,20 +1,43 @@
+// src/pages/InvestorProfile.jsx
+// Simulation-only version: NO Supabase, NO backend. Persists to sessionStorage.
+
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import LocationMultiSelect from "../cmpnnts/LocationMultiSelect";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+// ---------- sessionStorage helpers ----------
+const KEYS = {
+  USERS: "hri:users",          // map: { [email]: { ...userRecord, investorProfile? } }
+  SESSION: "hri:authSession",  // { email, issuedAt }
+};
 
-const API_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+const read = (key) => {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
 
+const write = (key, value) => {
+  sessionStorage.setItem(key, JSON.stringify(value));
+};
+
+// ---------- tiny utils ----------
+const toNumber = (v) => {
+  if (v === "" || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const arrayEnsure = (x) => (Array.isArray(x) ? x : []);
+
+// ---------- small UI helper ----------
 function MultiSelect({ label, options, selected, onChange }) {
   const toggleOption = (option) => {
     if (selected.includes(option)) onChange(selected.filter((x) => x !== option));
@@ -46,7 +69,11 @@ function MultiSelect({ label, options, selected, onChange }) {
 
 export default function InvestorProfile() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+
+  const [booting, setBooting] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
   const [form, setForm] = useState({
     industries: [],
     investment_stages: [],
@@ -60,11 +87,7 @@ export default function InvestorProfile() {
     advisory_availability: false,
     communication_frequency: "",
     meeting_preference: "",
-    stripe_customer_id: null,
-    stripe_subscription_id: null,
-    tier: null,
   });
-  const [error, setError] = useState(null);
 
   const industryOptions = [
     "Technology",
@@ -102,84 +125,107 @@ export default function InvestorProfile() {
   const commOptions = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "On-demand"];
   const meetingOptions = ["In-person", "Virtual", "Hybrid", "Email Only"];
 
+  // ---------- initial load from sessionStorage ----------
   useEffect(() => {
-    (async () => {
-      try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-        if (userError) throw userError;
+    try {
+      const session = read(KEYS.SESSION); // { email, issuedAt }
+      if (!session?.email) throw new Error("Not authenticated. Please register or log in.");
 
-        const { stripe_customer_id, stripe_subscription_id, plan } =
-          user?.user_metadata || {};
-        setForm((prev) => ({
-          ...prev,
-          stripe_customer_id,
-          stripe_subscription_id,
-          tier: plan,
-        }));
-      } catch (e) {
-        console.error("Metadata error:", e);
-      } finally {
-        setLoading(false);
-      }
-    })();
+      const users = read(KEYS.USERS);
+      const user = users[session.email];
+      if (!user) throw new Error("User record not found. Please register again.");
+
+      const profile = user.investorProfile || {};
+
+      setForm((prev) => ({
+        ...prev,
+        industries: arrayEnsure(profile.industries),
+        investment_stages: arrayEnsure(profile.investment_stages),
+        geographic_focus: arrayEnsure(profile.geographic_focus),
+        investment_range_min: profile.investment_range_min ?? "",
+        investment_range_max: profile.investment_range_max ?? "",
+        accredited_status: Boolean(profile.accredited_status),
+        investor_type: profile.investor_type || "",
+        risk_tolerance: profile.risk_tolerance || "",
+        portfolio_size: profile.portfolio_size ?? "",
+        advisory_availability: Boolean(profile.advisory_availability),
+        communication_frequency: profile.communication_frequency || "",
+        meeting_preference: profile.meeting_preference || "",
+      }));
+    } catch (e) {
+      console.error("Boot error:", e);
+      setError(e.message || "Failed to load profile.");
+    } finally {
+      setBooting(false);
+    }
   }, []);
 
+  // ---------- generic input handler ----------
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
   };
 
+  // ---------- submit (save to sessionStorage only) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setSaving(true);
     setError(null);
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const accessToken = session?.access_token;
-      if (!accessToken) throw new Error("No session token found");
+      const session = read(KEYS.SESSION);
+      if (!session?.email) throw new Error("Not authenticated.");
 
-      // Validate min/max on client as well
-      const minV = form.investment_range_min !== "" ? Number(form.investment_range_min) : null;
-      const maxV = form.investment_range_max !== "" ? Number(form.investment_range_max) : null;
+      const users = read(KEYS.USERS);
+      const user = users[session.email];
+      if (!user) throw new Error("User record not found.");
+
+      // Client-side validations
+      const minV =
+        form.investment_range_min !== "" ? Number(form.investment_range_min) : null;
+      const maxV =
+        form.investment_range_max !== "" ? Number(form.investment_range_max) : null;
       if (minV !== null && maxV !== null && minV > maxV) {
         throw new Error("Minimum investment cannot exceed maximum.");
       }
 
-      const payload = {
-        ...form,
-        investment_range_min: minV,
-        investment_range_max: maxV,
-        portfolio_size: form.portfolio_size !== "" ? Number(form.portfolio_size) : null,
+      // Build the profile object (normalized types)
+      const profile = {
+        industries: arrayEnsure(form.industries),
+        investment_stages: arrayEnsure(form.investment_stages),
+        geographic_focus: arrayEnsure(form.geographic_focus),
+        investment_range_min: toNumber(form.investment_range_min),
+        investment_range_max: toNumber(form.investment_range_max),
+        accredited_status: Boolean(form.accredited_status),
+        investor_type: form.investor_type || "",
+        risk_tolerance: form.risk_tolerance || "",
+        portfolio_size: toNumber(form.portfolio_size),
+        advisory_availability: Boolean(form.advisory_availability),
+        communication_frequency: form.communication_frequency || "",
+        meeting_preference: form.meeting_preference || "",
+        savedAt: Date.now(),
       };
 
-      const res = await fetch(`${API_BASE}/api/investors/profile`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      // Persist under the current user
+      users[session.email] = {
+        ...user,
+        investorProfile: profile,
+        updatedAt: Date.now(),
+      };
+      write(KEYS.USERS, users);
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Submission failed");
-
+      // Done — go to the simulated dashboard
       navigate("/dashboard/investor");
     } catch (err) {
       console.error("Profile error:", err);
       setError(err.message || "Could not submit profile");
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  if (loading) {
+  // ---------- UI ----------
+  if (booting) {
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="animate-spin h-6 w-6 text-gray-600" />
@@ -191,11 +237,12 @@ export default function InvestorProfile() {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Investor Profile</CardTitle>
-          <p className="text-sm text-gray-500">Tell us about your preferences</p>
+          <CardTitle className="text-2xl font-bold">Investor Profile (Simulation)</CardTitle>
+          <p className="text-sm text-gray-500">This saves locally to sessionStorage — no backend involved.</p>
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <MultiSelect
               label="Industries"
@@ -203,32 +250,36 @@ export default function InvestorProfile() {
               selected={form.industries}
               onChange={(v) => setForm((p) => ({ ...p, industries: v }))}
             />
+
             <MultiSelect
               label="Investment Stages"
               options={investmentStageOptions}
               selected={form.investment_stages}
               onChange={(v) => setForm((p) => ({ ...p, investment_stages: v }))}
             />
+
             <LocationMultiSelect
               values={form.geographic_focus}
               onChange={(v) => setForm((p) => ({ ...p, geographic_focus: v }))}
             />
+
             <div className="flex gap-4">
               <Input
                 name="investment_range_min"
-                placeholder="Min Investment"
+                placeholder="Min Investment (USD)"
                 type="number"
                 value={form.investment_range_min}
                 onChange={handleChange}
               />
               <Input
                 name="investment_range_max"
-                placeholder="Max Investment"
+                placeholder="Max Investment (USD)"
                 type="number"
                 value={form.investment_range_max}
                 onChange={handleChange}
               />
             </div>
+
             <select
               name="investor_type"
               value={form.investor_type}
@@ -242,6 +293,7 @@ export default function InvestorProfile() {
                 </option>
               ))}
             </select>
+
             <select
               name="risk_tolerance"
               value={form.risk_tolerance}
@@ -255,13 +307,15 @@ export default function InvestorProfile() {
                 </option>
               ))}
             </select>
+
             <Input
               name="portfolio_size"
-              placeholder="Portfolio Size"
+              placeholder="Portfolio Size (# of investments)"
               type="number"
               value={form.portfolio_size}
               onChange={handleChange}
             />
+
             <select
               name="communication_frequency"
               value={form.communication_frequency}
@@ -275,6 +329,7 @@ export default function InvestorProfile() {
                 </option>
               ))}
             </select>
+
             <select
               name="meeting_preference"
               value={form.meeting_preference}
@@ -288,6 +343,7 @@ export default function InvestorProfile() {
                 </option>
               ))}
             </select>
+
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -297,6 +353,7 @@ export default function InvestorProfile() {
               />
               Accredited Investor
             </label>
+
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -307,8 +364,8 @@ export default function InvestorProfile() {
               Available for Advisory
             </label>
 
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
+            <Button type="submit" disabled={saving} className="w-full">
+              {saving ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
             </Button>
           </form>
         </CardContent>

@@ -1,3 +1,4 @@
+// StartupCard.jsx
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -5,16 +6,10 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  MapPin,
-  DollarSign,
-  TrendingUp,
-  Users as UsersIcon,
-  Clock,
-  Target,
-  Award,
-  Briefcase,
-  MessageSquare,
+  MapPin, DollarSign, TrendingUp, Users as UsersIcon, Clock,
+  Target, Award, Briefcase, MessageSquare,
 } from "lucide-react";
+import { saveSessionContactMeta } from "@/lib/startupMeta";
 
 const formatMoneyShort = (n) => {
   if (n == null || isNaN(n)) return "-";
@@ -23,9 +18,7 @@ const formatMoneyShort = (n) => {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
   return `$${n}`;
 };
-
 const formatMonthly = (n) => (n == null ? "-" : `${formatMoneyShort(n)}/mo`);
-
 const formatCheckSize = (checkSize) =>
   typeof checkSize === "string"
     ? checkSize.replace(/\$(\d+)M/g, "$$$1M").replace(/\$(\d+)K/g, "$$$1K")
@@ -33,11 +26,10 @@ const formatCheckSize = (checkSize) =>
 
 const getMatchColor = (score) => {
   if (score >= 80) return "text-green-600 bg-green-50 border-green-200";
-  if (score >= 60) return "text-blue-600 bg-blue-100 border-blue-200";
+  if (score >= 60) return "text-blue-600 bg-blue-50 border-blue-200";
   if (score >= 40) return "text-yellow-600 bg-yellow-50 border-yellow-200";
   return "text-red-600 bg-red-50 border-red-200";
 };
-
 const getMatchLabel = (score) => {
   if (score >= 80) return "Excellent Match";
   if (score >= 60) return "Good Match";
@@ -45,7 +37,6 @@ const getMatchLabel = (score) => {
   return "Poor Match";
 };
 
-// storage helpers
 const getRolePlan = () => {
   const role =
     sessionStorage.getItem("registrationRole") ||
@@ -58,7 +49,6 @@ const getRolePlan = () => {
   return { role, plan };
 };
 
-// ---- normalization helpers ----
 const toArray = (val) => (Array.isArray(val) ? val : val == null ? [] : [val]);
 const industriesArray = (entity) => {
   const arr = Array.isArray(entity?.industries)
@@ -67,74 +57,97 @@ const industriesArray = (entity) => {
   return arr.filter((x) => typeof x === "string");
 };
 
-// Heuristic: if parent didn't pass `startup`, still detect startup-ish objects
+// detect startup-ish objects
 const looksLikeStartup = (e) => {
   if (!e) return false;
   const signals = [
-    "revenueMonthlyUSD",
-    "employees",
-    "valuationUSD",
-    "currentInvestors",
-    "summary",
-    "tags",
+    "revenueMonthlyUSD", "employees", "valuationUSD",
+    "currentInvestors", "summary", "tags",
   ];
   return signals.some((k) => e[k] != null);
 };
 
-const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) => {
+const StartupCard = ({
+  investor,
+  startup,
+  matchScore = 0,
+  onSimulate,              // SINGLE select
+  onToggleCompare,         // MULTI select
+  isActive = false,
+  isCompared = false,
+  // legacy
+  onSelect,
+  isSelected = false,
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // entity can be a startup or investor depending on list
   const entity = startup || investor;
-
-  // Treat as startup if `startup` prop exists OR it "looks like" one
   const isStartup =
     !!startup || (!startup && !investor ? false : looksLikeStartup(entity));
 
   const inds = industriesArray(entity);
   const stages = toArray(entity?.stage);
 
-  const handleClick = () => {
-    if (onSelect) onSelect(entity);
+  const handleSimulate = () => {
+    if (onSimulate) onSimulate(entity);
+    else if (onSelect) onSelect(entity);
   };
+
+  // NEW: take the user to the "montecarlo" tab when clicking the Simulate button
+  const goToMonteCarlo = () => {
+    sessionStorage.setItem("goToTab", "montecarlo");
+    // keep behavior consistent with other buttons that deep-link tabs
+    navigate("/dashboard/investor?tab=montecarlo");
+  };
+
+  // MULTI-SELECT: always send the id
+  const handleCompareChange = (e) => {
+    e.stopPropagation();
+    if (!entity?.id) return;
+    onToggleCompare?.(entity.id);
+  };
+
   const handleKey = (e) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      handleClick();
+      handleSimulate();
     }
   };
 
-  // Contact button for INVESTORS viewing STARTUP cards
-  const { role } = getRolePlan();
+  const { role, plan } = getRolePlan();
   const isInvestor =
     role?.toLowerCase() === "investor" ||
     location.pathname.includes("/dashboard/investor");
   const showContact = isInvestor && isStartup && !!entity?.name;
+  const canContact = !/investor_free/i.test(plan);
 
   const handleContact = (e) => {
     e.stopPropagation();
     if (!entity?.name) return;
-
-    // Tell Messages to open this conversation & switch to the Messages tab
+    saveSessionContactMeta(startup);
     sessionStorage.setItem("startChatWith", entity.name);
     sessionStorage.setItem("goToTab", "messages");
     navigate("/dashboard/investor?tab=messages");
   };
 
-  const containerClasses = `cursor-pointer transition-all duration-200 border ${
-    isSelected
-      ? "bg-blue-50 border-blue-500 ring-2 ring-blue-200 shadow-md"
-      : "bg-white border-slate-200 hover:bg-slate-50 hover:shadow-md"
+  const isCardActive = Boolean(isActive || isSelected);
+
+  const containerClasses = `cursor-pointer transition-all duration-200 hover:shadow-lg ${
+    isCardActive
+      ? "bg-blue-50 border-2 border-blue-500 ring-2 ring-blue-200 shadow-lg"
+      : "bg-white border border-slate-200 hover:bg-slate-50 hover:shadow-md"
   }`;
+
+  const stop = (e) => e.stopPropagation();
 
   return (
     <Card
       role="button"
       tabIndex={0}
-      onClick={handleClick}
+      onClick={handleSimulate} 
       onKeyDown={handleKey}
-      aria-pressed={!!isSelected}
+      aria-pressed={!!isCardActive}
       className={containerClasses}
     >
       <CardHeader className="pb-3">
@@ -192,7 +205,7 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4" onClick={stop}>
         {/* Key Metrics */}
         <div className="grid grid-cols-2 gap-4">
           {entity?.location && (
@@ -277,16 +290,14 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
           </div>
 
           <div className="flex flex-wrap gap-1 mt-1">
-            {industriesArray(entity)
-              .slice(0, 3)
-              .map((x, i) => (
-                <Badge key={`ind-${i}`} variant="outline" className="text-xs">
-                  {x}
-                </Badge>
-              ))}
-            {industriesArray(entity).length > 3 && (
+            {inds.slice(0, 3).map((x, i) => (
+              <Badge key={`ind-${i}`} variant="outline" className="text-xs">
+                {x}
+              </Badge>
+            ))}
+            {inds.length > 3 && (
               <Badge variant="outline" className="text-xs">
-                +{industriesArray(entity).length - 3} more
+                +{inds.length - 3} more
               </Badge>
             )}
 
@@ -384,8 +395,41 @@ const StartupCard = ({ investor, startup, matchScore, onSelect, isSelected }) =>
           </div>
         )}
 
-        {/* Contact action — for INVESTORS on STARTUP cards */}
-        {showContact && (
+        {/* Actions: Simulate + Compare */}
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            className="text-xs px-2 py-1 rounded bg-blue-600 text-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSimulate();   // keep existing select logic
+              goToMonteCarlo();   // NEW: jump to Monte Carlo tab
+            }}
+          >
+            Simulate
+          </button>
+
+          <label
+            className="text-xs inline-flex items-center gap-2 cursor-pointer"
+            onClick={stop}
+          >
+            <input
+              type="checkbox"
+              checked={isCompared}
+              onChange={handleCompareChange}
+              onClick={stop}
+            />
+            Compare
+          </label>
+
+          {isCardActive && (
+            <span className="ml-auto text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              Active
+            </span>
+          )}
+        </div>
+
+        {showContact && canContact && (
           <div className="pt-2 flex justify-end">
             <Button size="sm" onClick={handleContact}>
               <MessageSquare className="w-4 h-4 mr-2" />

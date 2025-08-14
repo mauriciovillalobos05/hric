@@ -45,7 +45,7 @@ export default function SelectPlan() {
     const key = mapPlanToKey(role, selectedPlanName);
     if (key) sessionStorage.setItem("registrationPlanKey", key);
 
-    navigate(role === "investor" ? "/dashboard/investor" : "/dashboard/entrepreneur");
+    navigate("/register");
   };
 
   return (

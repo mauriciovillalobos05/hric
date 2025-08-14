@@ -1,8 +1,15 @@
 // src/pages/.../matchComponents/mockStartups.js
 // Mock startup data for the startup–investor matching platform
 // NOTE: Locations now match LocationMultiSelect format => "City, Region, Country"
+/*
+ key: "revenueGrowth", label: "Revenue Growth" },
+    { key: "teamExperience", label: "Team Experience" },
+    { key: "marketSize", label: "Market Size" },
+    { key: "traction", label: "Traction" },
+    { key: "geography", label: "Geographic Scope" },
+    { key: "techFounders", label: "Tech Founder Bias" },*/ 
 
-const mockStartups = [
+export const mockStartups = [
   {
     id: "s-001",
     name: "CyberSec Pro",

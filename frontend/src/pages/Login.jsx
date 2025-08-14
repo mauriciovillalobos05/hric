@@ -1,17 +1,12 @@
 // src/pages/Login.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle } from "lucide-react";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -23,8 +18,8 @@ function Login() {
     e.preventDefault();
     setError(null);
 
-    // 🚨 TEMPORARY: Skip Supabase login and hardcode a role
-    const role = "entrepreneur"; // change to "entrepreneur" or "user" for testing
+    
+    const role = sessionStorage.getItem("registrationRole");
 
     if (role === "investor") {
       navigate("/dashboard/investor");
@@ -35,42 +30,7 @@ function Login() {
     }
 
     return; // stop execution so Supabase login is skipped
-
-    // ---- ORIGINAL LOGIN FLOW BELOW ----
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    const sessionUser = data.user;
-
-    const { data: userProfile, error: profileError } = await supabase
-      .from("user")
-      .select("role")
-      .eq("id", sessionUser.id)
-      .single();
-
-    if (profileError) {
-      console.error("Failed to fetch user_type", profileError);
-      setError("Could not retrieve user type.");
-      return;
-    }
-
-    const roleFromDb = userProfile.user_type;
-
-    if (roleFromDb === "investor") {
-      navigate("/dashboard/investor");
-    } else if (roleFromDb === "entrepreneur") {
-      navigate("/dashboard/entrepreneur");
-    } else {
-      navigate("/dashboard/user");
-    }
-  };
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 px-4">

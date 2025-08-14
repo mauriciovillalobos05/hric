@@ -1,4 +1,10 @@
-import React, { useRef, useState, useCallback, useEffect } from "react";
+import React, {
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+} from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Users, Radar, BarChart3 } from "lucide-react";
 import Dashboard from "./components/Dashboard"; // from Dashboard.jsx
@@ -24,6 +30,10 @@ const MatchesDashboard = ({
       Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
     setAtBottom(reached);
   }, []);
+  const selectedForCompare = useMemo(() => {
+    const byId = new Map(matchedInvestors.map((i) => [String(i.id), i]));
+    return compareIds.map((id) => byId.get(String(id))).filter(Boolean);
+  }, [matchedInvestors, compareIds]);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -85,16 +95,28 @@ const MatchesDashboard = ({
       </TabsContent>
 
       <TabsContent value="compare">
-        <SpiderChart
-          investors={
-            compareIds.length
-              ? matchedInvestors.filter((i) => compareIds.includes(i.id))
-              : []
-          }
-        />
+        <div className="w-full lg:w-full h-full flex flex-col items-center justify-center">
+          {selectedForCompare.length === 0 ? (
+            <div className="border rounded-lg p-6">
+               <h3 className="text-sm font-semibold text-blue-900">No startups selected for comparison</h3>
+      <p className="mt-1 text-sm text-blue-900/80">
+        Check <span className="font-semibold">Compare</span> on one or more cards in
+        <span className="font-semibold"> Matches</span> to visualize them here.
+      </p>
+            </div>
+          ) : (
+            <SpiderChart
+              investors={
+                compareIds.length
+                  ? matchedInvestors.filter((i) => compareIds.includes(i.id))
+                  : []
+              }
+            />
+          )}
+        </div>
       </TabsContent>
 
-      <div className="mt-6">
+      <div id="montecarlo" className="mt-6">
         <MonteCarloResults
           selectedInvestors={activeInvestor}
           simulationResults={activeInvestor?.simulation ?? simulationResults}

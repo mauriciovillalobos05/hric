@@ -8,7 +8,8 @@ import { Search, MessageSquare, Inbox, Send, Lock } from "lucide-react";
 import { mockMessages } from "../../../../investors-dashboard/dashboard-components/components/messagesComponents/mockMessages.js";
 import UpgradePrompt from "./UpgradePrompt.jsx";
 import { useNavigate } from "react-router-dom";
-
+import { getSessionContactMeta, buildInvestorMetaMap } from "@/lib/investorMeta";
+import mockInvestors from "../matchComponents/mockInvestors.js";
 function formatTime(t) {
   try {
     if (!t) return "";
@@ -39,6 +40,30 @@ export default function MessagesDashboard({ messages = [] }) {
   const isFreeStartup =
     role?.toLowerCase() === "entrepreneur" &&
     (plan === "entrepreneur_free" || plan === "" || plan == null);
+    // Build an investor meta map: name -> { id, name, thesis, type }
+  const baseMetaMap = useMemo(() => buildInvestorMetaMap(mockInvestors), []);
+  const sessionContact = useMemo(() => getSessionContactMeta(), []);
+  const investorMetaMap = useMemo(() => {
+    // Merge session contact (if any) so new contacts also show thesis immediately
+    if (sessionContact?.name) {
+      return {
+        ...baseMetaMap,
+        [sessionContact.name]: {
+          id: sessionContact.id ?? baseMetaMap[sessionContact.name]?.id ?? null,
+          name: sessionContact.name,
+          thesis: sessionContact.thesis ?? baseMetaMap[sessionContact.name]?.thesis ?? "",
+          type: sessionContact.type ?? baseMetaMap[sessionContact.name]?.type ?? "",
+        },
+      };
+    }
+    return baseMetaMap;
+  }, [baseMetaMap, sessionContact]);
+
+  const getThesisFor = (name) => {
+    if (!name) return "";
+    const meta = investorMetaMap[name];
+    return meta?.thesis || "";
+  };
 
   const [inbox, setInbox] = useState(
     messages && messages.length ? messages : mockMessages
@@ -108,6 +133,12 @@ export default function MessagesDashboard({ messages = [] }) {
     // select after ensures state exists
     setSelectedSender(target);
   }, []);
+
+  // Thesis for the currently selected sender (used in header)
+  const selectedThesis = useMemo(() => {
+    if (!selectedSender || isFreeStartup) return "";
+    return getThesisFor(selectedSender);
+  }, [selectedSender, isFreeStartup, investorMetaMap]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -267,6 +298,7 @@ export default function MessagesDashboard({ messages = [] }) {
                     const active = selectedSender === m.sender;
                     const sender = isFreeStartup ? maskedSender : m.sender;
                     const preview = isFreeStartup ? maskedPreview : m.preview;
+                    const thesis = !isFreeStartup ? getThesisFor(m.sender) : "";
                     return (
                       <li
                         key={`${m.id || m.sender}-${idx}`}
@@ -290,6 +322,12 @@ export default function MessagesDashboard({ messages = [] }) {
                                 <Lock className="w-3 h-3 text-gray-500" />
                               )}
                             </div>
+                            {/* Thesis shown right under the name (unlocked only) */}
+                            {!!thesis && (
+                              <div className="text-xs text-gray-500 truncate">
+                                {thesis}
+                              </div>
+                            )}
                             <div
                               className={`text-sm text-muted-foreground truncate ${
                                 isFreeStartup ? "blur-[1.5px]" : ""
@@ -323,6 +361,12 @@ export default function MessagesDashboard({ messages = [] }) {
                     <Badge variant="outline" className="ml-2">
                       Locked
                     </Badge>
+                  )}
+                  {/* Thesis shown right under the name (unlocked only) */}
+                  {!!selectedThesis && !isFreeStartup && (
+                    <div className="text-xs text-gray-500 font-normal">
+                      {selectedThesis}
+                    </div>
                   )}
                 </span>
               ) : (

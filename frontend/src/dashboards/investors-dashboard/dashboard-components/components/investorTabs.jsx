@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
-  Users, Target, BarChart3, Radar,
+  Users, Target, BarChart3, Radar, Calendar,
   ChevronLeft, ChevronRight, RefreshCw, MessageSquare,
 } from "lucide-react";
 
@@ -27,10 +27,17 @@ import SpiderChart from "./matchComponents/SpiderChart.jsx";
 import MonteCarloResults from "./matchComponents/MonteCarloResults.jsx";
 
 import InvestorKycPanel from "./kycComponents/InvestorKycPanel.jsx";
+import EventManagementApp from "../eventsComponents/EventManagementApp.jsx";
 
 const TABS = [
   { value: "matches", label: "Matches", icon: Users },
   { value: "analytics", label: "Analytics", icon: BarChart3 },
+  {
+    value: "events",
+    label: "Events",
+    icon: Calendar,
+    render: () => <EventManagementApp />,
+  },
   {
     value: "compare",
     label: "Compare",
@@ -338,6 +345,14 @@ function InvestorTabs({
             <AnalyticsDashboard
               matches={matchedInvestors && matchedInvestors.length ? matchedInvestors : filteredMatches}
             />
+          </div>
+        </div>
+      </TabsContent>
+      {/* Events */}
+      <TabsContent value="events" className="mt-4">
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="w-full ">
+            <EventManagementApp />
           </div>
         </div>
       </TabsContent>

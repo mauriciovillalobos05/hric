@@ -1,4 +1,3 @@
-// src/pages/Register.jsx
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
@@ -7,14 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import PhoneInput from "react-phone-number-input";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-import { isValidPhoneNumber } from "react-phone-number-input";
+import { AuthBridge } from "@/helpers/authBridge";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
+
+const USE_SUPABASE_SIGNUP = false; // keep enabled, but always persist to sessionStorage
+
+const API_BASE = USE_SUPABASE_SIGNUP
+  ? (import.meta.env.VITE_API_URL?.replace(/\/$/, "") || `${window.location.protocol}//${window.location.hostname}:5173`)
+  : "";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -27,70 +32,130 @@ export default function Register() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState(defaultRole);
+  const [role, setRole] = useState(defaultRole || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const KEYS = { USERS: "hri:users", SESSION: "hri:authSession" };
-  const read = (k) => {
+  async function seedRegisterComplete({ supabase_id }) {
     try {
-      const r = sessionStorage.getItem(k);
-      return r ? JSON.parse(r) : {};
-    } catch {
-      return {};
+      const res = await fetch(`${API_BASE}/api/auth/register-complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          supabase_id,
+          email,
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          role,
+        }),
+      });
+      if (!res.ok && res.status !== 409)
+        console.warn(
+          "register-complete warning:",
+          res.status,
+          await res.text().catch(() => "")
+        );
+    } catch (e) {
+      console.warn("register-complete call failed:", e);
     }
-  };
-  const write = (k, v) => sessionStorage.setItem(k, JSON.stringify(v));
+  }
+
+  async function localRegisterAndProceed() {
+    // Save to session for dev/local flow
+    AuthBridge.setSessionUser(email, {
+      firstName,
+      lastName,
+      phone,
+      role,
+      password,
+      entrepreneurProfile: { name: `${firstName} ${lastName}`.trim()},
+      investorProfile: { name: `${firstName} ${lastName}`.trim() },
+    });
+    AuthBridge.setAuthSession(email, { provider: "local" });
+    sessionStorage.setItem("registrationRole", role);
+    sessionStorage.setItem("registrationData", JSON.stringify({ email, role }));
+    navigate("/onboarding");
+  }
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    const cleanEmail = (email || "").trim();
+    const cleanPassword = (password || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setError("Please enter a valid email address.");
+      setLoading(false);
+      return;
+    }
 
-    if (!isValidPhoneNumber(phone)) {
+    if (!role) {
+      setError("Please select a role.");
+      setLoading(false);
+      return;
+    }
+    if (phone && !isValidPhoneNumber(phone)) {
       setError("Please enter a valid phone number.");
       setLoading(false);
       return;
     }
 
-    {
-      /*
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: 'http://localhost:5173/onboarding',
-        data: {
-          first_name: firstName,
-          last_name: lastName,
-          phone,
-          role: role || null
-        }
+    try {
+      if (!USE_SUPABASE_SIGNUP) return localRegisterAndProceed();
+
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: cleanPassword,
+        options: {
+          emailRedirectTo: `${window.location.origin}/onboarding`,
+          data: { first_name: firstName, last_name: lastName, phone, role },
+        },
+      });
+      if (signUpError) throw signUpError;
+
+      // Write-through to session for immediate dashboard usage
+      AuthBridge.setSessionUser(email, {
+        firstName,
+        lastName,
+        phone,
+        role,
+        password,
+        entrepreneurProfile: {},
+        investorProfile: {},
+      });
+      AuthBridge.setAuthSession(email, {
+        provider: "supabase",
+        user_id: data?.user?.id,
+      });
+
+      // Backend seed
+      const supabaseId = data?.user?.id;
+      if (supabaseId) seedRegisterComplete({ supabase_id: supabaseId });
+
+      // Role for Onboarding fallback
+      sessionStorage.setItem("registrationRole", role);
+      sessionStorage.setItem(
+        "registrationData",
+        JSON.stringify({ email, role })
+      );
+
+      if (USE_SUPABASE_SIGNUP) {
+        navigate("/confirm-email");
+      } else {
+        navigate("/onboarding");
       }
-    })
-    */
+
+    } catch (err) {
+      console.error(err);
+      // Fallback to local-only register to keep UX flowing during dev
+      await localRegisterAndProceed();
+    } finally {
+      setLoading(false);
     }
-
-    // create or update USERS[email]
-    const users = read(KEYS.USERS);
-    users[email] = {
-      ...(users[email] || {}),
-      email,
-      firstName,
-      lastName,
-      phone,
-      role: role || "",
-      plan: users[email]?.plan || "Free",
-      updatedAt: Date.now(),
-    };
-    write(KEYS.USERS, users);
-
-    // set SESSION
-    write(KEYS.SESSION, { email, issuedAt: Date.now() });
-    // optional flag that Onboarding already understands
-    sessionStorage.setItem("registrationRole", role || "");
-    navigate("/onboarding");
-    setLoading(false);
   };
 
   return (
@@ -158,6 +223,7 @@ export default function Register() {
                 required
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Password
@@ -180,7 +246,7 @@ export default function Register() {
                 </label>
                 <select
                   id="role"
-                  value={role || ""}
+                  value={role}
                   onChange={(e) => setRole(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
@@ -196,8 +262,7 @@ export default function Register() {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            {/* disabled={loading} */}
-            <Button type="submit" className="w-full">
+            <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (

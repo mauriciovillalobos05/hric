@@ -99,8 +99,6 @@ function EntrepreneurDashboard() {
     }
   };
 
-  const write = (k, v) => sessionStorage.setItem(k, JSON.stringify(v));
-
   /** find an email we can use, with multiple fallbacks */
   function getCurrentEmail() {
     // primary: session

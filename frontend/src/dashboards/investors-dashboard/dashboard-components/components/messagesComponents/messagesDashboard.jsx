@@ -1,11 +1,23 @@
-// ./messagesComponents/MessagesDashboard.jsx
-import React, { useMemo, useState } from "react";
+// src/dashboards/investors/messagesComponents/MessagesDashboard.jsx
+// Complete investor-facing Messages Dashboard:
+// - Uses mockStartups + buildStartupMetaMap to surface each startup's `summary`
+//   under the contact name (inbox + thread header).
+// - No backend calls; all mock/sessionStorage only.
+
+import React, { useMemo, useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Search, MessageSquare, Inbox, Send } from "lucide-react";
+
 import { mockMessages } from "./mockMessages.js";
+import { mockStartups } from "../matchComponents/mockInvestors.js";
+
+import {
+  buildStartupMetaMap,
+  getSessionContactMeta,
+} from "@/lib/startupMeta.js";
 
 function formatTime(t) {
   try {
@@ -18,12 +30,32 @@ function formatTime(t) {
 }
 
 export default function MessagesDashboard({ messages = [] }) {
-  // local inbox so we can update preview/time/order
+  // ---- Startup meta (to show summary under names) ----
+  const baseMetaMap = useMemo(() => buildStartupMetaMap(mockStartups), []);
+  const sessionContact = useMemo(() => getSessionContactMeta(), []);
+  const startupMetaMap = useMemo(() => {
+    if (sessionContact?.name) {
+      return {
+        ...baseMetaMap,
+        [sessionContact.name]: {
+          ...(baseMetaMap[sessionContact.name] || {}),
+          ...sessionContact, // contains id, name, summary (from Contact action)
+        },
+      };
+    }
+    return baseMetaMap;
+  }, [baseMetaMap, sessionContact]);
+
+  const getSummaryFor = (name) => {
+    if (!name) return "";
+    return startupMetaMap[name]?.summary || "";
+  };
+
+  // ---- Inbox / threads state ----
   const [inbox, setInbox] = useState(
     messages && messages.length ? messages : mockMessages
   );
 
-  // build a per-sender thread once from initial inbox
   const [threads, setThreads] = useState(() => {
     const base = {};
     (inbox || []).forEach((m) => {
@@ -43,6 +75,53 @@ export default function MessagesDashboard({ messages = [] }) {
   const [showUnread, setShowUnread] = useState(false);
   const [draft, setDraft] = useState("");
 
+  // 🚀 Auto-open thread when coming from “Contact” button
+  useEffect(() => {
+    const target = sessionStorage.getItem("startChatWith");
+    if (!target) return;
+
+    sessionStorage.removeItem("startChatWith");
+
+    const time = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    // add placeholder to inbox if missing
+    setInbox((prev) => {
+      const exists = prev.some((m) => m.sender === target);
+      if (exists) return prev;
+      const placeholder = {
+        id: `m-${Date.now()}`,
+        sender: target,
+        preview: "New conversation",
+        time,
+        read: true,
+        created_at: new Date().toISOString(),
+      };
+      return [placeholder, ...prev];
+    });
+
+    // ensure a thread exists
+    setThreads((prev) => {
+      if (prev[target]) return prev;
+      return {
+        ...prev,
+        [target]: [
+          {
+            sender: target,
+            content: "— conversation started —",
+            time,
+          },
+        ],
+      };
+    });
+
+    // select it
+    setSelectedSender(target);
+  }, []);
+
+  // ---- Derived UI data ----
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (inbox || []).filter((m) => {
@@ -60,6 +139,12 @@ export default function MessagesDashboard({ messages = [] }) {
     [threads, selectedSender]
   );
 
+  const selectedSummary = useMemo(
+    () => (selectedSender ? getSummaryFor(selectedSender) : ""),
+    [selectedSender, startupMetaMap]
+  );
+
+  // ---- Handlers ----
   const handleSelect = (msg) => {
     setSelectedSender(msg.sender);
     // mark as read in inbox
@@ -121,6 +206,7 @@ export default function MessagesDashboard({ messages = [] }) {
     }
   };
 
+  // ---- Render ----
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 w-full">
       {/* Inbox */}
@@ -164,6 +250,7 @@ export default function MessagesDashboard({ messages = [] }) {
               <ul className="divide-y">
                 {filtered.map((m, idx) => {
                   const active = selectedSender === m.sender;
+                  const summary = getSummaryFor(m.sender); // <- show under name
                   return (
                     <li
                       key={`${m.id || m.sender}-${idx}`}
@@ -182,6 +269,11 @@ export default function MessagesDashboard({ messages = [] }) {
                               </Badge>
                             )}
                           </div>
+                          {!!summary && (
+                            <div className="text-xs text-gray-500 truncate">
+                              {summary}
+                            </div>
+                          )}
                           <div className="text-sm text-muted-foreground truncate">
                             {m.preview}
                           </div>
@@ -199,14 +291,21 @@ export default function MessagesDashboard({ messages = [] }) {
         </CardContent>
       </Card>
 
-      {/* Thread + Composer (no dock) */}
+      {/* Thread + Composer */}
       <Card className="lg:col-span-2 h-[520px] flex flex-col">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
             {selectedSender ? (
-              <span className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" />
-                {selectedSender}
+              <span className="flex flex-col">
+                <span className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  {selectedSender}
+                </span>
+                {!!selectedSummary && (
+                  <span className="mt-1 text-sm text-gray-600 italic line-clamp-2">
+                    {selectedSummary}
+                  </span>
+                )}
               </span>
             ) : (
               "Select a conversation"
@@ -252,7 +351,11 @@ export default function MessagesDashboard({ messages = [] }) {
             onKeyDown={handleKeyDown}
             disabled={!selectedSender}
           />
-          <Button type="button" onClick={sendMessage} disabled={!selectedSender || !draft.trim()}>
+          <Button
+            type="button"
+            onClick={sendMessage}
+            disabled={!selectedSender || !draft.trim()}
+          >
             <Send className="w-4 h-4 mr-1" />
             Send
           </Button>

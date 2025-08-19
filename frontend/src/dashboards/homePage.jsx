@@ -53,6 +53,12 @@ function HomePage() {
     navigate("/login");
   };
 
+  const goToSelectPlan = (role) => {
+    sessionStorage.setItem("registrationRole", role);
+    navigate(`/select-plan?role=${role}`);
+  };
+
+
   const features = [
     {
       icon: <Users className="h-8 w-8 text-blue-600" />,
@@ -335,19 +341,21 @@ function HomePage() {
                 <Button
                   size="lg"
                   className="text-lg px-8 py-4"
-                  onClick={() => goToDashboard("investor")}
+                  onClick={() => goToSelectPlan("investor")}
                 >
                   Join as Investor
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
+
                 <Button
                   variant="outline"
                   size="lg"
                   className="text-lg px-8 py-4"
-                  onClick={() => goToDashboard("entrepreneur")}
+                  onClick={() => goToSelectPlan("entrepreneur")}
                 >
                   Apply as Entrepreneur
                 </Button>
+
               </div>
             </div>
             <div className="relative">
@@ -448,11 +456,10 @@ function HomePage() {
             ).map((plan, index) => (
               <Card
                 key={index}
-                className={`relative ${
-                  plan.popular
+                className={`relative ${plan.popular
                     ? "border-blue-500 border-2 shadow-xl"
                     : "border-gray-200"
-                }`}
+                  }`}
               >
                 {plan.popular && (
                   <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
@@ -486,9 +493,8 @@ function HomePage() {
                     ))}
                   </ul>
                   <Button
-                    className={`w-full ${
-                      plan.popular ? "bg-blue-600 hover:bg-blue-700" : ""
-                    }`}
+                    className={`w-full ${plan.popular ? "bg-blue-600 hover:bg-blue-700" : ""
+                      }`}
                   >
                     {plan.price === "$0" ? "Get Started Free" : "Choose Plan"}
                   </Button>
@@ -653,20 +659,22 @@ function HomePage() {
               size="lg"
               variant="secondary"
               className="text-lg px-8 py-4"
-              onClick={() => goToDashboard("investor")}
+              onClick={() => navigate("/register")}
             >
               <Building className="mr-2 h-5 w-5" />
               Join as Investor
             </Button>
+
             <Button
               size="lg"
               variant="outline"
               className="text-lg px-8 py-4 border-white hover:bg-white hover:text-blue-600"
-              onClick={() => goToDashboard("entrepreneur")}
+              onClick={() => navigate("/register")}
             >
               <Zap className="mr-2 h-5 w-5" />
               Apply as Entrepreneur
             </Button>
+
           </div>
         </div>
       </section>

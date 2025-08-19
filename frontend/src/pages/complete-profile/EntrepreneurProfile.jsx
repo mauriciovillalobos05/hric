@@ -1,19 +1,32 @@
+// src/pages/EntrepreneurProfile.jsx
+// Simulation-only version: NO Supabase, NO backend. Persists to sessionStorage.
+
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import LocationAutocomplete from "../cmpnnts/Location";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+// ---------- sessionStorage helpers ----------
+const KEYS = {
+  USERS: "hri:users", // map: { [email]: { ...userRecord, entrepreneurProfile? } }
+  SESSION: "hri:authSession", // { email, issuedAt }
+};
 
-const API_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+const read = (key) => {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const write = (key, value) => {
+  sessionStorage.setItem(key, JSON.stringify(value));
+};
 
 // ---------- helpers ----------
 const teamSizeOptionsDefault = [
@@ -99,7 +112,7 @@ const toPct = (v) => {
 };
 
 const csvToArray = (s) =>
-  s
+  (s || "")
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean);
@@ -145,10 +158,8 @@ export default function EntrepreneurProfile() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const [industryOptions, setIndustryOptions] = useState(
-    industryOptionsDefault
-  );
-  const [stageOptions, setStageOptions] = useState(stageOptionsDefault);
+  const [industryOptions] = useState(industryOptionsDefault);
+  const [stageOptions] = useState(stageOptionsDefault);
   const [teamSizeOptions] = useState(teamSizeOptionsDefault);
 
   const [form, setForm] = useState({
@@ -181,10 +192,6 @@ export default function EntrepreneurProfile() {
     current_investors: "", // CSV
     technical_founders_pct: "",
     previous_exits_pct: "",
-    // stripe passthrough
-    stripe_customer_id: null,
-    stripe_subscription_id: null,
-    tier: null,
   });
 
   // ARR auto from MRR if empty
@@ -202,161 +209,92 @@ export default function EntrepreneurProfile() {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // ---------- initial load: auth meta + profile + (optional) lookups ----------
+  // ---------- initial load from sessionStorage ----------
   useEffect(() => {
-    (async () => {
-      try {
-        const [{ data: userRes }, { data: sessionRes }] = await Promise.all([
-          supabase.auth.getUser(),
-          supabase.auth.getSession(),
-        ]);
+    try {
+      const session = read(KEYS.SESSION); // { email, issuedAt }
+      if (!session?.email)
+        throw new Error("Not authenticated. Please register or log in.");
 
-        const user = userRes?.user;
-        const accessToken = sessionRes?.session?.access_token;
+      const users = read(KEYS.USERS);
+      const user = users[session.email];
+      if (!user)
+        throw new Error("User record not found. Please register again.");
 
-        if (user) {
-          const { stripe_customer_id, stripe_subscription_id, plan } =
-            user.user_metadata || {};
-          setForm((prev) => ({
-            ...prev,
-            stripe_customer_id: stripe_customer_id ?? null,
-            stripe_subscription_id: stripe_subscription_id ?? null,
-            tier: plan ?? null,
-          }));
-        }
+      // Prefill from any existing entrepreneurProfile
+      const profile = user.entrepreneurProfile || {};
 
-        // Try to fetch lookup options (safe fallback if endpoints don't exist yet)
-        (async () => {
-          try {
-            const [inds, stages] = await Promise.allSettled([
-              fetch(`${API_BASE}/api/lookups/industries`).then((r) =>
-                r.ok ? r.json() : Promise.reject()
-              ),
-              fetch(`${API_BASE}/api/lookups/stages`).then((r) =>
-                r.ok ? r.json() : Promise.reject()
-              ),
-            ]);
-            if (
-              inds.status === "fulfilled" &&
-              Array.isArray(inds.value?.items)
-            ) {
-              const names = inds.value.items.map((x) => x.name).filter(Boolean);
-              if (names.length) setIndustryOptions(names);
-            }
-            if (
-              stages.status === "fulfilled" &&
-              Array.isArray(stages.value?.items)
-            ) {
-              const names = stages.value.items
-                .map((x) => x.name)
-                .filter(Boolean);
-              if (names.length) setStageOptions(names);
-            }
-          } catch {
-            /* ignore */
-          }
-        })();
+      const fetchedTeamSizeNumber =
+        typeof profile.team_size === "number" ? profile.team_size : null;
 
-        // Profile prefill
-        if (accessToken) {
-          const resp = await fetch(`${API_BASE}/api/entrepreneur/profile`, {
-            method: "GET",
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
+      setForm((prev) => ({
+        ...prev,
+        name: profile.name || "",
+        location: profile.location || "",
+        industry: profile.industry || "",
+        stage: profile.stage || "",
+        pitch_deck_url: profile.pitch_deck_url || "",
+        demo_url: profile.demo_url || "",
+        team_size:
+          pickTeamSizeOption(fetchedTeamSizeNumber) || profile.team_size || "",
+        funding_needed: numberOrEmpty(profile.funding_needed),
+        financials: {
+          funding_goal: numberOrEmpty(profile.financials?.funding_goal),
+        },
+        revenue_model: profile.revenue_model || "",
+        competitive_advantages: arrayToCSV(profile.competitive_advantages),
+        current_revenue: numberOrEmpty(profile.current_revenue),
+        monthly_growth_rate: numberOrEmpty(profile.monthly_growth_rate),
+        customer_count: numberOrEmpty(profile.customer_count),
+        market_size: numberOrEmpty(profile.market_size),
+        addressable_market: numberOrEmpty(profile.addressable_market),
+        intellectual_property:
+          (profile.intellectual_property &&
+            (profile.intellectual_property.notes ||
+              JSON.stringify(profile.intellectual_property))) ||
+          "",
+        target_market: profile.target_market || "",
+        business_model: profile.business_model || "",
+        problem_solved: profile.problem_solved || "",
+        traction_summary: profile.traction_summary || "",
+        headline_tags: arrayToCSV(profile.headline_tags),
 
-          if (resp.ok) {
-            const data = await resp.json();
-
-            const ent = data?.enterprise || {};
-            const prof = data?.profile || {};
-            const sp = data?.startup_profile || {};
-
-            const social = prof.social_media || {};
-            const km = prof.key_metrics || {};
-            const tmFrom = sp.target_market || km.target_market || "";
-
-            const fetchedTeamSizeNumber =
-              (typeof sp.team_size === "number" ? sp.team_size : null) ??
-              (typeof km.team_size === "number" ? km.team_size : null);
-
-            setForm((prev) => ({
-              ...prev,
-              name: ent.name || "",
-              location: ent.location || "",
-              industry: prof.industry || "",
-              stage: prof.stage || "",
-              pitch_deck_url: social.pitch_deck_url || "",
-              demo_url: social.demo_url || "",
-              team_size: pickTeamSizeOption(fetchedTeamSizeNumber),
-              funding_needed: numberOrEmpty(km.funding_needed),
-              financials: {
-                funding_goal: numberOrEmpty(km.funding_goal),
-              },
-              revenue_model: sp.revenue_model || "",
-              competitive_advantages: arrayToCSV(
-                sp.competitive_advantages || prof.competitive_advantages
-              ),
-              current_revenue: numberOrEmpty(sp.current_revenue),
-              monthly_growth_rate: numberOrEmpty(sp.monthly_growth_rate),
-              customer_count: numberOrEmpty(sp.customer_count),
-              market_size: numberOrEmpty(sp.market_size),
-              addressable_market: numberOrEmpty(sp.addressable_market),
-              intellectual_property:
-                (sp.intellectual_property &&
-                  (sp.intellectual_property.notes ||
-                    JSON.stringify(sp.intellectual_property))) ||
-                "",
-              target_market: tmFrom,
-              business_model: sp.business_model || "",
-              problem_solved: prof.description || sp.value_proposition || "",
-              traction_summary:
-                (sp.traction_metrics && sp.traction_metrics.summary) || "",
-              headline_tags: arrayToCSV(prof.headline_tags),
-
-              // NEW metrics
-              mrr_usd: numberOrEmpty(sp.mrr_usd ?? sp.display_mrr_usd),
-              arr_usd: numberOrEmpty(sp.arr_usd),
-              current_valuation_usd: numberOrEmpty(sp.current_valuation_usd),
-              current_investors: arrayToCSV(sp.current_investors),
-              technical_founders_pct: numberOrEmpty(sp.technical_founders_pct),
-              previous_exits_pct: numberOrEmpty(sp.previous_exits_pct),
-            }));
-          } else if (resp.status !== 404) {
-            // 404 = no profile yet (totally fine)
-            const err = await resp.json().catch(() => ({}));
-            console.warn(
-              "Prefill profile warning:",
-              err?.error || resp.statusText
-            );
-          }
-        }
-      } catch (e) {
-        console.error("Boot error:", e);
-        setError("Failed to load profile.");
-      } finally {
-        setBooting(false);
-      }
-    })();
+        // NEW metrics
+        mrr_usd: numberOrEmpty(profile.mrr_usd),
+        arr_usd: numberOrEmpty(profile.arr_usd),
+        current_valuation_usd: numberOrEmpty(profile.current_valuation_usd),
+        current_investors: arrayToCSV(profile.current_investors),
+        technical_founders_pct: numberOrEmpty(profile.technical_founders_pct),
+        previous_exits_pct: numberOrEmpty(profile.previous_exits_pct),
+      }));
+    } catch (e) {
+      console.error("Boot error:", e);
+      setError(e.message || "Failed to load profile.");
+    } finally {
+      setBooting(false);
+    }
   }, []);
 
-  // ---------- submit ----------
+  // ---------- submit (save to sessionStorage only) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError(null);
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("No session token found");
+      const session = read(KEYS.SESSION);
+      if (!session?.email) throw new Error("Not authenticated.");
+
+      const users = read(KEYS.USERS);
+      const user = users[session.email];
+      if (!user) throw new Error("User record not found.");
 
       const payloadRaw = {
         // enterprise
         name: form.name,
         location: form.location,
 
-        // lookups by name (backend resolves/creates if needed)
+        // lookups by name (simulated)
         industry: form.industry,
         stage: form.stage,
 
@@ -375,6 +313,7 @@ export default function EntrepreneurProfile() {
         intellectual_property: form.intellectual_property
           ? { notes: form.intellectual_property }
           : undefined,
+
         // key metrics / market / team
         team_size: teamSizeToInt(form.team_size),
         funding_needed: toNumber(form.funding_needed),
@@ -395,26 +334,20 @@ export default function EntrepreneurProfile() {
         technical_founders_pct: toPct(form.technical_founders_pct),
         previous_exits_pct: toPct(form.previous_exits_pct),
 
-        // passthrough (harmless if ignored)
-        stripe_customer_id: form.stripe_customer_id,
-        stripe_subscription_id: form.stripe_subscription_id,
-        tier: form.tier,
+        savedAt: Date.now(),
       };
 
-      const payload = cleanPayload(payloadRaw);
+      const profile = cleanPayload(payloadRaw);
 
-      const res = await fetch(`${API_BASE}/api/entrepreneur/profile`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      // Persist under the current user
+      users[session.email] = {
+        ...user,
+        entrepreneurProfile: profile,
+        updatedAt: Date.now(),
+      };
+      write(KEYS.USERS, users);
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Submission failed");
-
+      // Done — go to the simulated dashboard
       navigate("/dashboard/entrepreneur");
     } catch (err) {
       console.error("Profile error:", err);
@@ -438,14 +371,15 @@ export default function EntrepreneurProfile() {
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">
-            Entrepreneur Profile
+            Entrepreneur Profile (Simulation)
           </CardTitle>
           <p className="text-sm text-gray-500">
-            Help investors understand your company
+            This saves locally to sessionStorage — no backend involved.
           </p>
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               name="name"
@@ -579,7 +513,7 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
 
-            {/* NEW — headline tags */}
+            {/* headline tags */}
             <Input
               name="headline_tags"
               placeholder="Headline tags (comma-separated, e.g. AI, Fintech, DevTools)"
@@ -587,7 +521,7 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
 
-            {/* NEW — key metrics */}
+            {/* key metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Input
                 name="revenue_model"
@@ -685,6 +619,7 @@ export default function EntrepreneurProfile() {
                 onChange={handleChange}
               />
             </div>
+
             <textarea
               name="intellectual_property"
               placeholder="Intellectual property (patents, applications, trade secrets, notes)"
@@ -693,9 +628,28 @@ export default function EntrepreneurProfile() {
               value={form.intellectual_property}
               onChange={handleChange}
             />
-            <Button type="submit" disabled={saving} className="w-full">
-              {saving ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
-            </Button>
+            <div className="flex justify-between gap-4">
+              <Button 
+                type="button"
+                onClick={() => navigate("/dashboard/entrepreneur")}
+                classname="shadow hover:bg-white-100"
+              >
+                Complete later
+              </Button>
+              <div className="flex-1 flex justify-center">
+                <Button
+                  type="submit"
+                  disabled={saving}
+                  className="px-8 py-3 bg-white w-100 text-black border border-gray-300 rounded-md shadow hover:bg-gray-100"
+                >
+                  {saving ? (
+                    <Loader2 className="animate-spin h-5 w-5" />
+                  ) : (
+                    "Submit"
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
         </CardContent>
       </Card>

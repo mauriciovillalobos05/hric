@@ -88,6 +88,52 @@ function EntrepreneurDashboard() {
     setSimulationResults(investor.simulation); // you already compute sim
   };
 
+  const KEYS = { USERS: "hri:users", SESSION: "hri:authSession" };
+
+  const read = (k) => {
+    try {
+      const raw = sessionStorage.getItem(k);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const write = (k, v) => sessionStorage.setItem(k, JSON.stringify(v));
+
+  /** find an email we can use, with multiple fallbacks */
+  function getCurrentEmail() {
+    // primary: session
+    const session = read(KEYS.SESSION);
+    if (session && session.email) return session.email;
+
+    // fallback: onboarding/registration leftovers you might still have
+    // (we try to be robust if legacy data exists)
+    const reg = (() => {
+      try {
+        return JSON.parse(sessionStorage.getItem("registrationData") || "{}");
+      } catch {
+        return {};
+      }
+    })();
+    if (reg?.email) return reg.email;
+
+    // last-resort: if only one user exists in USERS, use that
+    const users = read(KEYS.USERS);
+    const emails = Object.keys(users || {});
+    if (emails.length === 1) return emails[0];
+
+    return null;
+  }
+
+  /** read the logged-in user's record (or {} if none) */
+  function getSessionUser() {
+    const email = getCurrentEmail();
+    if (!email) return {};
+    const users = read(KEYS.USERS);
+    return users[email] || {};
+  }
+
   // When user toggles "Compare" on a card
   const toggleCompare = (investorId) => {
     setCompareIds(
@@ -238,23 +284,22 @@ function EntrepreneurDashboard() {
     const fetchData = async () => {
       try {
         if (HARDCODE_MODE) {
-          // ---- Hardcoded demo data (no backend required) ----
-          setEntrepreneurName("Alex Rivera");
-          setUserRole("entrepreneur");
+          // 1) get the current user safely
+          const user = getSessionUser();
+
+          // 2) pull the saved startup profile from EntrepreneurProfile.jsx
+          const profile = user.entrepreneurProfile || {};
+
+          // 3) header UI
+          setEntrepreneurName(profile?.name || user.firstName || "Founder");
+          setUserRole((user.role || "entrepreneur").toLowerCase());
           setAvatarUrl(defaultAvatar);
 
-          setEnterprise({
-            name: "NeoCart AI",
-            industry: "Artificial Intelligence",
-            stage: "Seed",
-            location: "Guadalajara",
-            team_size: 8,
-            funding_needed: 350000,
-            pitch_deck_url: "https://example.com/deck.pdf",
-            financials: true,
-            business_model: "SaaS",
-          });
+          // 4) hydrate the dashboard enterprise from the saved profile
+          //    (this is the important line)
+          setEnterprise(profile);
 
+          // 5) leave your demo chrome (messages/events) so the screen renders
           setMessages([
             {
               sender: "Investor JP",
@@ -278,7 +323,7 @@ function EntrepreneurDashboard() {
               date: new Date(Date.now() + 3 * 24 * 3600e3).toISOString(),
               agenda: ["Networking", "Pitches", "Q&A"],
               presenters: ["Panel A", "Panel B"],
-              registration_status: null, // will turn "registered" after clicking the button
+              registration_status: null,
             },
             {
               id: "evt_2",
@@ -301,7 +346,7 @@ function EntrepreneurDashboard() {
           ]);
 
           setLoading(false);
-          return; // <-- IMPORTANT: skip the Supabase branch below
+          return; // keep skipping the Supabase path in demo mode
         }
         const {
           data: { session },
@@ -450,40 +495,90 @@ function EntrepreneurDashboard() {
     fetchData();
   }, []);
 
-  const requiredFields = [
+  // --- REQUIRED for profile to unlock (tier 1) ---
+  const REQUIRED = [
     "name",
     "industry",
     "stage",
     "location",
     "team_size",
     "funding_needed",
+    "financials.funding_goal", // <- look inside financials
     "pitch_deck_url",
-    "financials",
     "business_model",
+    "revenue_model",
+    "current_revenue",
+    "customer_count",
+    "mrr_usd", // ARR will auto-fill if MRR exists
   ];
-  const totalFields = requiredFields.length;
-  const filledFields = requiredFields.filter((field) => enterprise[field]);
-  const completion = Math.round((filledFields.length / totalFields) * 100);
+  // --- NICE TO HAVE (shows as “missing” but not required to unlock) ---
+  const OPTIONAL = [
+    "arr_usd",
+    "market_size",
+    "addressable_market",
+    "current_valuation_usd",
+    "headline_tags",
+    "competitive_advantages",
+    "demo_url",
+    "technical_founders_pct",
+    "previous_exits_pct",
+  ];
+
+  const get = (obj, path) =>
+    path.split(".").reduce((o, k) => (o ? o[k] : undefined), obj);
+
+  const isFilled = (val) => {
+    if (val === 0) return true; // number 0 is valid
+    if (val == null) return false;
+    if (typeof val === "string") return val.trim().length > 0;
+    if (Array.isArray(val)) return val.length > 0;
+    if (typeof val === "object") return Object.keys(val).length > 0;
+    return Boolean(val);
+  };
+
+  const requiredFilled = REQUIRED.filter((key) =>
+    isFilled(get(enterprise, key))
+  );
+  const completion = Math.round(
+    (requiredFilled.length / REQUIRED.length) * 100
+  );
 
   const handleOpenRegister = (event) => {
     setSelectedEvent(event);
     setShowRegisterModal(true);
   };
 
-  const missingSections = requiredFields
-    .filter((field) => !enterprise[field])
-    .map((field) => {
-      switch (field) {
-        case "pitch_deck_url":
-          return "Pitch Deck";
-        case "funding_needed":
-          return "Funding Needs";
-        default:
-          return field
-            .replace("_", " ")
-            .replace(/\b\w/g, (l) => l.toUpperCase());
-      }
-    });
+  const LABELS = {
+    name: "Name",
+    industry: "Industry",
+    stage: "Stage",
+    location: "Location",
+    team_size: "Team Size",
+    funding_needed: "Funding Needs",
+    "financials.funding_goal": "Funding Goal",
+    pitch_deck_url: "Pitch Deck",
+    business_model: "Business Model",
+    revenue_model: "Revenue Model",
+    current_revenue: "Current Revenue (USD/mo)",
+    customer_count: "Customer Count",
+    mrr_usd: "MRR (USD)",
+    arr_usd: "ARR (USD)",
+    market_size: "Market Size (USD)",
+    addressable_market: "Addressable Market (USD)",
+    current_valuation_usd: "Current Valuation (USD)",
+    headline_tags: "Headline Tags",
+    competitive_advantages: "Competitive Advantages",
+    demo_url: "Demo URL",
+    technical_founders_pct: "Technical Founders %",
+    previous_exits_pct: "Team Previous Exits %",
+  };
+
+  const missingRequired = REQUIRED.filter(
+    (k) => !isFilled(get(enterprise, k))
+  ).map((k) => LABELS[k] || k);
+  const missingOptional = OPTIONAL.filter(
+    (k) => !isFilled(get(enterprise, k))
+  ).map((k) => LABELS[k] || k);
 
   const handleSubmitRegistration = async (answers) => {
     try {
@@ -538,6 +633,7 @@ function EntrepreneurDashboard() {
     );
   }
 
+  const isLocked = completion < 90;
   return (
     <>
       <div id="dashboard-top">
@@ -554,41 +650,62 @@ function EntrepreneurDashboard() {
       <div id="profile-completion">
         <ProfileStatusCard
           completion={completion}
-          missingSections={missingSections}
+          missingRequired={missingRequired}
+          missingOptional={missingOptional}
           onUpdateClick={() => navigate("/complete-profile/entrepreneur")}
         />
       </div>
-
-      <EntrepreneurTabs
-        selectedTab="matches"
-        onTabChange={() => {}}
-        // filters
-        filters={filters}
-        onFilterChange={handleFilterChange}
-        onResetFilters={resetFilters}
-        // matches
-        matchedInvestors={matchedInvestors}
-        activeInvestor={activeInvestor}
-        compareIds={compareIds}
-        onSimulate={handleSimulate}
-        onToggleCompare={toggleCompare}
-        simulationResults={simulationResults}
-        // overview
-        enterprise={enterprise}
-        events={events}
-        onRegisterClick={handleOpenRegister}
-        registerModalOpen={showRegisterModal}
-        onCloseRegisterModal={() => setShowRegisterModal(false)}
-        selectedEvent={selectedEvent}
-        onSubmitRegistration={handleSubmitRegistration}
-        userRole={userRole}
-        // messages
-        messages={messages}
-        onOpenChat={handleOpenChat}
-        openChats={openChats}
-        onCloseChat={handleCloseChat}
-      />
-
+      <div className="relative">
+        <div className={isLocked ? "pointer-events-none opacity-40" : ""}>
+          <EntrepreneurTabs
+            selectedTab="matches"
+            onTabChange={() => {}}
+            // filters
+            filters={filters}
+            onFilterChange={handleFilterChange}
+            onResetFilters={resetFilters}
+            // matches
+            matchedInvestors={matchedInvestors}
+            activeInvestor={activeInvestor}
+            compareIds={compareIds}
+            onSimulate={handleSimulate}
+            onToggleCompare={toggleCompare}
+            simulationResults={simulationResults}
+            // overview
+            enterprise={enterprise}
+            events={events}
+            onRegisterClick={handleOpenRegister}
+            registerModalOpen={showRegisterModal}
+            onCloseRegisterModal={() => setShowRegisterModal(false)}
+            selectedEvent={selectedEvent}
+            onSubmitRegistration={handleSubmitRegistration}
+            userRole={userRole}
+            // messages
+            messages={messages}
+            onOpenChat={handleOpenChat}
+            openChats={openChats}
+            onCloseChat={handleCloseChat}
+          />
+        </div>
+        {isLocked && (
+          <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm">
+            <div className="rounded-xl bg-white p-4 shadow border text-center max-w-sm">
+              <p className="font-medium mb-2">
+                Finish your startup profile to unlock the dashboard
+              </p>
+              <p className="text-sm text-gray-600 mb-3">
+                Missing: {missingRequired.join(", ")}
+              </p>
+              <button
+                onClick={() => navigate("/complete-profile/entrepreneur")}
+                className="px-4 py-2 rounded-md bg-black text-white"
+              >
+                Complete profile
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       {/* Events */}
       <div id="events">
         <RegisterModal

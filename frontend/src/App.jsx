@@ -15,13 +15,14 @@ import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
 import EmailPendingSecondary from "./pages/emailPendingSecondary";
 import EmailConfirmationSent from "./pages/emailConfirmationSent";
 import ProfilePreview from "./pages/profileViews/ProfilePreview";
-
+import SelectPlan from "./pages/selectPlan";
 function App() {
   return (
     <>
       <Routes>
         {/* Public routes */}
         <Route path="/" element={<HomePage />} />
+        <Route path="/select-plan" element={<SelectPlan />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 

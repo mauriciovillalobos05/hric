@@ -1,54 +1,72 @@
 import React from "react";
-import ProgressBar from "./ui/progressBar";
-import Button from "./ui/button";
-import { CheckCircle } from "lucide-react";
 
-function ProfileStatusCard({ completion, missingSections = [], onUpdateClick }) {
-  const isComplete = completion === 100;
-
+function ProfileStatusCard({
+  completion = 0,
+  missingRequired = [],
+  missingOptional = [],
+  onUpdateClick,
+}) {
   return (
-    <section className="bg-white border rounded-lg shadow-sm p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        
-        <div className="w-full">
-          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            Profile Completion
-          </h3>
-
-          {isComplete ? (
-            <div className="flex items-center gap-2 text-green-600 font-medium">
-              <CheckCircle className="w-5 h-5" />
-              Your profile is fully complete.
-            </div>
-          ) : (
-            <>
-              <p className="text-sm text-gray-600 mb-2">
-                Your profile is {completion}% complete
-              </p>
-
-              {/* Progress Bar only shows if not 100% */}
-              <ProgressBar value={completion} />
-
-              {/* Missing sections list */}
-              {missingSections.length > 0 && (
-                <ul className="text-sm text-gray-500 list-disc list-inside mt-2">
-                  {missingSections.map((section, i) => (
-                    <li key={i}>{section}</li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
+    <div className="w-full bg-white border rounded-xl p-4 md:p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm text-gray-600">Profile Completion</p>
+          <p className="text-xs text-gray-500">
+            Your profile is {completion}% complete
+          </p>
         </div>
-
-        {/* Button only shows if not complete */}
-        {!isComplete && (
-          <div>
-            <Button onClick={onUpdateClick}>Update Profile</Button>
-          </div>
-        )}
+        <button
+          onClick={onUpdateClick}
+          className="px-3 py-2 rounded-md bg-blue-600 text-white text-sm"
+        >
+          Update Profile
+        </button>
       </div>
-    </section>
+
+      {/* progress bar */}
+      <div className="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-black transition-all"
+          style={{ width: `${completion}%` }}
+        />
+      </div>
+      {/* Missing sections, wrap horizontally as chips */}
+      {missingRequired.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-gray-600 mb-1">
+            Required (must fill):
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {missingRequired.map((m) => (
+              <span
+                key={`req-${m}`}
+                className="px-2 py-1 text-xs rounded-full border bg-white"
+              >
+                {m}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {missingOptional.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium text-gray-600 mb-1">
+            Nice to have:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {missingOptional.map((m) => (
+              <span
+                key={`opt-${m}`}
+                className="px-2 py-1 text-xs rounded-full border bg-white"
+              >
+                {m}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

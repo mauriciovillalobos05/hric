@@ -1,5 +1,5 @@
 // Mock investor data for the startup-investor matching platform
-const mockInvestors = [
+export const mockInvestors = [
   {
     id: 1,
     name: "Sequoia Capital",

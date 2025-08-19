@@ -1,85 +1,41 @@
 // src/pages/Login.jsx
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { AlertTriangle } from "lucide-react";
+{
+  /*import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { createClient } from '@supabase/supabase-js'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { AlertTriangle } from 'lucide-react'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+)
 
 function Login() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState(null);
-  const navigate = useNavigate();
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState(null)
+  const navigate = useNavigate()
 
   const handleLogin = async (e) => {
-    e.preventDefault();
-    setError(null);
-
-    // 🚨 TEMPORARY: Skip Supabase login and hardcode a role
-    const role = "entrepreneur"; // change to "entrepreneur" or "user" for testing
-
-    if (role === "investor") {
-      navigate("/dashboard/investor");
-    } else if (role === "entrepreneur") {
-      navigate("/dashboard/entrepreneur");
-    } else {
-      navigate("/dashboard/user");
-    }
-
-    return; // stop execution so Supabase login is skipped
-
-    // ---- ORIGINAL LOGIN FLOW BELOW ----
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    e.preventDefault()
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
-      setError(error.message);
-      return;
-    }
-
-    const sessionUser = data.user;
-
-    const { data: userProfile, error: profileError } = await supabase
-      .from("user")
-      .select("role")
-      .eq("id", sessionUser.id)
-      .single();
-
-    if (profileError) {
-      console.error("Failed to fetch user_type", profileError);
-      setError("Could not retrieve user type.");
-      return;
-    }
-
-    const roleFromDb = userProfile.user_type;
-
-    if (roleFromDb === "investor") {
-      navigate("/dashboard/investor");
-    } else if (roleFromDb === "entrepreneur") {
-      navigate("/dashboard/entrepreneur");
+      setError(error.message)
     } else {
-      navigate("/dashboard/user");
+      navigate('/dashboard')
     }
-  };
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 px-4">
       <Card className="w-full max-w-md shadow-lg border-0">
         <CardHeader className="space-y-1 text-center">
           <Badge className="bg-blue-100 text-blue-800 mb-2">Welcome Back</Badge>
-          <CardTitle className="text-2xl font-bold text-gray-900">
-            Sign in to HRIC
-          </CardTitle>
+          <CardTitle className="text-2xl font-bold text-gray-900">Sign in to HRIC</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-6">
@@ -94,9 +50,7 @@ function Login() {
               />
             </div>
             <div>
-              <label className="block mb-1 text-sm text-gray-700">
-                Password
-              </label>
+              <label className="block mb-1 text-sm text-gray-700">Password</label>
               <Input
                 type="password"
                 placeholder="••••••••"
@@ -111,17 +65,14 @@ function Login() {
                 {error}
               </div>
             )}
-            <Button
-              type="submit"
-              className="w-full text-white bg-blue-600 hover:bg-blue-700"
-            >
+            <Button type="submit" className="w-full text-white bg-blue-600 hover:bg-blue-700">
               Log In
             </Button>
           </form>
           <p className="mt-4 text-sm text-center text-gray-600">
-            Don't have an account?{" "}
+            Don’t have an account?{' '}
             <span
-              onClick={() => navigate("/register")}
+              onClick={() => navigate('/register')}
               className="text-blue-600 hover:underline cursor-pointer"
             >
               Register here
@@ -130,7 +81,173 @@ function Login() {
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }
 
-export default Login;
+export default Login
+*/
+}
+
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+const dummyUsers = [
+  {
+    email: "basic@investor.com",
+    firstName: "Beatrice",
+    lastName: "Investor",
+    phone: "+1234567890",
+    role: "investor",
+    plan: "Basic",
+    password: "test123",
+  },
+  {
+    email: "premium@investor.com",
+    firstName: "Peter",
+    lastName: "Investor",
+    phone: "+1987654321",
+    role: "investor",
+    plan: "Premium",
+    password: "test123",
+  },
+  {
+    email: "vip@investor.com",
+    firstName: "Valeria",
+    lastName: "Investor",
+    phone: "+1092837465",
+    role: "investor",
+    plan: "VIP",
+    password: "test123",
+  },
+  {
+    email: "free@entrepreneur.com",
+    firstName: "Felix",
+    lastName: "Founder",
+    phone: "+1010101010",
+    role: "entrepreneur",
+    plan: "Free",
+    password: "test123",
+  },
+  {
+    email: "premium@entrepreneur.com",
+    firstName: "Paula",
+    lastName: "Founder",
+    phone: "+2020202020",
+    role: "entrepreneur",
+    plan: "Premium",
+    password: "test123",
+  },
+  {
+    email: "enterprise@entrepreneur.com",
+    firstName: "Eli",
+    lastName: "Founder",
+    phone: "+3030303030",
+    role: "entrepreneur",
+    plan: "Enterprise",
+    password: "test123",
+  },
+];
+
+export default function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
+
+  const KEYS = { USERS: "hri:users", SESSION: "hri:authSession" };
+  const read = (k) => {
+    try {
+      const r = sessionStorage.getItem(k);
+      return r ? JSON.parse(r) : {};
+    } catch {
+      return {};
+    }
+  };
+  const write = (k, v) => sessionStorage.setItem(k, JSON.stringify(v));
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    const matched = dummyUsers.find(
+      (u) => u.email === email && u.password === password
+    );
+
+    if (!matched) {
+      setError("Invalid email or password.");
+      return;
+    }
+
+    // Seed USERS[email] if it doesn't exist; otherwise keep existing
+    const users = read(KEYS.USERS);
+    users[email] = {
+      ...matched,
+      ...(users[email] || {}),
+      updatedAt: Date.now(),
+    };
+    write(KEYS.USERS, users);
+
+    // Set SESSION
+    write(KEYS.SESSION, { email, issuedAt: Date.now() });
+
+    // Role-based landing
+    const user = users[email];
+    const role = (user.role || "").toLowerCase();
+    if (role === "investor") {
+      // If investor profile exists, go to dashboard; else go complete-profile
+      user.investorProfile
+        ? navigate("/dashboard/investor")
+        : navigate("/complete-profile/investor");
+    } else {
+      // Entrepreneur path
+      user.entrepreneurProfile
+        ? navigate("/dashboard/entrepreneur")
+        : navigate("/complete-profile/entrepreneur");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4">
+      <Card className="w-full max-w-md shadow-xl">
+        <CardHeader className="text-center">
+          <Badge className="bg-blue-100 text-blue-800 mb-2">Welcome Back</Badge>
+          <CardTitle className="text-2xl font-bold text-gray-900">
+            Login
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Email
+              </label>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Password
+              </label>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <Button type="submit" className="w-full">
+              Log In
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

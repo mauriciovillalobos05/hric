@@ -1,211 +1,325 @@
-from flask import Blueprint, jsonify, request, session
-from src.models.user import Users, InvestorProfile, Enterprise, Like,db
-from datetime import datetime
-import re
+from __future__ import annotations
 
-auth_bp = Blueprint('auth', __name__)
+from datetime import datetime, timezone
+import os
+from typing import Optional
 
-@auth_bp.route('/register-complete', methods=['POST'])
-def register_complete():
+import requests
+from flask import Blueprint, jsonify, request
+
+from src.extensions import db
+# add to imports at the top
+from src.models.user import User, Enterprise, EnterpriseUser, GeographicArea
+
+
+auth_bp = Blueprint("auth", __name__)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+
+# --------------------- Auth --------------------- #
+
+def require_auth():
+    """Validate Supabase JWT and return (user, token, error_tuple_or_None)."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
+
+    token = auth_header.split(" ")[1]
     try:
-        data = request.json
-        required_fields = ['supabase_id', 'email', 'role', 'first_name', 'last_name']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({'error': f'{field} is required'}), 400
-
-        if Users.query.filter_by(id=data['supabase_id']).first():
-            return jsonify({'error': 'Users already exists'}), 409
-
-        # Create base Users
-        Users = Users(
-            id=data['supabase_id'],
-            email=data['email'],
-            phone=data.get('phone'),
-            role=data['role'],
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            location=data.get('location'),
-            bio=data.get('bio'),
-            profile_image=data.get('profile_image'),
-            linkedin_url=data.get('linkedin_url'),
-            website_url=data.get('website_url'),
-            onboarding_status='pending_review'
+        resp = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
+            timeout=15,
         )
-        db.session.add(Users)
-        db.session.flush()  # assign Users.id
-
-        # Role-based profile creation
-        if Users.role == 'investor':
-            profile = InvestorProfile(
-                Users_id=Users.id,
-                industries=data.get('industries', []),
-                investment_stages=data.get('investment_stages', []),
-                geographic_focus=data.get('geographic_focus', []),
-                investment_range_min=data.get('investment_range_min'),
-                investment_range_max=data.get('investment_range_max'),
-                accredited_status=data.get('accredited_status', False),
-                investor_type=data.get('investor_type'),
-                risk_tolerance=data.get('risk_tolerance'),
-                portfolio_size=data.get('portfolio_size'),
-                advisory_availability=data.get('advisory_availability', False),
-                communication_frequency=data.get('communication_frequency'),
-                meeting_preference=data.get('meeting_preference')
-            )
-            db.session.add(profile)
-
-        elif Users.role == 'entrepreneur':
-            enterprise = Enterprise(
-                Users_id=Users.id,
-                name=data.get('company_name', ''),
-                industry=data.get('industry'),
-                stage=data.get('stage'),
-                business_model=data.get('business_model'),
-                team_size=data.get('team_size'),
-                pitch_deck_url=data.get('pitch_deck_url'),
-                demo_url=data.get('demo_url'),
-                is_actively_fundraising=data.get('is_actively_fundraising', True),
-                financials=data.get('financials'),
-                target_market=data.get('target_market')
-            )
-            db.session.add(enterprise)
-
-        db.session.commit()
-        return jsonify({'message': 'Users onboarding complete', 'Users': Users.to_dict()}), 201
-
+        if resp.status_code != 200:
+            return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
+        user_id = resp.json()["id"]
     except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
 
-@auth_bp.route('/track-login', methods=['POST'])
-def track_login():
-    try:
-        email = request.json.get('email')
-        Users = Users.query.filter_by(email=email).first()
-        if Users:
-            Users.last_login = datetime.utcnow()
-            db.session.commit()
-            return jsonify({'message': 'Login tracked'}), 200
-        return jsonify({'error': 'Users not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    user = db.session.get(User, user_id)
+    if not user:
+        return None, None, (jsonify({"error": "User not found in database"}), 404)
 
-@auth_bp.route('/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({'message': 'Logout successful'}), 200
+    return user, token, None
 
-@auth_bp.route('/me', methods=['GET'])
-def get_current_Users():
-    try:
-        Users_id = session.get('Users_id')
-        if not Users_id:
-            return jsonify({'error': 'Not authenticated'}), 401
 
-        Users = Users.query.get(Users_id)
-        if not Users:
-            return jsonify({'error': 'Users not found'}), 404
+# --------------------- Helpers --------------------- #
 
-        Users_data = Users.to_dict()
+def _role_to_enterprise_type(role: str) -> Optional[str]:
+    r = (role or "").strip().lower()
+    if r == "investor":
+        return "investor"
+    if r in ("entrepreneur", "startup", "founder"):
+        return "startup"
+    return None
 
-        if Users.role == 'investor' and Users.investor_profile:
-            Users_data['profile'] = Users.investor_profile.to_dict()
-        elif Users.role == 'entrepreneur' and Users.enterprises:
-            Users_data['profile'] = Users.enterprises[0].to_dict()
 
-        return jsonify({'Users': Users_data}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def _default_enterprise_name(first_name: str, last_name: str, ent_type: str) -> str:
+    first = (first_name or "").strip() or "New"
+    last = (last_name or "").strip() or "User"
+    if ent_type == "investor":
+        return f"{first} {last} Capital"
+    return f"{first} {last} Startup"
 
-@auth_bp.route('/profile', methods=['PUT'])
+
+def _serialize_user(u: User):
+    return {
+        "id": str(u.id),
+        "email": u.email,
+        "first_name": u.first_name,
+        "last_name": u.last_name,
+        "phone": u.phone,
+        "location": u.location,  # NEW
+        "stripe_customer_id": u.stripe_customer_id,
+        "profile_image_url": u.profile_image_url,
+        "bio": u.bio,
+        "linkedin_url": u.linkedin_url,
+        "twitter_url": u.twitter_url,
+        "website_url": u.website_url,
+        "timezone": u.timezone,
+        "language_preference": u.language_preference,
+        "onboarding_completed": bool(u.onboarding_completed),
+        "is_active": bool(u.is_active),
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+    }
+
+
+def _serialize_membership(m: EnterpriseUser):
+    return {
+        "id": str(m.id),
+        "enterprise_id": str(m.enterprise_id),
+        "user_id": str(m.user_id),
+        "role": m.role,
+        "is_active": bool(m.is_active),
+        "joined_date": m.joined_date.isoformat() if m.joined_date else None,
+    }
+
+
+def _serialize_enterprise(e: Enterprise):
+    return {
+        "id": str(e.id),
+        "name": e.name,
+        "enterprise_type": e.enterprise_type,
+        "description": e.description,
+        "website": e.website,
+        "location": e.location,
+        "status": e.status,
+        "is_verified": bool(e.is_verified),
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+    }
+
+# in auth_bp file
+
+def _serialize_membership(m: EnterpriseUser):
+    # include enterprise details inline to avoid extra client calls
+    ent = m.enterprise  # relationship access
+    ent_payload = None
+    if ent:
+        ent_payload = {
+            "id": str(ent.id),
+            "name": ent.name,
+            "enterprise_type": ent.enterprise_type,
+            "location": ent.location,
+            "website": ent.website,
+            "status": ent.status,
+        }
+    return {
+        "id": str(m.id),
+        "enterprise_id": str(m.enterprise_id),
+        "user_id": str(m.user_id),
+        "role": m.role,
+        "is_active": bool(m.is_active),
+        "joined_date": m.joined_date.isoformat() if m.joined_date else None,
+        "enterprise": ent_payload,
+        # keep a flat copy for convenience:
+        "enterprise_type": ent.enterprise_type if ent else None,
+    }
+# --------------------- Routes --------------------- #
+
+@auth_bp.route("/register-complete", methods=["POST"])
+def register_complete():
+    data = request.get_json() or {}
+    supabase_id = data.get("supabase_id")
+    email       = data.get("email")
+    first_name  = (data.get("first_name") or "").strip()
+    last_name   = (data.get("last_name") or "").strip()
+    phone       = (data.get("phone") or "").strip() or None
+    role        = (data.get("role") or "entrepreneur").lower()
+    raw_location= data.get("location")
+    location    = (raw_location or "").strip() or None  # normalize
+
+    if not (supabase_id and email):
+        return jsonify({"error": "supabase_id and email required"}), 400
+
+    # upsert (basic)
+    user = db.session.get(User, supabase_id)
+    if not user:
+        user = User(
+            id=supabase_id,
+            email=email,
+            first_name=first_name or "New",
+            last_name=last_name or "User",
+            phone=phone,
+            location=location,
+        )
+        db.session.add(user)
+    else:
+        if first_name:
+            user.first_name = first_name
+        if last_name:
+            user.last_name = last_name
+        if phone is not None:
+            user.phone = phone
+        # set to None if empty string
+        user.location = location
+
+    # ensure GeographicArea row exists if we have a location
+    if location:
+        ga = db.session.query(GeographicArea).filter(GeographicArea.name.ilike(location)).first()
+        if not ga:
+            ga = GeographicArea(name=location)
+            db.session.add(ga)
+
+    # Create enterprise + owner membership if missing (active owner)
+    ent_type = "investor" if role == "investor" else "startup"
+    ent = (
+        db.session.query(Enterprise)
+        .join(EnterpriseUser, EnterpriseUser.enterprise_id == Enterprise.id)
+        .filter(
+            EnterpriseUser.user_id == user.id,
+            EnterpriseUser.role == "owner",
+            EnterpriseUser.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if not ent:
+        ent = Enterprise(
+            name=f"{user.first_name} {user.last_name}".strip() or "New User",
+            enterprise_type=ent_type,
+            status="active",
+        )
+        db.session.add(ent)
+        db.session.flush()  # get ent.id
+
+        db.session.add(EnterpriseUser(
+            enterprise_id=ent.id,
+            user_id=user.id,
+            role="owner",
+            is_active=True,
+        ))
+    else:
+        if ent.enterprise_type != ent_type:
+            ent.enterprise_type = ent_type
+
+    db.session.commit()
+    return jsonify({"ok": True, "redirect": f"/complete-profile/{role}"}), 200
+
+
+@auth_bp.route("/profile", methods=["PUT", "PATCH"])
 def update_profile():
+    user, _, err = require_auth()
+    if err:
+        return err
+
+    data = request.get_json() or {}
+
+    # simple fields
+    for field in [
+        "first_name", "last_name", "phone", "linkedin_url",
+        "twitter_url", "website_url", "bio", "timezone",
+        "language_preference", "profile_image_url"
+    ]:
+        if field in data:
+            setattr(user, field, data[field])
+
+    # normalize and set location (None if empty)
+    if "location" in data:
+        loc = (data.get("location") or "").strip() or None
+        user.location = loc
+        if loc:
+            ga = db.session.query(GeographicArea).filter(GeographicArea.name.ilike(loc)).first()
+            if not ga:
+                db.session.add(GeographicArea(name=loc))
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated"}), 200
+
+
+@auth_bp.route("/me", methods=["GET"])
+def me():
+    user, _, err = require_auth()
+    if err:
+        return err
     try:
-        Users_id = session.get('Users_id')
-        if not Users_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-
-        Users = Users.query.get(Users_id)
-        if not Users:
-            return jsonify({'error': 'Users not found'}), 404
-
-        data = request.json
-        # Update base Users fields
-        for field in ['first_name', 'last_name', 'phone', 'location', 'bio', 'linkedin_url', 'website_url', 'profile_image']:
-            if field in data:
-                setattr(Users, field, data[field])
-
-        # Update investor profile
-        if Users.role == 'investor' and Users.investor_profile:
-            profile = Users.investor_profile
-            for field in [
-                'industries', 'investment_stages', 'geographic_focus',
-                'investment_range_min', 'investment_range_max',
-                'accredited_status', 'investor_type', 'risk_tolerance',
-                'portfolio_size', 'advisory_availability',
-                'communication_frequency', 'meeting_preference'
-            ]:
-                if field in data:
-                    setattr(profile, field, data[field])
-
-        # Update entrepreneur profile
-        elif Users.role == 'entrepreneur' and Users.enterprises:
-            enterprise = Users.enterprises[0]
-            for field in [
-                'name', 'industry', 'stage', 'business_model',
-                'team_size', 'pitch_deck_url', 'demo_url',
-                'is_actively_fundraising', 'financials', 'target_market'
-            ]:
-                if field in data:
-                    setattr(enterprise, field, data[field])
-
+        # bump last_active_at on successful authenticated fetch
+        user.last_active_at = datetime.now(timezone.utc)
         db.session.commit()
 
-        updated = Users.to_dict()
-        if Users.role == 'investor' and Users.investor_profile:
-            updated['profile'] = Users.investor_profile.to_dict()
-        elif Users.role == 'entrepreneur' and Users.enterprises:
-            updated['profile'] = Users.enterprises[0].to_dict()
-
-        return jsonify({'message': 'Profile updated', 'Users': updated}), 200
-
+        memberships = [_serialize_membership(m) for m in user.enterprise_memberships]
+        return jsonify({
+            "user": _serialize_user(user),
+            "memberships": memberships,
+        }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+    
+@auth_bp.route("/after-login", methods=["POST"])
+def after_login():
+    user, _, err = require_auth()
+    if err:
+        return err
 
-@auth_bp.route('/enterprise/<int:enterprise_id>/likes', methods=['POST', 'GET'])
-def handle_likes(enterprise_id):
-    Users_id = session.get('Users_id')
-    if not Users_id:
-        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        user.last_active_at = datetime.now(timezone.utc)
 
-    Users = Users.query.get(Users_id)
-    if not Users or Users.role != 'investor':
-        return jsonify({'error': 'Only investors can perform this action'}), 403
+        # Optional: write a UserActivity row
+        from src.models.user import UserActivity
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+        ua = request.headers.get("User-Agent")
+        db.session.add(UserActivity(
+            user_id=user.id,
+            activity_type="login",
+            activity_category="auth",
+            activity_data={},
+            ip_address=ip,
+            user_agent=ua,
+            session_id=None,
+        ))
 
-    enterprise = Enterprise.query.get(enterprise_id)
-    if not enterprise:
-        return jsonify({'error': 'Enterprise not found'}), 404
-
-    if request.method == 'POST':
-        existing_like = Like.query.filter_by(Users_id=Users.id, enterprise_id=enterprise_id).first()
-        if existing_like:
-            return jsonify({'message': 'Already liked'}), 200
-
-        like = Like(Users_id=Users.id, enterprise_id=enterprise_id)
-        db.session.add(like)
         db.session.commit()
-        return jsonify({'message': 'Enterprise liked'}), 201
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
-    elif request.method == 'GET':
-        likes = Like.query.filter_by(enterprise_id=enterprise_id).all()
-        tier = Users.investor_profile.portfolio_size if Users.investor_profile else 0
+@auth_bp.route("/logout", methods=["POST"])
+def logout():
+    user, _, err = require_auth()
+    if err:
+        return err
+    try:
+        from datetime import datetime, timezone
+        from src.models.user import UserActivity
 
-        if tier >= 1000000:
-            return jsonify({
-                'likes': [like.Users.to_dict(include_profile=True) for like in likes],
-                'count': len(likes)
-            }), 200
-        elif tier > 0:
-            return jsonify({'count': len(likes)}), 200
-        else:
-            return jsonify({'message': 'Upgrade to view likes'}), 403
+        user.last_active_at = datetime.now(timezone.utc)  # or last_logout_at if you add it
+        db.session.add(UserActivity(
+            user_id=user.id,
+            activity_type="logout",
+            activity_category="auth",
+            activity_data={},
+            ip_address=request.headers.get("X-Forwarded-For", request.remote_addr),
+            user_agent=request.headers.get("User-Agent"),
+            session_id=None,
+        ))
+        db.session.commit()
+        return jsonify({"ok": True}), 200  # or: return ("", 204)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500

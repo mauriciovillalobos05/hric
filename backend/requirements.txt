@@ -11,6 +11,7 @@ ecdsa==0.19.1
 eventlet==0.40.2
 Flask==3.1.1
 flask-cors==6.0.0
+Flask-Migrate==4.1.0
 Flask-SocketIO==5.5.1
 Flask-SQLAlchemy==3.1.1
 greenlet==3.2.3
@@ -29,6 +30,7 @@ python-dotenv==1.1.1
 python-engineio==4.12.2
 python-jose==3.5.0
 python-socketio==5.13.0
+RapidFuzz==3.13.0
 requests==2.32.4
 rsa==4.9.1
 s3transfer==0.13.1

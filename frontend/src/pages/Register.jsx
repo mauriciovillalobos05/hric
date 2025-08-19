@@ -30,7 +30,17 @@ export default function Register() {
   const [role, setRole] = useState(defaultRole);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
+
+  const KEYS = { USERS: "hri:users", SESSION: "hri:authSession" };
+  const read = (k) => {
+    try {
+      const r = sessionStorage.getItem(k);
+      return r ? JSON.parse(r) : {};
+    } catch {
+      return {};
+    }
+  };
+  const write = (k, v) => sessionStorage.setItem(k, JSON.stringify(v));
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -43,25 +53,43 @@ export default function Register() {
       return;
     }
 
+    {
+      /*
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: "http://localhost:5173/onboarding",
+        emailRedirectTo: 'http://localhost:5173/onboarding',
         data: {
           first_name: firstName,
           last_name: lastName,
           phone,
-          role: role || null,
-        },
-      },
-    });
-
-    if (error) {
-      setError(error.message);
-    } else {
-      navigate("/email-confirmation-sent");
+          role: role || null
+        }
+      }
+    })
+    */
     }
+
+    // create or update USERS[email]
+    const users = read(KEYS.USERS);
+    users[email] = {
+      ...(users[email] || {}),
+      email,
+      firstName,
+      lastName,
+      phone,
+      role: role || "",
+      plan: users[email]?.plan || "Free",
+      updatedAt: Date.now(),
+    };
+    write(KEYS.USERS, users);
+
+    // set SESSION
+    write(KEYS.SESSION, { email, issuedAt: Date.now() });
+    // optional flag that Onboarding already understands
+    sessionStorage.setItem("registrationRole", role || "");
+    navigate("/onboarding");
     setLoading(false);
   };
 
@@ -168,7 +196,8 @@ export default function Register() {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            {/* disabled={loading} */}
+            <Button type="submit" className="w-full">
               {loading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
@@ -176,11 +205,7 @@ export default function Register() {
               )}
             </Button>
           </form>
-          {successMessage && (
-            <div className="bg-green-100 text-green-800 px-4 py-2 rounded-md mb-4 border border-green-300">
-              {successMessage}
-            </div>
-          )}
+
           <p className="text-sm text-center text-gray-600 mt-6">
             Already have an account?{" "}
             <button

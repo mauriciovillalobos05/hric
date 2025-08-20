@@ -1,12 +1,15 @@
 import React from "react";
-import { Calendar, CreditCard, CheckCircle, BarChart3 } from "lucide-react";
+import { Calendar, CreditCard, CheckCircle, BarChart3, Ticket } from "lucide-react";
 
 const NavigationTabs = ({ activeTab, onChange }) => {
   const tabs = [
     { id: "events", label: "Events", icon: Calendar },
     { id: "purchase", label: "Purchase", icon: CreditCard },
     /*{ id: "validate", label: "Validate", icon: CheckCircle },*/
+
+    { id: "myTickets", label: "My Tickets", icon: Ticket },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
+
   ];
 
   return (

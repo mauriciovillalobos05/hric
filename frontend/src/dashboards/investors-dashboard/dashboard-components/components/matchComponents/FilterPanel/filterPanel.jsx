@@ -2,51 +2,49 @@ import React, { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import {
+  userTypes,
+  stagePreferences,
+  industryPreferences,
+} from "./preferences";
+
+// Checkbox stages
 import MultiSelectChips from "./MultiSelectChips";
+
+// Location dropdown
 import LocationMultiSelect from "@/pages/cmpnnts/LocationMultiSelect";
 
-// Stages (covers what appears in your mocks, plus a few extra common ones)
-const stageOptionsDefault = [
-  "Seed",
-  "Series A",
-  "Series B",
-  "Growth",
-  "Late",
-  "Pre-seed",
-  "Series C",
-  "IPO",
-];
-
-// Industries EXACTLY from your mockStartups
-const industryOptionsDefault = [
-  "AI/ML",
-  "SaaS",
-  "CyberSecurity",
-  "Enterprise",
-  "Logistics",
-  "Healthcare",
-  "FinTech",
-  "CleanTech",
-  "IoT",
-  "EdTech",
-  "AgriTech",
-  "ClimateTech",
-  "Hardware",
-  "RetailTech",
-  "BioTech",
-];
-
-const FilterPanel = ({
-  filters,
-  onFilterChange,
-  stageOptions = stageOptionsDefault,
-  industryOptions = industryOptionsDefault,
-}) => {
+export default function FilterPanel({ filters, onFilterChange }) {
   const [localFilters, setLocalFilters] = useState(filters);
 
+  const investorTypeOptions = (userTypes || []).map((t) => t.label);
+  const stageOptions = (stagePreferences || []).map(
+    (s) => s.label ?? s.value ?? s
+  );
+  const industryOptions = (industryPreferences || []).map(
+    (i) => i.label ?? i.value ?? i
+  );
+
   useEffect(() => {
-    setLocalFilters(filters);
+    const toLabel = (x) =>
+      x && typeof x === "object" ? x.label ?? x.value : x;
+    setLocalFilters({
+      ...filters,
+      investorTypes: (filters.investorTypes || []).map(toLabel),
+      stagePreferences: (filters.stagePreferences || []).map(toLabel),
+      industryPreferences: (filters.industryPreferences || []).map(toLabel),
+      locationPreferences: Array.isArray(filters.locationPreferences)
+        ? filters.locationPreferences
+        : [], // keep as string array if your LocationMultiSelect returns strings
+    });
   }, [filters]);
 
   const update = (patch) => {
@@ -60,22 +58,41 @@ const FilterPanel = ({
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle className="text-lg font-semibold">Investment Preferences</CardTitle>
+        <CardTitle className="text-lg font-semibold">
+          Investment Preferences
+        </CardTitle>
         <p className="text-sm text-gray-600">
-          Select stages, industries, and locations. Leave any section empty to include all.
+          Select stages, industries, and locations. Leave any section empty to
+          include all.
         </p>
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {/* Investor type */}
+        <MultiSelectChips
+          label="Investor Type"
+          options={investorTypeOptions}
+          values={
+            Array.isArray(localFilters.investorTypes)
+              ? localFilters.investorTypes
+              : []
+          }
+          onChange={(vals) => update({ investorTypes: vals })}
+        />
+
         {/* Stages (checkboxes) */}
         <MultiSelectChips
           label="Preferred Stages"
           options={stageOptions}
-          values={localFilters.stagePreferences ?? []}
+          values={
+            Array.isArray(localFilters.stagePreferences)
+              ? localFilters.stagePreferences
+              : []
+          }
           onChange={(vals) => update({ stagePreferences: vals })}
         />
 
-        {/* Locations */}
+        {/* Locations — identical look/feel to investor */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">Locations</Label>
           <LocationMultiSelect
@@ -91,7 +108,11 @@ const FilterPanel = ({
         <MultiSelectChips
           label="Industry Focus"
           options={industryOptions}
-          values={localFilters.industryPreferences ?? []}
+          values={
+            Array.isArray(localFilters.industryPreferences)
+              ? localFilters.industryPreferences
+              : []
+          }
           onChange={(vals) => update({ industryPreferences: vals })}
         />
 
@@ -104,12 +125,15 @@ const FilterPanel = ({
             { key: "previousExitsWeight", label: "Previous Exits" },
             { key: "revenueWeight", label: "Revenue Performance" },
             { key: "teamSizeWeight", label: "Team Size" },
-            { key: "currentlyRaisingWeight", label: "Currently Raising Priority" },
+            {
+              key: "currentlyRaisingWeight",
+              label: "Currently Raising Priority",
+            },
           ].map(({ key, label }) => (
             <div key={key} className="space-y-3">
               <div className="flex justify-between items-center">
                 <Label className="text-sm">{label}</Label>
-                <Badge variant="outline">{(localFilters[key] ?? 0)}%</Badge>
+                <Badge variant="outline">{localFilters[key] ?? 0}%</Badge>
               </div>
               <Slider
                 value={[localFilters[key] ?? 0]}
@@ -124,6 +148,4 @@ const FilterPanel = ({
       </CardContent>
     </Card>
   );
-};
-
-export default FilterPanel;
+}

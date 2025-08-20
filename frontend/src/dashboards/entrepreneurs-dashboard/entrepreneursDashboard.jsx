@@ -1,4 +1,7 @@
-import React, { useState, useEffect } from "react";
+// =============================================
+// FILE: EntrepreneurDashboard.jsx  (adapted to backend-driven matches)
+// =============================================
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import HeaderBar from "./dashboard-components/components/headerBarComponents/headerBar.jsx";
 import EntrepreneurTabs from "./dashboard-components/components/entrepreneurTabs.jsx";
@@ -8,13 +11,11 @@ import { Loader2 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import ScrollToTopButton from "@/components/scrollToTopButton.jsx";
 import defaultAvatar from "../../assets/default_user_image.png";
+
+// IMPORTANT: this transform maps your UI filters to the
+// entrepreneur weights JSON the backend expects (?weights=...)
+// and also emits `raiseTargetUsd` for ?raise_target_usd=
 import transformFilters from "./dashboard-components/components/matchComponents/components/FilterPanel/transformFilters.jsx";
-
-// Matching algorithm
-import { InvestorMatcher } from "./dashboard-components/components/matchComponents/components/algorithms/matchingAlgorithm.js"; // Import the matching algorithm
-
-// Mock matches
-import mockMatches from "./dashboard-components/components/matchComponents/mockInvestors.js"; // Import mock matches if needed
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -24,221 +25,113 @@ const supabase = createClient(
 function EntrepreneurDashboard() {
   const [entrepreneurName, setEntrepreneurName] = useState("Founder");
   const [avatarUrl, setAvatarUrl] = useState("");
-  const [userRole, setUserRole] = useState(""); // optional: store user role
+  const [userRole, setUserRole] = useState("");
   const [enterprise, setEnterprise] = useState({});
   const [notifications, setNotifications] = useState([]);
   const [openChats, setOpenChats] = useState([]);
   const [messages, setMessages] = useState([]);
   const [events, setEvents] = useState([]);
 
-  // Matches state
-  const [matchedInvestors, setMatchedInvestors] = useState([]);
+  // Matches-related state (cards fetch happens downstream in MatchesDashboard)
+  const [matchedInvestors] = useState([]); // optional prop for back-compat
 
-  // Simulation results state
+  // Simulation & compare
   const [simulationResults, setSimulationResults] = useState(null);
+  const [activeInvestor, setActiveInvestor] = useState(null);
+  const [compareIds, setCompareIds] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // Compare and Selected Investors
-  const [activeInvestor, setActiveInvestor] = useState(null); // for Monte Carlo
-  const [compareIds, setCompareIds] = useState([]);
+  const navigate = useNavigate();
 
+  // ---- FILTERS: align with Entrepreneur route (NOT investor sliders) ----
+  // These keys match FilterPanel + transformFilters (industryFitWeight, etc.)
   const DEFAULT_FILTERS = {
-    // what FilterPanel already emits
-    userType: "vc", // "vc" | "angel" | "corporate" | "any"
-    stagePreference: "All",
-    locationPreference: "All",
-    industryPreference: "All",
-
+    investorTypes: [],
     stagePreferences: [],
     industryPreferences: [],
     locationPreferences: [],
-    investorTypes: [],
+    locationPreference: "All",
 
-    // extra hard filters you added
-    checkMin: 0,
-    checkMax: Number.POSITIVE_INFINITY,
-    followOnMin: 0,
-    boardSeat: "any", // any | willing | avoid
-    syndication: "any", // any | lead | co-lead
-    dealTimeMaxDays: 999,
+    // Optional UI filters you may add later (server ignores for now):
+    verifiedOnly: false,
+    maxDecisionDays: 30,
+    portfolioKeyword: "",
+    preferMyCity: false,
 
-    // sliders that transformFilters already expects
-    roiWeight: 25,
-    technicalFoundersWeight: 15,
-    previousExitsWeight: 15,
-    revenueWeight: 20,
-    teamSizeWeight: 20,
-    currentlyRaisingWeight: 10,
+    // Scoring helper for check-size fit (maps to ?raise_target_usd=)
+    raiseTargetUsd: 0,
+
+    // Entrepreneur weight sliders (sum doesn’t need to be 100; transform will normalize)
+    industryFitWeight: 30,
+    stageAlignmentWeight: 25,
+    geoCoverageWeight: 15,
+    checkSizeFitWeight: 20,
+    decisionSpeedWeight: 5,
+    verificationTrustWeight: 5,
+    activityTrackRecordWeight: 0,
   };
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const navigate = useNavigate();
-  const HARDCODE_MODE = true;
+
+  // View controls for matches list
+  const [minScore, setMinScore] = useState(0);     // applied to server-side view_score (0..100)
+  const [order, setOrder] = useState("desc");      // "desc" | "asc"
+
+  // Debounce/derive transform payloads whenever filters change
+  const tf = useMemo(() => transformFilters(filters), [filters]);
+  // tf.weightsParam -> stringified JSON for ?weights=
+  // tf.raiseTargetUsd -> number for ?raise_target_usd=
+
   const handleFilterChange = (newFilters) => {
-    setFilters(newFilters);
-    // Optional: run matching logic here based on updated filters
+    setFilters((prev) => ({ ...prev, ...newFilters }));
+    // Optionally persist to sessionStorage for shareable state across sessions:
+    sessionStorage.setItem("entrepreneurMatchFilters", JSON.stringify({ ...filters, ...newFilters }));
   };
 
-  // When user clicks "Simulate" on a card
+  // On "Simulate" click from a card
   const handleSimulate = (investor) => {
     setActiveInvestor(investor);
-    setSimulationResults(investor.simulation); // you already compute sim
+    setSimulationResults(investor.simulation ?? null);
   };
 
-  // When user toggles "Compare" on a card
+  // Compare selection (max 3)
   const toggleCompare = (investorId) => {
-    setCompareIds(
-      (prev) =>
-        prev.includes(investorId)
-          ? prev.filter((id) => id !== investorId)
-          : prev.length >= 3
-          ? prev
-          : [...prev, investorId] // cap at 3
+    setCompareIds((prev) =>
+      prev.includes(investorId)
+        ? prev.filter((id) => id !== investorId)
+        : prev.length >= 3
+        ? prev
+        : [...prev, investorId]
     );
   };
 
-  // Budget parsing function
-  function parseCheckRange(str = "") {
-    // "$5M - $50M" | "$250k–$1.5M" | "$10M" | "Undisclosed"
-    if (!str || /undisclosed/i.test(str)) return [0, Infinity];
-    // grab all numbers with optional decimals, k/m/b suffix
-    const parts = [...str.matchAll(/(\d+(\.\d+)?)(\s*[kmb])?/gi)].map((m) => {
-      const n = parseFloat(m[1]);
-      const suf = (m[3] || "").trim().toLowerCase();
-      const mult =
-        suf === "k" ? 1e3 : suf === "m" ? 1e6 : suf === "b" ? 1e9 : 1;
-      return n * mult;
-    });
-    if (parts.length === 1) return [parts[0], parts[0]];
-    if (parts.length >= 2)
-      return [Math.min(parts[0], parts[1]), Math.max(parts[0], parts[1])];
-    return [0, Infinity];
-  }
+  // Reset filters to defaults
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    sessionStorage.removeItem("entrepreneurMatchFilters");
+  };
 
-  // Average deal time parsing function
-  function parseAvgDealTime(str = "") {
-    // "3-6 months" | "45-90 days" | "8 weeks" | "3 months"
-    if (!str) return 999;
-    const range = [...str.matchAll(/(\d+(\.\d+)?)/g)].map((m) =>
-      parseFloat(m[1])
-    );
-    const hasMonths = /month/i.test(str);
-    const hasWeeks = /week/i.test(str);
-    const hasDays = /day/i.test(str);
-
-    const avg = range.length
-      ? range.reduce((a, b) => a + b, 0) / range.length
-      : 0;
-    if (hasMonths) return Math.round(avg * 30);
-    if (hasWeeks) return Math.round(avg * 7);
-    if (hasDays) return Math.round(avg);
-    return 999;
-  }
-
-  //
-  // Example matcher function
-  //
-
+  // Restore filters from session (optional)
   useEffect(() => {
-    const matcher = new InvestorMatcher();
+    const saved = sessionStorage.getItem("entrepreneurMatchFilters");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setFilters((prev) => ({ ...prev, ...parsed }));
+      } catch {}
+    }
+  }, []);
 
-    const filteredAndScored = mockMatches
-      .filter((inv) => {
-        const norm = (s) =>
-          String(s || "")
-            .toLowerCase()
-            .trim();
-
-        const arr = (v) => (Array.isArray(v) ? v : v && v !== "All" ? [v] : []);
-
-        // derive normalized selections (arrays)
-        const selectedStages = arr(
-          filters.stagePreferences ?? filters.stagePreference
-        ).map(norm);
-        const selectedIndustries = arr(
-          filters.industryPreferences ?? filters.industryPreference
-        ).map(norm);
-        const selectedLocations = arr(
-          filters.locationPreferences ?? filters.locationPreference
-        ).map(norm);
-
-        // chip-based (labels) e.g. ["Angel Investor","Venture Capital"] -> normalize
-        const selectedTypes = arr(filters.investorTypes).map(norm);
-        const typeOk =
-          !selectedTypes.length ||
-          selectedTypes.some((t) => norm(inv.type).includes(t));
-
-        // Stage filter (array-aware)
-        const stageOk =
-          selectedStages.length === 0 ||
-          inv.stage?.some((s) => selectedStages.includes(norm(s)));
-
-        // Industry filter (array-aware; investor has industries[])
-        const industryOk =
-          selectedIndustries.length === 0 ||
-          inv.industries?.some((i) => selectedIndustries.includes(norm(i)));
-
-        // Geo filter (array-aware; allow partial match)
-        const geoOk =
-          selectedLocations.length === 0 ||
-          selectedLocations.some((loc) => norm(inv.location).includes(loc));
-
-        const [min, max] = parseCheckRange(inv.checkSize); // "$5M - $50M" -> [5_000_000, 50_000_000]
-        const checkOk = max >= filters.checkMin && min <= filters.checkMax;
-
-        const followOk = (inv.followOnRate ?? 0) >= filters.followOnMin;
-
-        const boardOk =
-          filters.boardSeat === "any" ||
-          (filters.boardSeat === "willing" &&
-            /board/i.test(inv.boardSeats || "")) ||
-          (filters.boardSeat === "avoid" &&
-            !/board/i.test(inv.boardSeats || ""));
-
-        const syndOk =
-          filters.syndication === "any" ||
-          inv.investmentBehavior?.syndicationPreference === filters.syndication;
-
-        const avgDealDays = parseAvgDealTime(inv.avgDealTime); // "3-6 months" -> ~135–180d avg; pick mid
-        const ddDays = inv.investmentBehavior?.dueDiligenceTime ?? avgDealDays;
-        const timeOk = Math.min(avgDealDays, ddDays) <= filters.dealTimeMaxDays;
-
-        return (
-          stageOk &&
-          industryOk &&
-          geoOk &&
-          typeOk &&
-          checkOk &&
-          followOk &&
-          boardOk &&
-          syndOk &&
-          timeOk
-        );
-      })
-      .map((investor) => {
-        // transform weights into your sim input
-        const sim = matcher.runMonteCarloSimulation(
-          investor,
-          transformFilters(filters)
-        );
-        return { ...investor, matchScore: sim.mean, simulation: sim };
-      });
-
-    setMatchedInvestors(filteredAndScored);
-  }, [filters]);
-
-  // Reset filters to default
-  const resetFilters = () => setFilters(DEFAULT_FILTERS);
-
-  // Fetch user, enterprise, messages, matches, events on mount
+  // Fetch user + enterprise + events (mock/demo option kept)
   useEffect(() => {
+    const HARDCODE_MODE = true; // set false when wiring to Supabase data fully
+
     const fetchData = async () => {
       try {
         if (HARDCODE_MODE) {
-          // ---- Hardcoded demo data (no backend required) ----
           setEntrepreneurName("Alex Rivera");
           setUserRole("entrepreneur");
           setAvatarUrl(defaultAvatar);
@@ -256,18 +149,8 @@ function EntrepreneurDashboard() {
           });
 
           setMessages([
-            {
-              sender: "Investor JP",
-              preview: "Interested in your KPIs...",
-              time: "10:14",
-              read: false,
-            },
-            {
-              sender: "Ana (HRIC)",
-              preview: "Event reminder for Thu",
-              time: "09:21",
-              read: true,
-            },
+            { sender: "Investor JP", preview: "Interested in your KPIs...", time: "10:14", read: false },
+            { sender: "Ana (HRIC)", preview: "Event reminder for Thu", time: "09:21", read: true },
           ]);
 
           const upcoming = [
@@ -278,7 +161,7 @@ function EntrepreneurDashboard() {
               date: new Date(Date.now() + 3 * 24 * 3600e3).toISOString(),
               agenda: ["Networking", "Pitches", "Q&A"],
               presenters: ["Panel A", "Panel B"],
-              registration_status: null, // will turn "registered" after clicking the button
+              registration_status: null,
             },
             {
               id: "evt_2",
@@ -292,154 +175,80 @@ function EntrepreneurDashboard() {
           ];
           setEvents(upcoming);
 
-          setNotifications([
-            {
-              title: "You have a new investor match",
-              time: "Just now",
-              read: false,
-            },
-          ]);
-
+          setNotifications([{ title: "You have a new investor match", time: "Just now", read: false }]);
           setLoading(false);
-          return; // <-- IMPORTANT: skip the Supabase branch below
+          return;
         }
+
         const {
           data: { session },
         } = await supabase.auth.getSession();
-
         if (!session?.user) return;
         const userId = session.user.id;
 
-        // Updated user fetch with email and role
         const { data: user, error: userErr } = await supabase
           .from("user")
           .select("first_name, last_name, profile_image, email, role")
           .eq("id", userId)
           .single();
-
         if (userErr) throw userErr;
 
         setEntrepreneurName(`${user.first_name} ${user.last_name}`);
-        setUserRole(user.role); // you can now use this for role-based logic
+        setUserRole(user.role);
 
         const resolvedAvatarUrl =
           user.profile_image && user.profile_image.trim().length > 0
-            ? supabase.storage
-                .from("profile-images")
-                .getPublicUrl(user.profile_image).data?.publicUrl
+            ? supabase.storage.from("profile-images").getPublicUrl(user.profile_image).data?.publicUrl
             : defaultAvatar;
-
         setAvatarUrl(resolvedAvatarUrl);
 
-        // Fetch enterprise data
         const { data: enterpriseData, error: enterpriseErr } = await supabase
           .from("enterprise")
           .select("*")
           .eq("user_id", userId)
           .single();
-
         if (enterpriseErr) throw enterpriseErr;
-
         setEnterprise(enterpriseData);
 
-        // Fetch messages
         const { data: msgData } = await supabase
           .from("message")
           .select("content, sender_id, created_at, is_read")
           .eq("recipient_id", userId)
           .order("created_at", { ascending: false })
           .limit(5);
-
         const formattedMessages = (msgData || []).map((msg) => ({
-          sender: `Sender ${msg.sender_id.slice(0, 6)}`,
+          sender: `Sender ${String(msg.sender_id || "").slice(0, 6)}`,
           preview: msg.content.slice(0, 60),
           time: new Date(msg.created_at).toLocaleTimeString(),
           read: msg.is_read,
         }));
-
         setMessages(formattedMessages);
 
-        // Fetch matches
-        const { data: matchData } = await supabase
-          .from("match")
-          .select(
-            `
-            id,
-            compatibility_score,
-            match_reasons,
-            investor:investor_id (
-              company_name,
-              location,
-              industry,
-              funding_stage,
-              profile_image
-            )
-          `
-          )
-          .eq("enterprise_id", userId)
-          .order("compatibility_score", { ascending: false });
-
-        // Format matches (UNLINED LATER)
-
-        // const formattedMatches = (matchData || []).map((m) => ({
-        //   founder: m.investor.company_name,
-        //   company_name: m.investor.company_name,
-        //   description: `Invests in ${m.investor.industry}`,
-        //   location: m.investor.location,
-        //   profile_image: m.investor.profile_image,
-        //   match_score: m.compatibility_score,
-        //   match_reasons: m.match_reasons ? m.match_reasons.split(",") : [],
-        //   funding_stage: m.investor.funding_stage,
-        //   industry: m.investor.industry,
-        // }));
-
-        // For now, use mock data
-
-        // Set matches state
-
-        // Fetch events
         const { data: eventsData, error: eventsErr } = await supabase
           .from("event")
           .select(
             `
-    id,
-    title,
-    description,
-    date,
-    agenda,
-    presenters,
-    event_registration!left(
-      user_id,
-      registration_status
-    )
-  `
+              id,
+              title,
+              description,
+              date,
+              agenda,
+              presenters,
+              event_registration!left(user_id, registration_status)
+            `
           )
           .gte("date", new Date().toISOString())
           .order("date", { ascending: true })
           .limit(20);
-
         if (eventsErr) throw eventsErr;
 
-        // attach this user's registration_status to each event row
         const withStatus = (eventsData || []).map((e) => {
-          const reg = (e.event_registration || []).find(
-            (r) => r.user_id === userId
-          );
-          return {
-            ...e,
-            registration_status: reg?.registration_status || null,
-          };
+          const reg = (e.event_registration || []).find((r) => r.user_id === userId);
+          return { ...e, registration_status: reg?.registration_status || null };
         });
-
         setEvents(withStatus);
 
-        setNotifications([
-          {
-            title: "You have a new investor match",
-            time: "Just now",
-            read: false,
-          },
-        ]);
+        setNotifications([{ title: "You have a new investor match", time: "Just now", read: false }]);
       } catch (err) {
         console.error("Entrepreneur dashboard fetch error:", err);
       } finally {
@@ -450,6 +259,7 @@ function EntrepreneurDashboard() {
     fetchData();
   }, []);
 
+  // Profile completion calc
   const requiredFields = [
     "name",
     "industry",
@@ -479,9 +289,7 @@ function EntrepreneurDashboard() {
         case "funding_needed":
           return "Funding Needs";
         default:
-          return field
-            .replace("_", " ")
-            .replace(/\b\w/g, (l) => l.toUpperCase());
+          return field.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase());
       }
     });
 
@@ -495,39 +303,27 @@ function EntrepreneurDashboard() {
       const { error } = await supabase.from("event_registration").insert({
         event_id: selectedEvent.id,
         user_id: user.id,
-        answers, // JSONB (your dynamic form)
+        answers, // JSONB
         registration_status: "registered",
       });
-
       if (error) throw error;
 
-      // Optimistically update UI
       setEvents((prev) =>
-        prev.map((e) =>
-          e.id === selectedEvent.id
-            ? { ...e, registration_status: "registered" }
-            : e
-        )
+        prev.map((e) => (e.id === selectedEvent.id ? { ...e, registration_status: "registered" } : e))
       );
       setShowRegisterModal(false);
     } catch (e) {
       console.error(e);
-      // optionally show a toast with e.message
     }
   };
 
   const handleOpenChat = (msg) => {
     setOpenChats((prev) => {
       const alreadyOpen = prev.some((chat) => chat.sender === msg.sender);
-      return alreadyOpen
-        ? prev
-        : [...prev, { sender: msg.sender, history: [msg] }];
+      return alreadyOpen ? prev : [...prev, { sender: msg.sender, history: [msg] }];
     });
   };
-
-  const handleCloseChat = (sender) => {
-    setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
-  };
+  const handleCloseChat = (sender) => setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
 
   if (loading) {
     return (
@@ -559,6 +355,15 @@ function EntrepreneurDashboard() {
         />
       </div>
 
+      {/* NOTE:
+          EntrepreneurTabs should forward the props
+            - weightsParam
+            - raiseTargetUsd
+            - minScore
+            - order
+          to its internal MatchesDashboard component, which (in your adapted code)
+          will call GET /matching/matches/entrepreneur with these query params.
+      */}
       <EntrepreneurTabs
         selectedTab="matches"
         onTabChange={() => {}}
@@ -566,7 +371,12 @@ function EntrepreneurDashboard() {
         filters={filters}
         onFilterChange={handleFilterChange}
         onResetFilters={resetFilters}
-        // matches
+        // computed query params for matches
+        weightsParam={tf.weightsParam}           // -> ?weights=<JSON>
+        raiseTargetUsd={tf.raiseTargetUsd}       // -> ?raise_target_usd=<number>
+        minScore={minScore}                      // -> ?min_score=
+        order={order}                            // -> ?order=desc|asc
+        // matches (optional back-compat; MatchesDashboard will fetch itself)
         matchedInvestors={matchedInvestors}
         activeInvestor={activeInvestor}
         compareIds={compareIds}
@@ -587,6 +397,9 @@ function EntrepreneurDashboard() {
         onOpenChat={handleOpenChat}
         openChats={openChats}
         onCloseChat={handleCloseChat}
+        // optional UI handlers to change score/order from a control bar you add later
+        onChangeMinScore={setMinScore}
+        onChangeOrder={setOrder}
       />
 
       {/* Events */}

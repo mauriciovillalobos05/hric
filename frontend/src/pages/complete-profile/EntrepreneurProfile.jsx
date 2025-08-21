@@ -1,13 +1,15 @@
 // src/pages/EntrepreneurProfile.jsx
-// Simulation-only version: NO Supabase, NO backend. Persists to sessionStorage.
+// Simulation-only profile save (sessionStorage).
+// Pitch deck uploads to Supabase public bucket via uploadUserDocument().
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
+import { Loader2, UploadCloud, FileText, X, CheckCircle2 } from "lucide-react";
 import LocationAutocomplete from "../cmpnnts/Location";
+import { uploadUserDocument } from "@/lib/uploadDocument";
 
 // ---------- sessionStorage helpers ----------
 const KEYS = {
@@ -29,25 +31,8 @@ const write = (key, value) => {
 };
 
 // ---------- helpers ----------
-const teamSizeOptionsDefault = [
-  "1-2",
-  "3-5",
-  "6-10",
-  "11-20",
-  "21-50",
-  "51-100",
-  "100+",
-];
-const stageOptionsDefault = [
-  "Idea",
-  "Pre-seed",
-  "Seed",
-  "Series A",
-  "Series B",
-  "Series C",
-  "Growth",
-  "IPO",
-];
+const teamSizeOptionsDefault = ["1-2", "3-5", "6-10", "11-20", "21-50", "51-100", "100+"];
+const stageOptionsDefault = ["Idea", "Pre-seed", "Seed", "Series A", "Series B", "Series C", "Growth", "IPO"];
 const industryOptionsDefault = [
   "Technology",
   "Healthcare",
@@ -89,10 +74,7 @@ const teamSizeToInt = (v) => {
   const s = String(v);
   if (s.endsWith("+")) return parseInt(s, 10) || null;
   if (s.includes("-")) {
-    const parts = s
-      .split("-")
-      .map((x) => parseInt(x, 10))
-      .filter(Number.isFinite);
+    const parts = s.split("-").map((x) => parseInt(x, 10)).filter(Number.isFinite);
     return parts.length ? Math.max(...parts) : null;
   }
   const n = parseInt(s, 10);
@@ -111,14 +93,8 @@ const toPct = (v) => {
   return Math.max(0, Math.min(100, n));
 };
 
-const csvToArray = (s) =>
-  (s || "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-
+const csvToArray = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 const arrayToCSV = (arr) => (Array.isArray(arr) ? arr.join(", ") : "");
-
 const numberOrEmpty = (n) => (n == null ? "" : String(n));
 
 const pickTeamSizeOption = (n) => {
@@ -142,12 +118,20 @@ const cleanPayload = (obj) => {
     const out = {};
     for (const [k, v] of Object.entries(obj)) {
       const cv = cleanPayload(v);
-      if (cv !== "" && cv !== null && !(Array.isArray(cv) && cv.length === 0))
-        out[k] = cv;
+      if (cv !== "" && cv !== null && !(Array.isArray(cv) && cv.length === 0)) out[k] = cv;
     }
     return out;
   }
   return obj === "" ? null : obj;
+};
+
+// Human-readable bytes
+const formatBytes = (bytes = 0) => {
+  if (!bytes) return "0 B";
+  const k = 1024,
+    sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 };
 
 // ---------- component ----------
@@ -169,7 +153,9 @@ export default function EntrepreneurProfile() {
     location: "",
     team_size: "", // UI option string
     funding_needed: "",
+    // set by upload only
     pitch_deck_url: "",
+    pitch_deck_path: "",
     demo_url: "",
     financials: { funding_goal: "" },
     target_market: "",
@@ -194,6 +180,19 @@ export default function EntrepreneurProfile() {
     previous_exits_pct: "",
   });
 
+  // Upload UI state
+  const [uploadingDeck, setUploadingDeck] = useState(false);
+  const [deckError, setDeckError] = useState(null);
+  const [uploadedDeckName, setUploadedDeckName] = useState("");
+  const [uploadedDeckSize, setUploadedDeckSize] = useState(0);
+  const [dragActive, setDragActive] = useState(false);
+
+  // Use the session email as a folder namespace (demo). In prod, use Supabase Auth user.id.
+  const userId = useMemo(() => {
+    const session = read(KEYS.SESSION);
+    return session?.email || "anonymous";
+  }, []);
+
   // ARR auto from MRR if empty
   useEffect(() => {
     if (form.mrr_usd && !form.arr_usd) {
@@ -213,19 +212,15 @@ export default function EntrepreneurProfile() {
   useEffect(() => {
     try {
       const session = read(KEYS.SESSION); // { email, issuedAt }
-      if (!session?.email)
-        throw new Error("Not authenticated. Please register or log in.");
+      if (!session?.email) throw new Error("Not authenticated. Please register or log in.");
 
       const users = read(KEYS.USERS);
       const user = users[session.email];
-      if (!user)
-        throw new Error("User record not found. Please register again.");
+      if (!user) throw new Error("User record not found. Please register again.");
 
       // Prefill from any existing entrepreneurProfile
       const profile = user.entrepreneurProfile || {};
-
-      const fetchedTeamSizeNumber =
-        typeof profile.team_size === "number" ? profile.team_size : null;
+      const fetchedTeamSizeNumber = typeof profile.team_size === "number" ? profile.team_size : null;
 
       setForm((prev) => ({
         ...prev,
@@ -234,13 +229,11 @@ export default function EntrepreneurProfile() {
         industry: profile.industry || "",
         stage: profile.stage || "",
         pitch_deck_url: profile.pitch_deck_url || "",
+        pitch_deck_path: profile.pitch_deck_path || "",
         demo_url: profile.demo_url || "",
-        team_size:
-          pickTeamSizeOption(fetchedTeamSizeNumber) || profile.team_size || "",
+        team_size: pickTeamSizeOption(fetchedTeamSizeNumber) || profile.team_size || "",
         funding_needed: numberOrEmpty(profile.funding_needed),
-        financials: {
-          funding_goal: numberOrEmpty(profile.financials?.funding_goal),
-        },
+        financials: { funding_goal: numberOrEmpty(profile.financials?.funding_goal) },
         revenue_model: profile.revenue_model || "",
         competitive_advantages: arrayToCSV(profile.competitive_advantages),
         current_revenue: numberOrEmpty(profile.current_revenue),
@@ -250,8 +243,7 @@ export default function EntrepreneurProfile() {
         addressable_market: numberOrEmpty(profile.addressable_market),
         intellectual_property:
           (profile.intellectual_property &&
-            (profile.intellectual_property.notes ||
-              JSON.stringify(profile.intellectual_property))) ||
+            (profile.intellectual_property.notes || JSON.stringify(profile.intellectual_property))) ||
           "",
         target_market: profile.target_market || "",
         business_model: profile.business_model || "",
@@ -267,6 +259,11 @@ export default function EntrepreneurProfile() {
         technical_founders_pct: numberOrEmpty(profile.technical_founders_pct),
         previous_exits_pct: numberOrEmpty(profile.previous_exits_pct),
       }));
+
+      if (profile.pitch_deck_url) {
+        const n = profile.pitch_deck_url.split("/").pop();
+        setUploadedDeckName(decodeURIComponent(n || "Pitch deck"));
+      }
     } catch (e) {
       console.error("Boot error:", e);
       setError(e.message || "Failed to load profile.");
@@ -274,6 +271,38 @@ export default function EntrepreneurProfile() {
       setBooting(false);
     }
   }, []);
+
+  // ---------- upload handler (Supabase Storage public bucket) ----------
+  const handleDeckSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setDeckError(null);
+    setUploadingDeck(true);
+    try {
+      const { publicUrl, path } = await uploadUserDocument({
+        file,
+        userId,
+        allowedTypes: [
+          "application/pdf",
+          "application/vnd.ms-powerpoint",
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ],
+        maxBytes: 50 * 1024 * 1024,
+      });
+
+      setForm((prev) => ({ ...prev, pitch_deck_url: publicUrl, pitch_deck_path: path }));
+      setUploadedDeckName(file.name);
+      setUploadedDeckSize(file.size || 0);
+    } catch (err) {
+      console.error(err);
+      setDeckError(err.message || "Upload failed");
+    } finally {
+      setUploadingDeck(false);
+      // allow re-selecting same file
+      e.target.value = "";
+    }
+  };
 
   // ---------- submit (save to sessionStorage only) ----------
   const handleSubmit = async (e) => {
@@ -300,7 +329,8 @@ export default function EntrepreneurProfile() {
 
         // enterprise_profile / description + links + tags
         problem_solved: form.problem_solved,
-        pitch_deck_url: form.pitch_deck_url,
+        pitch_deck_url: form.pitch_deck_url || null,
+        pitch_deck_path: form.pitch_deck_path || null,
         demo_url: form.demo_url,
         headline_tags: csvToArray(form.headline_tags),
         revenue_model: form.revenue_model,
@@ -310,9 +340,7 @@ export default function EntrepreneurProfile() {
         customer_count: toNumber(form.customer_count),
         market_size: toNumber(form.market_size),
         addressable_market: toNumber(form.addressable_market),
-        intellectual_property: form.intellectual_property
-          ? { notes: form.intellectual_property }
-          : undefined,
+        intellectual_property: form.intellectual_property ? { notes: form.intellectual_property } : undefined,
 
         // key metrics / market / team
         team_size: teamSizeToInt(form.team_size),
@@ -326,9 +354,7 @@ export default function EntrepreneurProfile() {
 
         // NEW numeric & list fields
         mrr_usd: toNumber(form.mrr_usd),
-        arr_usd:
-          toNumber(form.arr_usd) ??
-          (toNumber(form.mrr_usd) ? Number(form.mrr_usd) * 12 : null),
+        arr_usd: toNumber(form.arr_usd) ?? (toNumber(form.mrr_usd) ? Number(form.mrr_usd) * 12 : null),
         current_valuation_usd: toNumber(form.current_valuation_usd),
         current_investors: csvToArray(form.current_investors),
         technical_founders_pct: toPct(form.technical_founders_pct),
@@ -370,30 +396,18 @@ export default function EntrepreneurProfile() {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">
-            Entrepreneur Profile (Simulation)
-          </CardTitle>
+          <CardTitle className="text-2xl font-bold">Entrepreneur Profile (Simulation)</CardTitle>
           <p className="text-sm text-gray-500">
-            This saves locally to sessionStorage — no backend involved.
+            Profile saves locally to sessionStorage. Pitch deck uploads to a public Supabase bucket.
           </p>
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              name="name"
-              placeholder="Company Name"
-              value={form.name}
-              onChange={handleChange}
-            />
+            <Input name="name" placeholder="Company Name" value={form.name} onChange={handleChange} />
 
-            <select
-              name="industry"
-              value={form.industry}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
+            <select name="industry" value={form.industry} onChange={handleChange} className="w-full border rounded-md p-2">
               <option value="">Select Industry</option>
               {industryOptions.map((opt) => (
                 <option key={opt} value={opt}>
@@ -402,12 +416,7 @@ export default function EntrepreneurProfile() {
               ))}
             </select>
 
-            <select
-              name="stage"
-              value={form.stage}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
+            <select name="stage" value={form.stage} onChange={handleChange} className="w-full border rounded-md p-2">
               <option value="">Select Stage</option>
               {stageOptions.map((opt) => (
                 <option key={opt} value={opt}>
@@ -416,19 +425,9 @@ export default function EntrepreneurProfile() {
               ))}
             </select>
 
-            <LocationAutocomplete
-              value={form.location}
-              onChange={(value) =>
-                setForm((prev) => ({ ...prev, location: value }))
-              }
-            />
+            <LocationAutocomplete value={form.location} onChange={(value) => setForm((prev) => ({ ...prev, location: value }))} />
 
-            <select
-              name="team_size"
-              value={form.team_size}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
+            <select name="team_size" value={form.team_size} onChange={handleChange} className="w-full border rounded-md p-2">
               <option value="">Select Team Size</option>
               {teamSizeOptions.map((opt) => (
                 <option key={opt} value={opt}>
@@ -437,26 +436,128 @@ export default function EntrepreneurProfile() {
               ))}
             </select>
 
-            <Input
-              name="funding_needed"
-              placeholder="Funding Needed (USD)"
-              type="number"
-              value={form.funding_needed}
-              onChange={handleChange}
-            />
+            <Input name="funding_needed" placeholder="Funding Needed (USD)" type="number" value={form.funding_needed} onChange={handleChange} />
 
-            <Input
-              name="pitch_deck_url"
-              placeholder="Pitch Deck URL"
-              value={form.pitch_deck_url}
-              onChange={handleChange}
-            />
-            <Input
-              name="demo_url"
-              placeholder="Demo URL"
-              value={form.demo_url}
-              onChange={handleChange}
-            />
+            {/* Pitch deck upload ONLY (no manual URL) */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-800">Pitch Deck</label>
+
+              {/* Dropzone */}
+              <div
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ")
+                    e.currentTarget.querySelector("input[type=file]")?.click();
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragActive(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragActive(false);
+                }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragActive(false);
+                  const file = e.dataTransfer?.files?.[0];
+                  if (file) {
+                    const fakeEvt = { target: { files: [file], value: "" } };
+                    await handleDeckSelect(fakeEvt);
+                  }
+                }}
+                className={[
+                  "relative w-full rounded-2xl border-2 border-dashed transition-all",
+                  "p-6 flex flex-col items-center justify-center text-center",
+                  "bg-white/50 hover:bg-gray-50",
+                  dragActive ? "border-blue-500/70 ring-4 ring-blue-100" : "border-gray-300",
+                ].join(" ")}
+              >
+                <UploadCloud className="h-8 w-8 mb-2" aria-hidden />
+                <p className="text-sm text-gray-700">
+                  Drag & drop your <span className="font-medium">PDF/PPT/PPTX</span> here, or{" "}
+                  <button
+                    type="button"
+                    onClick={(ev) =>
+                      ev.currentTarget.parentElement?.parentElement?.querySelector("input[type=file]")?.click()
+                    }
+                    className="text-blue-600 underline underline-offset-2 hover:text-blue-700"
+                  >
+                    browse
+                  </button>
+                  .
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Max 50 MB. Stored in Supabase.</p>
+
+                <input
+                  type="file"
+                  accept=".pdf,.ppt,.pptx"
+                  onChange={handleDeckSelect}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  title="Upload pitch deck"
+                  aria-label="Upload pitch deck"
+                />
+              </div>
+
+              {/* Status / Errors */}
+              {deckError && (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <X className="h-4 w-4" />
+                  <span>{deckError}</span>
+                </div>
+              )}
+
+              {/* Progress (indeterminate while uploading) */}
+              {uploadingDeck && (
+                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full w-1/3 bg-gray-800 animate-[pulse_1.2s_infinite]" />
+                </div>
+              )}
+
+              {/* Uploaded file chip */}
+              {form.pitch_deck_url && !uploadingDeck && (
+                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <FileText className="h-4 w-4 text-gray-700 shrink-0" />
+                    <a
+                      href={form.pitch_deck_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-sm text-blue-700 hover:underline"
+                      title={uploadedDeckName}
+                    >
+                      {uploadedDeckName || "pitch-deck"}
+                    </a>
+                    <span className="text-xs text-gray-500 shrink-0">• {formatBytes(uploadedDeckSize)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm((p) => ({ ...p, pitch_deck_url: "", pitch_deck_path: "" }));
+                      setUploadedDeckName("");
+                      setUploadedDeckSize(0);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100"
+                    title="Remove file"
+                  >
+                    <X className="h-3 w-3" />
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <Input name="demo_url" placeholder="Demo URL" value={form.demo_url} onChange={handleChange} />
 
             <Input
               name="funding_goal"
@@ -466,20 +567,12 @@ export default function EntrepreneurProfile() {
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  financials: {
-                    ...prev.financials,
-                    funding_goal: e.target.value,
-                  },
+                  financials: { ...prev.financials, funding_goal: e.target.value },
                 }))
               }
             />
 
-            <select
-              name="target_market"
-              value={form.target_market}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
+            <select name="target_market" value={form.target_market} onChange={handleChange} className="w-full border rounded-md p-2">
               <option value="">Select Target Market</option>
               {targetMarketOptions.map((opt) => (
                 <option key={opt} value={opt}>
@@ -523,12 +616,7 @@ export default function EntrepreneurProfile() {
 
             {/* key metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Input
-                name="revenue_model"
-                placeholder="Revenue Model"
-                value={form.revenue_model}
-                onChange={handleChange}
-              />
+              <Input name="revenue_model" placeholder="Revenue Model" value={form.revenue_model} onChange={handleChange} />
               <Input
                 name="competitive_advantages"
                 placeholder="Competitive advantages (comma-separated)"
@@ -550,20 +638,8 @@ export default function EntrepreneurProfile() {
                 value={form.monthly_growth_rate}
                 onChange={handleChange}
               />
-              <Input
-                name="customer_count"
-                type="number"
-                placeholder="Customer count"
-                value={form.customer_count}
-                onChange={handleChange}
-              />
-              <Input
-                name="market_size"
-                type="number"
-                placeholder="Market size (USD)"
-                value={form.market_size}
-                onChange={handleChange}
-              />
+              <Input name="customer_count" type="number" placeholder="Customer count" value={form.customer_count} onChange={handleChange} />
+              <Input name="market_size" type="number" placeholder="Market size (USD)" value={form.market_size} onChange={handleChange} />
               <Input
                 name="addressable_market"
                 type="number"
@@ -571,20 +647,8 @@ export default function EntrepreneurProfile() {
                 value={form.addressable_market}
                 onChange={handleChange}
               />
-              <Input
-                name="mrr_usd"
-                type="number"
-                placeholder="MRR (USD)"
-                value={form.mrr_usd}
-                onChange={handleChange}
-              />
-              <Input
-                name="arr_usd"
-                type="number"
-                placeholder="ARR (USD)"
-                value={form.arr_usd}
-                onChange={handleChange}
-              />
+              <Input name="mrr_usd" type="number" placeholder="MRR (USD)" value={form.mrr_usd} onChange={handleChange} />
+              <Input name="arr_usd" type="number" placeholder="ARR (USD)" value={form.arr_usd} onChange={handleChange} />
               <Input
                 name="current_valuation_usd"
                 type="number"
@@ -629,24 +693,17 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
             <div className="flex justify-between gap-4">
-              <Button 
-                type="button"
-                onClick={() => navigate("/dashboard/entrepreneur")}
-                classname="shadow hover:bg-white-100"
-              >
+              <Button type="button" onClick={() => navigate("/dashboard/entrepreneur")} className="shadow hover:bg-white-100">
                 Complete later
               </Button>
               <div className="flex-1 flex justify-center">
                 <Button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || uploadingDeck}
                   className="px-8 py-3 bg-white w-100 text-black border border-gray-300 rounded-md shadow hover:bg-gray-100"
+                  title={uploadingDeck ? "Please wait for the upload to finish" : undefined}
                 >
-                  {saving ? (
-                    <Loader2 className="animate-spin h-5 w-5" />
-                  ) : (
-                    "Submit"
-                  )}
+                  {saving ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
                 </Button>
               </div>
             </div>

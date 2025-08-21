@@ -60,7 +60,7 @@ function HeaderBar({
       {/* Greeting */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">
-          Welcome back, {entrepreneurName}
+          Welcome back, entrepreneur
         </h1>
         <p className="text-sm text-gray-500">
           Your Ideas and Associate Partners dashboard
@@ -87,14 +87,10 @@ function HeaderBar({
         {/* Messages Dropdown */}
         {chatBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">
-              Recent Messages
-            </div>
+            <div className="p-4 border-b font-semibold text-gray-700">Recent Messages</div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {messages.length === 0 ? (
-                <li className="p-4 text-gray-500 text-sm text-center">
-                  No messages
-                </li>
+                <li className="p-4 text-gray-500 text-sm text-center">No messages</li>
               ) : (
                 messages.map((msg, index) => (
                   <li
@@ -133,14 +129,10 @@ function HeaderBar({
         {/* Notification Dropdown */}
         {notificationBarOpen && (
           <div className="absolute right-20 top-16 w-80 bg-white border rounded-lg shadow-lg z-50">
-            <div className="p-4 border-b font-semibold text-gray-700">
-              Notifications
-            </div>
+            <div className="p-4 border-b font-semibold text-gray-700">Notifications</div>
             <ul className="max-h-64 overflow-y-auto divide-y">
               {notifications.length === 0 ? (
-                <li className="p-4 text-gray-500 text-sm text-center">
-                  No notifications
-                </li>
+                <li className="p-4 text-gray-500 text-sm text-center">No notifications</li>
               ) : (
                 notifications.map((notif, index) => (
                   <li key={index} className="p-4 hover:bg-gray-50 text-sm">
@@ -163,13 +155,9 @@ function HeaderBar({
           }}
         >
           <img
-            src={profileImage || "https://i.pravatar.cc/150?img=31"}
+            src={profileImage}
             alt="User avatar"
             className="h-10 w-10 rounded-full object-cover border border-gray-300"
-            onError={(e) => {
-              e.target.onerror = null;
-              e.target.src = "https://i.pravatar.cc/150?img=31";
-            }}
           />
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border z-50">

@@ -18,7 +18,7 @@ function MainUserDashboard({ role }) {
   switch (effectiveRole) {
     case "investor":
       return <InvestorsDashboard />;
-    case "entrepreneur":
+    case "startup":
       return <EntrepreneurDashboard />;
     default:
       return (

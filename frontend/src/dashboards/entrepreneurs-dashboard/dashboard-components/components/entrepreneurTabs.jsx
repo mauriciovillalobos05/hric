@@ -55,18 +55,6 @@ const ENTREPRENEUR_TABS = [
       compareIds,
     }) => (
       <div className="flex flex-col lg:flex-row gap-6 min-h-0">
-        {/* LEFT: Filter Panel */}
-        <div className="w-full lg:w-1/4 space-y-4 lg:sticky lg:top-6">
-          <FilterPanel filters={filters} onFilterChange={onFilterChange} />
-          <Button
-            variant="outline"
-            className="w-full flex items-center justify-center"
-            onClick={onResetFilters}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reset Filters
-          </Button>
-        </div>
 
         {/* RIGHT: Results */}
         <div className="w-full lg:w-3/4 min-h-0">

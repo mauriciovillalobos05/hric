@@ -24,6 +24,7 @@ investor_bp = Blueprint("investor", __name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+LOCAL_API_BASE_URL = os.getenv("LOCAL_API_BASE_URL", None)
 
 
 # --------------------- Auth helpers ---------------------
@@ -799,6 +800,18 @@ def update_investor_profile():
             _sync_geo_focus(prof.id, data.get("geographic_focus"))
 
         db.session.commit()
+
+        try:
+            if LOCAL_API_BASE_URL:
+                requests.post(
+                    f"{LOCAL_API_BASE_URL}/api/matching/recompute",
+                    json={"investor_enterprise_id": str(enterprise_id), "force": True},
+                    headers={"Authorization": request.headers.get("Authorization", "")},
+                    timeout=5,
+                )
+        except Exception:
+            pass
+
         return jsonify({"message": "Investor profile updated"}), 200
     except Exception as e:
         db.session.rollback()

@@ -1,52 +1,76 @@
-import React from 'react';
+// =============================================
+// FILE: components/Dashboard.jsx 
+// =============================================
+import React from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, ScatterChart, Scatter
-} from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Users, DollarSign, Award } from 'lucide-react';
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  ScatterChart,
+  Scatter,
+} from "recharts";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TrendingUp, Users, DollarSign, Award } from "lucide-react";
 
-const Dashboard = ({ investors, filteredInvestors }) => {
+const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7c7c", "#8dd1e1", "#d084d0"]; 
+
+function num(x) { return Number.isFinite(Number(x)) ? Number(x) : 0; }
+
+// Parse first number from a "$X - $Y" string; return value in *millions* for display.
+function toM(s) {
+  const first = String(s || "").split(" - ")[0] || "";
+  const raw = parseFloat(first.replace(/[$,]/g, ""));
+  if (!Number.isFinite(raw)) return 0;
+  const hasM = /m\b/i.test(first);
+  return hasM ? raw : raw / 1_000_000;
+}
+
+const Dashboard = ({ investors = [], filteredInvestors = [] }) => {
   const totalInvestors = investors.length;
   const filteredCount = filteredInvestors.length;
 
-  const avgCheckSize = filteredInvestors.reduce((sum, inv) => {
-    const size = parseFloat(inv.checkSize?.split(' - ')[0]?.replace(/[$M]/g, '')) || 0;
-    return sum + size;
-  }, 0) / (filteredCount || 1);
+  const avgCheckSize =
+    filteredInvestors.reduce((sum, inv) => sum + toM(inv.checkSize), 0) /
+    (filteredCount || 1);
+  const avgPortfolioSize =
+    filteredInvestors.reduce((sum, inv) => sum + num(inv.portfolioSize), 0) /
+    (filteredCount || 1);
+  const avgFollowOnRate =
+    filteredInvestors.reduce((sum, inv) => sum + num(inv.followOnRate), 0) /
+    (filteredCount || 1);
 
-  const avgPortfolioSize = filteredInvestors.reduce((sum, inv) => sum + (inv.portfolioSize || 0), 0) / (filteredCount || 1);
-
-  const avgFollowOnRate = filteredInvestors.reduce((sum, inv) => sum + (inv.followOnRate || 0), 0) / (filteredCount || 1);
-
-  // Stage preferences across filtered investors
   const stageDistribution = filteredInvestors.reduce((acc, investor) => {
-    (investor.stage || []).forEach(stage => {
+    (investor.stage || []).forEach((stage) => {
       acc[stage] = (acc[stage] || 0) + 1;
     });
     return acc;
   }, {});
   const stageData = Object.entries(stageDistribution).map(([stage, count]) => ({ stage, count }));
 
-  // Industry distribution
   const industryDistribution = filteredInvestors.reduce((acc, investor) => {
-    (investor.industries || []).forEach(ind => {
+    (investor.industries || []).forEach((ind) => {
       acc[ind] = (acc[ind] || 0) + 1;
     });
     return acc;
   }, {});
-  const industryData = Object.entries(industryDistribution).map(([industry, count]) => ({ industry, count }))
+
+  const industryData = Object.entries(industryDistribution)
+    .map(([industry, count]) => ({ industry, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
 
-  // Deal Time vs Check Size
-  const scatterData = filteredInvestors.map(inv => ({
-    dealTime: parseInt(inv.avgDealTime?.split('-')[0]) || 0,
-    checkSize: parseFloat(inv.checkSize?.split(' - ')[0]?.replace(/[$M]/g, '')) || 0,
-    name: inv.name
+  const scatterData = filteredInvestors.map((inv) => ({
+    dealTime: parseInt(String(inv.avgDealTime || "").split("-")[0]) || 0,
+    checkSize: toM(inv.checkSize),
+    name: inv.name || "—",
   }));
-
-  const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#d084d0'];
 
   return (
     <div className="space-y-6">
@@ -107,9 +131,10 @@ const Dashboard = ({ investors, filteredInvestors }) => {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Stage Distribution */}
         <Card>
-          <CardHeader><CardTitle>Stage Preferences</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Stage Preferences</CardTitle>
+          </CardHeader>
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer>
@@ -125,9 +150,10 @@ const Dashboard = ({ investors, filteredInvestors }) => {
           </CardContent>
         </Card>
 
-        {/* Industry Focus */}
         <Card>
-          <CardHeader><CardTitle>Top Industries</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Top Industries</CardTitle>
+          </CardHeader>
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer>
@@ -144,15 +170,16 @@ const Dashboard = ({ investors, filteredInvestors }) => {
           </CardContent>
         </Card>
 
-        {/* Deal Time vs Check Size */}
         <Card>
-          <CardHeader><CardTitle>Deal Time vs Check Size</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Deal Time vs Check Size</CardTitle>
+          </CardHeader>
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer>
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="dealTime" name="Deal Time (months)" />
+                  <XAxis dataKey="dealTime" name="Deal Time (days)" />
                   <YAxis dataKey="checkSize" name="Check Size ($M)" />
                   <Tooltip />
                   <Scatter dataKey="checkSize" data={scatterData} fill="#82ca9d" />

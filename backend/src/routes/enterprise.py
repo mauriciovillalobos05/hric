@@ -435,7 +435,18 @@ def update_enterprise_core_data(enterprise_id):
                 setattr(sp, f, data[f])
 
         db.session.commit()
+        try:
+            if LOCAL_API_BASE_URL:
+                requests.post(
+                    f"{LOCAL_API_BASE_URL}/api/matching/recompute",
+                    json={"enterprise_id": str(enterprise_id), "force": True},
+                    headers={"Authorization": request.headers.get("Authorization", "")},
+                    timeout=5,   # keep it snappy
+                )
+        except Exception:
+            pass  # don't fail the main request
         return jsonify({"message": "Enterprise updated successfully", "enterprise": _enterprise_detail(ent)}), 200
+    
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
@@ -473,6 +484,18 @@ def update_fundraising_status():
     if new_status and new_status in allowed:
         owned.status = new_status
         db.session.commit()
+
+        # Fire-and-forget recompute
+        try:
+            if LOCAL_API_BASE_URL:
+                requests.post(
+                    f"{LOCAL_API_BASE_URL}/api/matching/recompute",
+                    json={"enterprise_id": str(owned.id), "force": True},
+                    headers={"Authorization": request.headers.get("Authorization", "")},
+                    timeout=5,
+                )
+        except Exception:
+            pass
         return jsonify({"message": "Status updated", "enterprise": _enterprise_detail(owned)}), 200
     return jsonify({"error": f"Provide valid 'status' in {sorted(allowed)}"}), 400
 

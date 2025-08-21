@@ -50,14 +50,13 @@ export default function HashSessionHandler() {
           } else {
             // Determine if the user is new (i.e., hasn't onboarded yet)
             const { data: dbUser, error: fetchError } = await supabase
-              .from("user")
-              .select("role")
+              .from("enterprise")
+              .select("enterprise_type")
               .eq("id", user.id)
               .maybeSingle();
 
-            const userMetadataRole = user.user_metadata?.role;
 
-            if (!dbUser?.role && userMetadataRole) {
+            if (!dbUser?.enterprise_type) {
               console.log(
                 "Detected new user (no role in DB yet). Routing to onboarding."
               );
@@ -67,7 +66,7 @@ export default function HashSessionHandler() {
               navigate(
                 dbUser?.role === "investor"
                   ? "/dashboard/investor"
-                  : dbUser?.role === "entrepreneur"
+                  : dbUser?.role === "startup"
                   ? "/dashboard/entrepreneur"
                   : "/dashboard/user"
               );

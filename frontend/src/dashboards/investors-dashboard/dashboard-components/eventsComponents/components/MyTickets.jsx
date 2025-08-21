@@ -184,7 +184,7 @@ const MyTickets = ({ tickets = [], events = [], currentInvestorId = "investor-de
                   </div>
                   <p className="text-gray-600 text-sm truncate mt-1">{t.event.date} • {t.event.time} • {t.event.venue}</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                    <span className="px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 font-medium">{t.tier} tier</span>
+                    <span className="px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 font-medium">{t.tier.charAt(0).toUpperCase() + t.tier.slice(1)} Tier</span>
                     <span className="px-2 py-1 rounded-md bg-gray-50 text-gray-700">Code: <span className="font-mono">{t.code}</span></span>
                     <span className="px-2 py-1 rounded-md bg-gray-50 text-gray-700">Purchased: {new Date(t.purchaseDate).toLocaleDateString()}</span>
                   </div>

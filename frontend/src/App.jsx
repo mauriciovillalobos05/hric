@@ -1,6 +1,6 @@
 import React from "react";
 import { Routes, Route } from "react-router-dom";
-import HomePage from "./dashboards/HomePage";
+import HomePage from "./dashboards/HomePage.jsx";
 import MainUserDashboard from "./dashboards/MainUserDashboard";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";
 import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard";

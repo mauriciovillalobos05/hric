@@ -1,4 +1,7 @@
 # src/main.py
+import eventlet
+eventlet.monkey_patch()
+
 import os
 from dotenv import load_dotenv
 from flask import Flask, send_from_directory
@@ -32,14 +35,18 @@ def create_app():
     app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'hric-platform-secret-key-2025')
 
-    # HTTP CORS (REST endpoints)
-    CORS(app, resources={r"/*": {"origins": [
-        "https://hric-unh3.vercel.app",
-        "http://localhost:3000",
-        "*"
-    ]}})
+    # ===== CORS / Socket.IO allow only client origins (NOT the backend URL) =====
+    # Configure via env so you don’t edit code later:
+    # ALLOWED_ORIGINS="https://hric-unh3.vercel.app,http://localhost:3000"
+    allowed_origins = [o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "https://hric-unh3.vercel.app,http://localhost:5173"
+    ).split(",") if o.strip()]
 
-    # DB URL (normalize postgres:// → postgresql:// for SQLAlchemy)
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+    socketio.init_app(app, cors_allowed_origins=allowed_origins)
+
+    # ===== DB, uploads, blueprints… (unchanged) =====
     db_url = os.getenv('DATABASE_URL')
     if not db_url:
         raise RuntimeError("DATABASE_URL not found in environment variables.")

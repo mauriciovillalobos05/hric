@@ -2,7 +2,7 @@ import React from "react";
 import { Routes, Route } from "react-router-dom";
 
 // DASHBOARDS (match exact filenames in repo)
-import HomePage from "./dashboards/homePage.jsx";
+import HomePage from "./dashboards/HomePage.jsx";
 import MainUserDashboard from "./dashboards/mainUserDashboard.jsx";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard.jsx";
 import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard.jsx";

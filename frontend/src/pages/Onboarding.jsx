@@ -7,31 +7,31 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import LocationAutocomplete from "./cmpnnts/Location";
-import { AuthBridge } from "@/helpers/authBridge";
+import { fetchUserAndRole } from "@/helpers/role";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-const USE_SUPABASE_ONBOARDING = false; // keep on, but read/write session too
-
-const API_BASE = USE_SUPABASE_ONBOARDING
-  ? (import.meta.env.VITE_API_URL?.replace(/\/$/, "") || `${window.location.protocol}//${window.location.hostname}:5173`)
-  : "";
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 export default function Onboarding() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [file, setFile] = useState(null);
   const [error, setError] = useState(null);
+
   const [plans, setPlans] = useState([]);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
+
+  // Only columns that exist in public.users
   const [form, setForm] = useState({
     first_name: "",
     last_name: "",
     phone: "",
-    location: "",
+    location: "", // ← NEW
     linkedin_url: "",
     twitter_url: "",
     website_url: "",
@@ -41,65 +41,26 @@ export default function Onboarding() {
     role: "",
   });
 
-  // Prefill from Supabase *or* session
+  // Prefill from Supabase + load plans
   useEffect(() => {
     (async () => {
       try {
-        let meta = {};
-        if (USE_SUPABASE_ONBOARDING) {
-          const {
-            data: { user },
-            error,
-          } = await supabase.auth.getUser();
-          if (user && !error) meta = user.user_metadata || {};
-        }
-        const sessionUser = AuthBridge.getSessionUser();
-        const role =
-          meta.role ||
-          sessionStorage.getItem("registrationRole") ||
-          sessionUser.role ||
-          "entrepreneur";
+        const { user, role } = await fetchUserAndRole();
+        if (!user) throw new Error("User not authenticated");
+
         setForm((prev) => ({
           ...prev,
           role,
-          first_name: meta.first_name || sessionUser.firstName || "",
-          last_name: meta.last_name || sessionUser.lastName || "",
-          phone: meta.phone || sessionUser.phone || "",
-          location: meta.location || sessionUser.location || "",
+          first_name: user.user_metadata?.first_name || "",
+          last_name: user.user_metadata?.last_name || "",
+          phone: user.user_metadata?.phone || "",
+          location: user.user_metadata?.location || "",
         }));
 
-        // Plans: try API, else mock
-        try {
-          const res = await fetch(`${API_BASE}/api/subscriptions/plans`);
-          const json = await res.json();
-          const activePlans = Array.isArray(json.plans) ? json.plans : [];
-          setPlans(activePlans);
-        } catch {
-          setPlans([
-            {
-              id: "p1",
-              name: "Starter",
-              monthly_price: 0,
-              description: "Free",
-              plan_key:
-                role === "investor"
-                  ? "investor_starter"
-                  : "entrepreneur_starter",
-              features: ["popular"],
-            },
-            {
-              id: "p2",
-              name: "Pro",
-              monthly_price: 49,
-              description: "Pro features",
-              plan_key:
-                role === "investor" ? "investor_pro" : "entrepreneur_pro",
-              features: ["priority support"],
-            },
-          ]);
-        }
-
-        sessionStorage.removeItem("registrationRole");
+        const res = await fetch(`${API_BASE}/api/subscriptions/plans`);
+        const json = await res.json();
+        const activePlans = Array.isArray(json.plans) ? json.plans : [];
+        setPlans(activePlans);
       } catch (e) {
         console.error(e);
         setError(e.message || "Failed to load user");
@@ -125,114 +86,155 @@ export default function Onboarding() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
     try {
-      // Write-through: update session user profile regardless
-      const email = AuthBridge.getCurrentEmail();
-      AuthBridge.setSessionUser(email, {
-        firstName: form.first_name,
-        lastName: form.last_name,
-        phone: form.phone,
-        location: form.location,
-        role: form.role,
-        profile: {
-          linkedin_url: form.linkedin_url,
-          twitter_url: form.twitter_url,
-          website_url: form.website_url,
-          bio: form.bio,
-          timezone: form.timezone,
-          language_preference: form.language_preference,
-          plan_key: selectedPlanKey,
-        },
-        // Store role-based profile so dashboards can hydrate immediately
-        ...(form.role === "investor"
-          ? {
-              investorProfile: {
-                name: `${form.first_name} ${form.last_name}`.trim(),
-              },
-            }
-          : {}),
-        ...(form.role !== "investor"
-          ? {
-              entrepreneurProfile: {
-                name: `${form.first_name} ${form.last_name}`.trim(),
-              },
-            }
-          : {}),
-      });
-      AuthBridge.setAuthSession(email, {
-        provider:
-          AuthBridge.ssRead(AuthBridge.STORAGE_KEYS.SESSION)?.provider ||
-          "local",
-      });
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
 
-      if (USE_SUPABASE_ONBOARDING) {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const accessToken = session?.access_token;
-        if (user && accessToken) {
-          // optional metadata sync
-          await supabase.auth
-            .updateUser({
-              data: {
-                role: form.role,
-                plan: selectedPlanKey,
-                location: form.location || null,
-              },
-            })
-            .catch(() => {});
-          // optional profile API call
-          await fetch(`${API_BASE}/api/auth/profile`, {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              first_name: (form.first_name || "").trim(),
-              last_name: (form.last_name || "").trim(),
-              phone: (form.phone || "").trim(),
-              location: (form.location || "").trim(),
-              linkedin_url: (form.linkedin_url || "").trim(),
-              twitter_url: (form.twitter_url || "").trim(),
-              website_url: (form.website_url || "").trim(),
-              bio: (form.bio || "").trim(),
-              timezone: form.timezone || "UTC",
-              language_preference: form.language_preference || "en",
-              profile_image_url: null,
-            }),
-          }).catch(() => {});
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("User session expired");
 
-          // optional checkout; if not available, just navigate
-          try {
-            const checkoutRes = await fetch(
-              `${API_BASE}/api/subscriptions/checkout`,
-              {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-                body: JSON.stringify({
-                  plan_key: selectedPlanKey,
-                  billing_interval: "monthly",
-                }),
-              }
-            );
-            const resp = await checkoutRes.json().catch(() => ({}));
-            if (checkoutRes.ok && (resp.checkout_url || resp.redirect_url)) {
-              window.location.href = resp.checkout_url || resp.redirect_url;
-              return;
-            }
-          } catch {}
-        }
+      if (!selectedPlanKey) {
+        throw new Error("Please choose a plan to continue.");
       }
 
-      // Navigate by role
+      // Optional avatar upload
+      let profileImagePath = null;
+      if (file) {
+        const ext = file.name.split(".").pop();
+        const filename = `profile.${ext}`;
+        const filepath = `${user.id}/${filename}`;
+        const { error: uploadError } = await supabase.storage
+          .from("profile-images")
+          .upload(filepath, file, { upsert: true });
+        if (uploadError) throw uploadError;
+        profileImagePath = filepath;
+      }
+
+      // Persist role/plan in Supabase metadata (client convenience)
+      const { error: metadataError } = await supabase.auth.updateUser({
+        data: {
+          role: form.role,
+          plan: selectedPlanKey,
+          location: form.location || null,
+        },
+      });
+      if (metadataError) throw metadataError;
+
+      // Build clean payload with trimming
+      const payload = {
+        first_name: (form.first_name || "").trim(),
+        last_name: (form.last_name || "").trim(),
+        phone: (form.phone || "").trim(),
+        location: (form.location || "").trim(), // ← NEW
+        linkedin_url: (form.linkedin_url || "").trim(),
+        twitter_url: (form.twitter_url || "").trim(),
+        website_url: (form.website_url || "").trim(),
+        bio: (form.bio || "").trim(),
+        timezone: form.timezone || "UTC",
+        language_preference: form.language_preference || "en",
+        profile_image_url: profileImagePath, // may be null if not uploaded
+      };
+
+      // Update users table
+      const profileRes = await fetch(`${API_BASE}/api/auth/profile`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!profileRes.ok) {
+        const t = await profileRes.text();
+        throw new Error(t || "Failed to save profile");
+      }
+
+      // INSERT enterprise + profile block here
+      const fullName = `${(form.first_name || "").trim()} ${(
+        form.last_name || ""
+      ).trim()}`.trim();
+      const enterprise_type = form.role === "investor" ? "investor" : "startup";
+
+      // 1) enterprise
+      const { data: ent, error: entErr } = await supabase
+        .from("enterprise")
+        .insert({
+          name: fullName || user.email,
+          enterprise_type,
+          location: form.location || null,
+          status: "active",
+        })
+        .select("id")
+        .single();
+      if (entErr) throw entErr;
+
+      // 2) enterprise_user link
+      const { error: linkErr } = await supabase.from("enterprise_user").insert({
+        enterprise_id: ent.id,
+        user_id: user.id,
+        role: "owner",
+        is_active: true,
+      });
+      if (linkErr) throw linkErr;
+
+      // 3) role-specific profile
+      if (enterprise_type === "investor") {
+        const { error } = await supabase.from("investor_profile").insert({
+          enterprise_id: ent.id,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("startup_profile").insert({
+          enterprise_id: ent.id,
+        });
+        if (error) throw error;
+      }
+
+      // 4) convenience: store enterprise_id back to auth metadata
+      await supabase.auth.updateUser({
+        data: {
+          role: enterprise_type === "investor" ? "investor" : "entrepreneur",
+          enterprise_id: ent.id,
+        },
+      });
+
+      // Create Stripe checkout session (or redirect for free plans)
+      const checkoutRes = await fetch(
+        `${API_BASE}/api/subscriptions/checkout`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            plan_key: selectedPlanKey,
+            billing_interval: "monthly",
+          }),
+        }
+      );
+
+      const resp = await checkoutRes.json().catch(() => ({}));
+      if (!checkoutRes.ok) {
+        throw new Error(resp.error || "Failed to create Stripe session");
+      }
+
+      if (resp.checkout_url) {
+        window.location.href = resp.checkout_url;
+        return;
+      }
+      if (resp.redirect_url) {
+        window.location.href = resp.redirect_url;
+        return;
+      }
+
       navigate(
         form.role === "investor"
           ? "/dashboard/investor"
@@ -262,7 +264,7 @@ export default function Onboarding() {
             Complete Your Profile
           </CardTitle>
           <p className="text-sm text-blue-700 mt-1">
-            You are signing up as: <strong>{form.role}</strong>
+            You are signing up as: <strong>{form.role === "startup" ? "entrepreneur" : form.role}</strong>
           </p>
         </CardHeader>
         <CardContent>

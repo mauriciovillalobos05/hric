@@ -8,18 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-import { AuthBridge } from "@/helpers/authBridge";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-const USE_SUPABASE_SIGNUP = false; // keep enabled, but always persist to sessionStorage
-
-const API_BASE = USE_SUPABASE_SIGNUP
-  ? (import.meta.env.VITE_API_URL?.replace(/\/$/, "") || `${window.location.protocol}//${window.location.hostname}:5173`)
-  : "";
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -38,6 +34,7 @@ export default function Register() {
 
   async function seedRegisterComplete({ supabase_id }) {
     try {
+      // NOTE: backend route is /api/register-complete (not /api/auth/…)
       const res = await fetch(`${API_BASE}/api/auth/register-complete`, {
         method: "POST",
         headers: {
@@ -50,48 +47,22 @@ export default function Register() {
           first_name: firstName,
           last_name: lastName,
           phone,
-          role,
+          role, // "investor" | "entrepreneur"
         }),
       });
-      if (!res.ok && res.status !== 409)
-        console.warn(
-          "register-complete warning:",
-          res.status,
-          await res.text().catch(() => "")
-        );
+      if (!res.ok && res.status !== 409) {
+        const txt = await res.text().catch(() => "");
+        console.warn("register-complete warning:", res.status, txt);
+      }
     } catch (e) {
       console.warn("register-complete call failed:", e);
     }
-  }
-
-  async function localRegisterAndProceed() {
-    // Save to session for dev/local flow
-    AuthBridge.setSessionUser(email, {
-      firstName,
-      lastName,
-      phone,
-      role,
-      password,
-      entrepreneurProfile: { name: `${firstName} ${lastName}`.trim()},
-      investorProfile: { name: `${firstName} ${lastName}`.trim() },
-    });
-    AuthBridge.setAuthSession(email, { provider: "local" });
-    sessionStorage.setItem("registrationRole", role);
-    sessionStorage.setItem("registrationData", JSON.stringify({ email, role }));
-    navigate("/onboarding");
   }
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const cleanEmail = (email || "").trim();
-    const cleanPassword = (password || "").trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setError("Please enter a valid email address.");
-      setLoading(false);
-      return;
-    }
 
     if (!role) {
       setError("Please select a role.");
@@ -105,11 +76,9 @@ export default function Register() {
     }
 
     try {
-      if (!USE_SUPABASE_SIGNUP) return localRegisterAndProceed();
-
       const { data, error: signUpError } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: cleanPassword,
+        email,
+        password,
         options: {
           emailRedirectTo: `${window.location.origin}/onboarding`,
           data: { first_name: firstName, last_name: lastName, phone, role },
@@ -117,42 +86,24 @@ export default function Register() {
       });
       if (signUpError) throw signUpError;
 
-      // Write-through to session for immediate dashboard usage
-      AuthBridge.setSessionUser(email, {
-        firstName,
-        lastName,
-        phone,
-        role,
-        password,
-        entrepreneurProfile: {},
-        investorProfile: {},
-      });
-      AuthBridge.setAuthSession(email, {
-        provider: "supabase",
-        user_id: data?.user?.id,
-      });
+      // Save role for onboarding fallback
+      // Put the chosen role into auth metadata so onboarding can read it.
+      try {
+        await supabase.auth.updateUser({
+          data: { role }, 
+        });
+      } catch {}
 
-      // Backend seed
+      // Create Enterprise + owner membership in your DB now
       const supabaseId = data?.user?.id;
-      if (supabaseId) seedRegisterComplete({ supabase_id: supabaseId });
-
-      // Role for Onboarding fallback
-      sessionStorage.setItem("registrationRole", role);
-      sessionStorage.setItem(
-        "registrationData",
-        JSON.stringify({ email, role })
-      );
-
-      if (USE_SUPABASE_SIGNUP) {
-        navigate("/confirm-email");
-      } else {
-        navigate("/onboarding");
+      if (supabaseId) {
+        seedRegisterComplete({ supabase_id: supabaseId });
       }
 
+      navigate("/email-confirmation-sent");
     } catch (err) {
       console.error(err);
-      // Fallback to local-only register to keep UX flowing during dev
-      await localRegisterAndProceed();
+      setError(err.message || "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -236,29 +187,27 @@ export default function Register() {
               />
             </div>
 
-            {!defaultRole && (
-              <div>
-                <label
-                  htmlFor="role"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Select Role
-                </label>
-                <select
-                  id="role"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="" disabled>
-                    Select a role
-                  </option>
-                  <option value="investor">Investor</option>
-                  <option value="entrepreneur">Entrepreneur</option>
-                </select>
-              </div>
-            )}
+            <div>
+              <label
+                htmlFor="role"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Select Role
+              </label>
+              <select
+                id="role"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                required
+              >
+                <option value="" disabled>
+                  Select a role
+                </option>
+                <option value="investor">Investor</option>
+                <option value="entrepreneur">Entrepreneur</option>
+              </select>
+            </div>
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -6,6 +6,18 @@ const write = (k,v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } c
 
 const norm = (email) => (email || "").trim().toLowerCase();
 
+export function getAuthSession() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEYS.SESSION);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAuthSession() {
+  try { sessionStorage.removeItem(STORAGE_KEYS.SESSION); } catch {}
+}
 
 export function getCurrentEmail() {
   const s = read(STORAGE_KEYS.SESSION);

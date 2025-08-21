@@ -7,109 +7,83 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle } from "lucide-react";
-import { AuthBridge } from "@/helpers/authBridge";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-const USE_SUPABASE_AUTH = true; 
-
-const API_BASE = USE_SUPABASE_AUTH
-  ? (import.meta.env.VITE_API_URL?.replace(/\/$/, "") || `${window.location.protocol}//${window.location.hostname}:5173`)
-  : "";
-export default function Login() {
+function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  async function localLoginFallback() {
-    const users = AuthBridge.ssRead(AuthBridge.STORAGE_KEYS.USERS);
-    const u = users[email];
-    if (!u || (u.password && u.password !== password))
-      throw new Error("Invalid credentials");
-    AuthBridge.setAuthSession(email, { source: "local" });
-    const role = (u.role || "entrepreneur").toLowerCase();
-    navigate(
-      role.includes("investor")
-        ? "/dashboard/investor"
-        : "/dashboard/entrepreneur"
-    );
-  }
-
   const handleLogin = async (e) => {
     e.preventDefault();
     setError(null);
 
-    if (!USE_SUPABASE_AUTH)
-      return localLoginFallback().catch((err) => setError(err.message));
-
+    // 1) Supabase sign-in
     const { data, error: signInError } = await supabase.auth.signInWithPassword(
-      { email, password }
+      {
+        email,
+        password,
+      }
     );
     if (signInError) {
-      // fallback to local session login if present
-      return localLoginFallback().catch(() => setError(signInError.message));
+      setError(signInError.message);
+      return;
     }
 
-    const accessToken = data?.session?.access_token;
     const user = data?.user;
-    if (!accessToken || !user) {
-      setError("Login failed: no session returned.");
+    if (!user) {
+      setError("Login failed: no user returned.");
       return;
     }
 
     try {
-      // optional backend pings
-      fetch(`${API_BASE}/api/auth/after-login`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }).catch(() => {});
-      const meRes = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const me = meRes.ok ? await meRes.json() : {};
+      // 2) Read role straight from DB
+      // Find the active OWNER membership and its enterprise type
+      const { data: memberships, error: memErr } = await supabase
+        .from("enterprise_user")
+        .select(
+          `
+        role,
+        is_active,
+        enterprise:enterprise_id (
+          id,
+          enterprise_type
+        )
+      `
+        )
+        .eq("user_id", user.id);
 
-      // persist to sessionStorage for dashboard hydration
-      const meta = user.user_metadata || {};
-      const fullName = `${meta.first_name || ""} ${
-        meta.last_name || ""
-      }`.trim();
-      AuthBridge.setSessionUser(email, {
-        supabaseId: user.id,
-        firstName: meta.first_name,
-        lastName: meta.last_name,
-        fullName,
-        phone: meta.phone,
-        role:
-          meta.role || me?.memberships?.[0]?.enterprise_type || "entrepreneur",
-        investorProfile: {},
-        entrepreneurProfile: {},
-      });
-      AuthBridge.setAuthSession(email, {
-        provider: "supabase",
-        user_id: user.id,
-      });
+      if (memErr) throw memErr;
 
-      // route resolution (preserve existing logic)
-      const owner = (me.memberships || []).find(
-        (m) => m.role === "owner" && m.is_active
+      const owner = (memberships || []).find(
+        (m) => m.role === "owner" && m.is_active && m.enterprise
       );
-      const enterpriseType =
-        owner?.enterprise?.enterprise_type || owner?.enterprise_type;
-      const metaRole = meta.role || meta.plan;
+
+      // 3) Decide route
       let route = "/dashboard/user";
+      const enterpriseType = owner?.enterprise?.enterprise_type;
+
       if (enterpriseType === "investor") route = "/dashboard/investor";
       else if (enterpriseType === "startup") route = "/dashboard/entrepreneur";
-      else if (typeof metaRole === "string") {
-        const r = metaRole.toLowerCase();
-        if (r.includes("investor")) route = "/dashboard/investor";
-        else if (r.includes("entrepreneur") || r.includes("startup"))
+      else {
+        // Fallback to auth metadata if membership hasn't been created yet
+        const metaRole = (user.user_metadata?.role || "").toLowerCase();
+        if (metaRole.includes("investor")) route = "/dashboard/investor";
+        else if (
+          metaRole.includes("entrepreneur") ||
+          metaRole.includes("startup")
+        )
           route = "/dashboard/entrepreneur";
       }
+
       navigate(route);
     } catch (err) {
       console.error(err);
@@ -177,3 +151,5 @@ export default function Login() {
     </div>
   );
 }
+
+export default Login;

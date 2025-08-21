@@ -1,538 +1,468 @@
-from flask import Blueprint, jsonify, request, session
-from src.models.user import User, Event, EventRegistration, db
-from datetime import datetime, timedelta
+# src/routes/events.py
 
-events_bp = Blueprint('events', __name__)
+from datetime import datetime, timedelta, timezone
+import os
+
+import requests
+from flask import Blueprint, request, jsonify
+from sqlalchemy import func
+
+from src.extensions import db
+from src.models.user import (
+    User,
+    Event,
+    UserActivity,        # we'll use this to track registrations, payments, check-ins
+    EnterpriseUser,      # for admin/owner checks
+)
+
+events_bp = Blueprint("events", __name__)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+LOCAL_API_BASE_URL = os.getenv("LOCAL_API_BASE_URL")
+
+
+# --------------------- Helpers ---------------------
+
+def _parse_dt(s: str):
+    """Parse ISO-ish strings (supports trailing 'Z')."""
+    if not s:
+        return None
+    try:
+        # handle '2025-01-02T12:34:56Z'
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
 
 def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
-        return None, jsonify({'error': 'Not authenticated'}), 401
-    
+    """Validate Supabase JWT and return (user, token, error_response_or_None)."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
+
+    token = auth_header.split(" ")[1]
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
+        user_id = resp.json()["id"]
+    except Exception as e:
+        return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
+
     user = User.query.get(user_id)
     if not user:
-        return None, jsonify({'error': 'User not found'}), 404
-    
-    return user, None, None
+        return None, None, (jsonify({"error": "User not found in database"}), 404)
+    return user, token, None
 
-@events_bp.route('/', methods=['GET'])
-def get_events():
-    """Get list of events with filtering options"""
+
+def _is_admin_like(user: User) -> bool:
+    """Owner/admin of any enterprise counts as admin-like."""
+    return (
+        db.session.query(EnterpriseUser.id)
+        .filter(
+            EnterpriseUser.user_id == user.id,
+            EnterpriseUser.is_active.is_(True),
+            EnterpriseUser.role.in_(["owner", "admin"]),
+        )
+        .first()
+        is not None
+    )
+
+
+def _can_manage_event(user: User, event: Event) -> bool:
+    """Event creator OR owner/admin of the event's enterprise (if set) OR admin-like."""
+    if not event:
+        return False
+    if event.created_by == user.id:
+        return True
+    if _is_admin_like(user):
+        return True
+    if event.enterprise_id:
+        mem = EnterpriseUser.query.filter_by(
+            user_id=user.id, enterprise_id=event.enterprise_id, is_active=True
+        ).first()
+        return bool(mem and mem.role in ("owner", "admin"))
+    return False
+
+
+def _event_to_dict(e: Event):
+    return {
+        "id": str(e.id),
+        "enterprise_id": str(e.enterprise_id) if e.enterprise_id else None,
+        "title": e.title,
+        "description": e.description,
+        "event_type": e.event_type,
+        "start_time": e.start_time.isoformat() if e.start_time else None,
+        "end_time": e.end_time.isoformat() if e.end_time else None,
+        "location": e.location,
+        "venue_details": e.venue_details or {},
+        "ticket_price": float(e.ticket_price or 0),
+        "max_attendees": e.max_attendees,
+        "current_attendees": e.current_attendees or 0,
+        "registration_deadline": e.registration_deadline.isoformat() if e.registration_deadline else None,
+        "event_details": e.event_details or {},
+        "agenda": e.agenda or [],
+        "speakers": e.speakers or [],
+        "sponsors": e.sponsors or [],
+        "status": e.status,
+        "is_public": e.is_public,
+        "registration_required": e.registration_required,
+        "created_by": str(e.created_by) if e.created_by else None,
+        "created_at": e.created_at.isoformat() if hasattr(e, "created_at") and e.created_at else None,
+        "updated_at": e.updated_at.isoformat() if hasattr(e, "updated_at") and e.updated_at else None,
+    }
+
+
+def _registration_activity(event_id, user_id):
+    """Fetch a user's registration activity for a given event."""
+    return UserActivity.query.filter(
+        UserActivity.user_id == user_id,
+        UserActivity.activity_type == "event_registration",
+        UserActivity.activity_data["event_id"].astext == str(event_id),
+    ).first()
+
+
+def _payment_activity(event_id, user_id):
+    """Fetch a user's payment activity for a given event."""
+    return UserActivity.query.filter(
+        UserActivity.user_id == user_id,
+        UserActivity.activity_type == "event_payment",
+        UserActivity.activity_data["event_id"].astext == str(event_id),
+    ).first()
+
+
+def _count_registrations(event_id):
+    return (
+        db.session.query(func.count(UserActivity.id))
+        .filter(
+            UserActivity.activity_type == "event_registration",
+            UserActivity.activity_data["event_id"].astext == str(event_id),
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _sync_event_attendee_count(event: Event):
+    """Optional: keep Event.current_attendees in sync with registrations."""
     try:
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
-        event_type = request.args.get('event_type')
-        status = request.args.get('status', 'upcoming')
-        upcoming_only = request.args.get('upcoming_only', 'true').lower() == 'true'
-        
-        query = Event.query
-        
-        # Filter by event type
-        if event_type:
-            query = query.filter_by(event_type=event_type)
-        
-        # Filter by status
+        event.current_attendees = _count_registrations(event.id)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+# --------------------- Events ---------------------
+
+@events_bp.route("/events", methods=["GET"])
+def list_events():
+    """
+    Optional filters:
+      ?status=planned|open_registration|in_progress|completed|cancelled
+      ?from=ISO8601  ?to=ISO8601
+    """
+    try:
+        q = Event.query
+
+        status = request.args.get("status")
         if status:
-            query = query.filter_by(status=status)
-        
-        # Filter upcoming events
-        if upcoming_only:
-            query = query.filter(Event.date >= datetime.utcnow())
-        
-        # Order by date
-        query = query.order_by(Event.date.asc())
-        
-        events = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        result = []
-        for event in events.items:
-            event_data = event.to_dict()
-            result.append(event_data)
-        
-        return jsonify({
-            'events': result,
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': events.total,
-                'pages': events.pages,
-                'has_next': events.has_next,
-                'has_prev': events.has_prev
-            }
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            q = q.filter(Event.status == status)
 
-@events_bp.route('/<int:event_id>', methods=['GET'])
-def get_event_details():
-    """Get detailed information about a specific event"""
+        dt_from = _parse_dt(request.args.get("from"))
+        dt_to = _parse_dt(request.args.get("to"))
+        if dt_from:
+            q = q.filter(Event.start_time >= dt_from)
+        if dt_to:
+            q = q.filter(Event.start_time <= dt_to)
+
+        events = q.order_by(Event.start_time.desc()).all()
+        return jsonify({"events": [_event_to_dict(e) for e in events]}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@events_bp.route("/events/<uuid:event_id>", methods=["GET"])
+def get_event(event_id):
     try:
-        event = Event.query.get(event_id)
-        if not event:
-            return jsonify({'error': 'Event not found'}), 404
-        
-        event_data = event.to_dict()
-        
-        # Add registration information if user is authenticated
-        user_id = session.get('user_id')
-        if user_id:
-            registration = EventRegistration.query.filter_by(
-                event_id=event_id,
-                user_id=user_id
-            ).first()
-            
-            if registration:
-                event_data['user_registration'] = registration.to_dict()
-        
-        # Add registration statistics
-        total_registrations = len(event.registrations)
-        paid_registrations = len([r for r in event.registrations if r.payment_status == 'paid'])
-        
-        event_data['registration_stats'] = {
-            'total_registrations': total_registrations,
-            'paid_registrations': paid_registrations,
-            'available_spots': event.capacity - total_registrations if event.capacity else None
-        }
-        
-        return jsonify({'event': event_data}), 200
-        
+        e = Event.query.get(event_id)
+        if not e:
+            return jsonify({"error": "Event not found"}), 404
+        return jsonify({"event": _event_to_dict(e)}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-@events_bp.route('/', methods=['POST'])
+
+# --------------------- Event creation (creator/owner/admin) ---------------------
+
+@events_bp.route("/events", methods=["POST"])
 def create_event():
-    """Create a new event (admin function)"""
+    user, _, err = require_auth()
+    if err:
+        return err
+
     try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        # In a real implementation, this would be restricted to admin users
-        data = request.json
-        
-        # Validate required fields
-        required_fields = ['title', 'event_type', 'date']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return jsonify({'error': f'{field} is required'}), 400
-        
-        # Parse date
-        try:
-            event_date = datetime.fromisoformat(data['date'].replace('Z', '+00:00'))
-        except ValueError:
-            return jsonify({'error': 'Invalid date format. Use ISO format.'}), 400
-        
-        # Create event
-        event = Event(
-            title=data['title'],
-            description=data.get('description', ''),
-            event_type=data['event_type'],
-            date=event_date,
-            location=data.get('location', 'Hyatt Residence Main Lounge'),
-            capacity=data.get('capacity'),
-            price=data.get('price', 0.0),
-            is_members_only=data.get('is_members_only', False),
-            status='upcoming'
+        data = request.get_json() or {}
+        title = data.get("title")
+        start_time = _parse_dt(data.get("start_time"))
+        end_time = _parse_dt(data.get("end_time"))
+        if not title or not start_time or not end_time:
+            return jsonify({"error": "title, start_time and end_time are required (ISO8601)"}), 400
+
+        # Optional: enterprise_id (if provided, user must be owner/admin)
+        enterprise_id = data.get("enterprise_id")
+        if enterprise_id:
+            mem = EnterpriseUser.query.filter_by(
+                user_id=user.id, enterprise_id=enterprise_id, is_active=True
+            ).first()
+            if not mem or mem.role not in ("owner", "admin"):
+                return jsonify({"error": "Owner/admin membership required for this enterprise"}), 403
+
+        e = Event(
+            enterprise_id=enterprise_id,
+            title=title,
+            description=data.get("description"),
+            event_type=data.get("event_type"),
+            start_time=start_time,
+            end_time=end_time,
+            location=data.get("location"),
+            venue_details=data.get("venue_details"),
+            ticket_price=data.get("ticket_price") or 0,
+            max_attendees=data.get("max_attendees"),
+            current_attendees=0,
+            registration_deadline=_parse_dt(data.get("registration_deadline")),
+            event_details=data.get("event_details"),
+            agenda=data.get("agenda") or [],
+            speakers=data.get("speakers") or [],
+            sponsors=data.get("sponsors") or [],
+            status=data.get("status") or "planned",
+            is_public=bool(data.get("is_public", True)),
+            registration_required=bool(data.get("registration_required", True)),
+            created_by=user.id,
         )
-        
-        # Set agenda if provided
-        if 'agenda' in data:
-            event.set_agenda(data['agenda'])
-        
-        # Set presenters if provided
-        if 'presenters' in data:
-            event.set_presenters(data['presenters'])
-        
-        db.session.add(event)
+        db.session.add(e)
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Event created successfully',
-            'event': event.to_dict()
-        }), 201
-        
+        return jsonify({"message": "Event created", "event": _event_to_dict(e)}), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-@events_bp.route('/<int:event_id>', methods=['PUT'])
-def update_event():
-    """Update an existing event (admin function)"""
+
+# --------------------- Registration ---------------------
+
+@events_bp.route("/events/<uuid:event_id>/register", methods=["POST"])
+def register_for_event(event_id):
+    user, _, err = require_auth()
+    if err:
+        return err
+
     try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        event = Event.query.get(event_id)
-        if not event:
-            return jsonify({'error': 'Event not found'}), 404
-        
-        data = request.json
-        
-        # Update basic fields
-        updateable_fields = ['title', 'description', 'location', 'capacity', 'price', 'is_members_only', 'status']
-        for field in updateable_fields:
-            if field in data:
-                setattr(event, field, data[field])
-        
-        # Update date if provided
-        if 'date' in data:
-            try:
-                event.date = datetime.fromisoformat(data['date'].replace('Z', '+00:00'))
-            except ValueError:
-                return jsonify({'error': 'Invalid date format. Use ISO format.'}), 400
-        
-        # Update agenda if provided
-        if 'agenda' in data:
-            event.set_agenda(data['agenda'])
-        
-        # Update presenters if provided
-        if 'presenters' in data:
-            event.set_presenters(data['presenters'])
-        
-        event.updated_at = datetime.utcnow()
+        e = Event.query.get(event_id)
+        if not e:
+            return jsonify({"error": "Event not found"}), 404
+
+        # Check deadline / capacity
+        if e.registration_deadline and datetime.now(timezone.utc) > e.registration_deadline:
+            return jsonify({"error": "Registration deadline has passed"}), 400
+        if e.max_attendees and _count_registrations(e.id) >= e.max_attendees:
+            return jsonify({"error": "Event is full"}), 400
+
+        answers = (request.get_json() or {}).get("answers", {})
+
+        existing = _registration_activity(e.id, user.id)
+        if existing:
+            # already registered; update answers optionally
+            data = existing.activity_data or {}
+            data["answers"] = answers or data.get("answers") or {}
+            data["registration_status"] = data.get("registration_status", "registered")
+            existing.activity_data = data
+        else:
+            ua = UserActivity(
+                user_id=user.id,
+                activity_type="event_registration",
+                activity_category="events",
+                activity_data={
+                    "event_id": str(e.id),
+                    "answers": answers,
+                    "registration_status": "registered",
+                },
+            )
+            db.session.add(ua)
+
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Event updated successfully',
-            'event': event.to_dict()
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        _sync_event_attendee_count(e)
+        return jsonify({"message": "Registered successfully"}), 201
+    except Exception as ex:
+        db.session.rollback
+        return jsonify({"error": str(ex)}), 500
 
-@events_bp.route('/<int:event_id>/register', methods=['POST'])
-def register_for_event():
-    """Register for an event"""
+
+# --------------------- Payment (record only) ---------------------
+
+@events_bp.route("/events/<uuid:event_id>/pay", methods=["POST"])
+def pay_for_event(event_id):
+    user, _, err = require_auth()
+    if err:
+        return err
+
     try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        event = Event.query.get(event_id)
-        if not event:
-            return jsonify({'error': 'Event not found'}), 404
-        
-        # Check if event is in the future
-        if event.date <= datetime.utcnow():
-            return jsonify({'error': 'Cannot register for past events'}), 400
-        
-        # Check if user is already registered
-        existing_registration = EventRegistration.query.filter_by(
-            event_id=event_id,
-            user_id=user.id
-        ).first()
-        
-        if existing_registration:
-            return jsonify({'error': 'Already registered for this event'}), 409
-        
-        # Check capacity
-        if event.capacity:
-            current_registrations = len(event.registrations)
-            if current_registrations >= event.capacity:
-                return jsonify({'error': 'Event is at full capacity'}), 400
-        
-        # Check membership requirement
-        if event.is_members_only and user.subscription_tier == 'free':
-            return jsonify({'error': 'This event is for members only'}), 403
-        
-        data = request.json or {}
-        
-        # Create registration
-        registration = EventRegistration(
-            event_id=event_id,
-            user_id=user.id,
-            payment_status='pending' if event.price > 0 else 'paid',
-            special_requests=data.get('special_requests', '')
-        )
-        
-        db.session.add(registration)
+        e = Event.query.get(event_id)
+        if not e:
+            return jsonify({"error": "Event not found"}), 404
+
+        data = request.get_json() or {}
+        stripe_payment_id = data.get("stripe_payment_id")
+        amount = data.get("amount")
+        if not stripe_payment_id or amount is None:
+            return jsonify({"error": "stripe_payment_id and amount are required"}), 400
+
+        # record payment activity
+        pay = _payment_activity(e.id, user.id)
+        if pay:
+            # idempotent-ish: update
+            pdata = pay.activity_data or {}
+            pdata.update({"stripe_payment_id": stripe_payment_id, "amount": amount})
+            pay.activity_data = pdata
+        else:
+            pay = UserActivity(
+                user_id=user.id,
+                activity_type="event_payment",
+                activity_category="events",
+                activity_data={
+                    "event_id": str(e.id),
+                    "stripe_payment_id": stripe_payment_id,
+                    "amount": amount,
+                },
+            )
+            db.session.add(pay)
+
+        # ensure registration exists & mark status 'paid'
+        reg = _registration_activity(e.id, user.id)
+        if not reg:
+            reg = UserActivity(
+                user_id=user.id,
+                activity_type="event_registration",
+                activity_category="events",
+                activity_data={
+                    "event_id": str(e.id),
+                    "answers": {},
+                    "registration_status": "paid",
+                },
+            )
+            db.session.add(reg)
+        else:
+            data = reg.activity_data or {}
+            data["registration_status"] = "paid"
+            reg.activity_data = data
+
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Successfully registered for event',
-            'registration': registration.to_dict()
-        }), 201
-        
-    except Exception as e:
+        _sync_event_attendee_count(e)
+        return jsonify({"message": "Payment recorded and registration updated"}), 201
+    except Exception as ex:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(ex)}), 500
 
-@events_bp.route('/<int:event_id>/unregister', methods=['DELETE'])
-def unregister_from_event():
-    """Unregister from an event"""
+
+# --------------------- Admin: attendees ---------------------
+
+@events_bp.route("/admin/events/<uuid:event_id>/attendees", methods=["GET"])
+def get_event_attendees(event_id):
+    user, _, err = require_auth()
+    if err:
+        return err
+
     try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        registration = EventRegistration.query.filter_by(
-            event_id=event_id,
-            user_id=user.id
-        ).first()
-        
-        if not registration:
-            return jsonify({'error': 'Registration not found'}), 404
-        
-        event = Event.query.get(event_id)
-        
-        # Check if event is too close (e.g., within 24 hours)
-        if event and event.date <= datetime.utcnow() + timedelta(hours=24):
-            return jsonify({'error': 'Cannot unregister within 24 hours of event'}), 400
-        
-        db.session.delete(registration)
+        e = Event.query.get(event_id)
+        if not e:
+            return jsonify({"error": "Event not found"}), 404
+        if not _can_manage_event(user, e):
+            return jsonify({"error": "Admin/owner access required"}), 403
+
+        regs = UserActivity.query.filter(
+            UserActivity.activity_type == "event_registration",
+            UserActivity.activity_data["event_id"].astext == str(e.id),
+        ).all()
+
+        attendees = []
+        for reg in regs:
+            u = User.query.get(reg.user_id)
+            attendees.append({
+                "user": {
+                    "id": str(u.id),
+                    "email": u.email,
+                    "name": f"{u.first_name} {u.last_name}",
+                } if u else {"id": str(reg.user_id)},
+                "answers": (reg.activity_data or {}).get("answers", {}),
+                "status": (reg.activity_data or {}).get("registration_status", "registered"),
+                "registered_at": reg.activity_date.isoformat() if reg.activity_date else None,
+            })
+
+        return jsonify({"attendees": attendees}), 200
+    except Exception as ex:
+        return jsonify({"error": str(ex)}), 500
+
+
+@events_bp.route("/admin/events/<uuid:event_id>/attendees/<uuid:user_id>/status", methods=["PUT"])
+def update_attendee_status(event_id, user_id):
+    user, _, err = require_auth()
+    if err:
+        return err
+
+    try:
+        e = Event.query.get(event_id)
+        if not e:
+            return jsonify({"error": "Event not found"}), 404
+        if not _can_manage_event(user, e):
+            return jsonify({"error": "Admin/owner access required"}), 403
+
+        reg = _registration_activity(e.id, user_id)
+        if not reg:
+            return jsonify({"error": "Registration not found"}), 404
+
+        new_status = (request.get_json() or {}).get("status")
+        if new_status not in {"registered", "paid", "attended", "cancelled"}:
+            return jsonify({"error": "Invalid status"}), 400
+
+        data = reg.activity_data or {}
+        data["registration_status"] = new_status
+        reg.activity_data = data
         db.session.commit()
-        
-        return jsonify({'message': 'Successfully unregistered from event'}), 200
-        
-    except Exception as e:
+        _sync_event_attendee_count(e)
+        return jsonify({"message": "Status updated"}), 200
+    except Exception as ex:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(ex)}), 500
 
-@events_bp.route('/<int:event_id>/registrations', methods=['GET'])
-def get_event_registrations():
-    """Get registrations for an event (admin function)"""
+
+# --------------------- Self check-in ---------------------
+
+@events_bp.route("/events/<uuid:event_id>/check-in", methods=["POST"])
+def check_in_user(event_id):
+    user, _, err = require_auth()
+    if err:
+        return err
+
     try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        # In a real implementation, this would be restricted to admin users
-        event = Event.query.get(event_id)
-        if not event:
-            return jsonify({'error': 'Event not found'}), 404
-        
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 50, type=int), 100)
-        payment_status = request.args.get('payment_status')
-        attendance_status = request.args.get('attendance_status')
-        
-        query = EventRegistration.query.filter_by(event_id=event_id)
-        
-        if payment_status:
-            query = query.filter_by(payment_status=payment_status)
-        
-        if attendance_status:
-            query = query.filter_by(attendance_status=attendance_status)
-        
-        registrations = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        result = []
-        for registration in registrations.items:
-            registration_data = registration.to_dict()
-            result.append(registration_data)
-        
-        # Calculate statistics
-        total_registrations = len(event.registrations)
-        paid_count = len([r for r in event.registrations if r.payment_status == 'paid'])
-        attended_count = len([r for r in event.registrations if r.attendance_status == 'attended'])
-        
-        return jsonify({
-            'registrations': result,
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': registrations.total,
-                'pages': registrations.pages,
-                'has_next': registrations.has_next,
-                'has_prev': registrations.has_prev
-            },
-            'stats': {
-                'total_registrations': total_registrations,
-                'paid_registrations': paid_count,
-                'attended_count': attended_count,
-                'payment_rate': (paid_count / total_registrations * 100) if total_registrations > 0 else 0,
-                'attendance_rate': (attended_count / total_registrations * 100) if total_registrations > 0 else 0
-            }
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        e = Event.query.get(event_id)
+        if not e:
+            return jsonify({"error": "Event not found"}), 404
 
-@events_bp.route('/my-registrations', methods=['GET'])
-def get_my_registrations():
-    """Get current user's event registrations"""
-    try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
-        upcoming_only = request.args.get('upcoming_only', 'false').lower() == 'true'
-        
-        query = EventRegistration.query.filter_by(user_id=user.id).join(Event)
-        
-        if upcoming_only:
-            query = query.filter(Event.date >= datetime.utcnow())
-        
-        query = query.order_by(Event.date.desc())
-        
-        registrations = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        result = []
-        for registration in registrations.items:
-            registration_data = registration.to_dict()
-            # Include event details
-            registration_data['event'] = registration.event.to_dict()
-            result.append(registration_data)
-        
-        return jsonify({
-            'registrations': result,
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': registrations.total,
-                'pages': registrations.pages,
-                'has_next': registrations.has_next,
-                'has_prev': registrations.has_prev
-            }
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        reg = _registration_activity(e.id, user.id)
+        if not reg:
+            return jsonify({"error": "Not registered for this event"}), 404
 
-@events_bp.route('/upcoming', methods=['GET'])
-def get_upcoming_events():
-    """Get upcoming events"""
-    try:
-        limit = min(request.args.get('limit', 5, type=int), 20)
-        event_type = request.args.get('event_type')
-        
-        query = Event.query.filter(
-            Event.date >= datetime.utcnow(),
-            Event.status == 'upcoming'
-        )
-        
-        if event_type:
-            query = query.filter_by(event_type=event_type)
-        
-        events = query.order_by(Event.date.asc()).limit(limit).all()
-        
-        result = []
-        for event in events:
-            event_data = event.to_dict()
-            
-            # Add registration status if user is authenticated
-            user_id = session.get('user_id')
-            if user_id:
-                registration = EventRegistration.query.filter_by(
-                    event_id=event.id,
-                    user_id=user_id
-                ).first()
-                
-                event_data['is_registered'] = registration is not None
-                if registration:
-                    event_data['registration_status'] = registration.payment_status
-            
-            result.append(event_data)
-        
-        return jsonify({'events': result}), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@events_bp.route('/types', methods=['GET'])
-def get_event_types():
-    """Get available event types"""
-    event_types = [
-        {
-            'value': 'monthly_meeting',
-            'label': 'Monthly Meeting',
-            'description': 'Regular monthly investor-entrepreneur networking event'
-        },
-        {
-            'value': 'enterprise_showcase',
-            'label': 'Enterprise Showcase',
-            'description': 'Premium presentation slots for established companies'
-        },
-        {
-            'value': 'networking',
-            'label': 'Networking Event',
-            'description': 'Casual networking and relationship building'
-        },
-        {
-            'value': 'workshop',
-            'label': 'Workshop',
-            'description': 'Educational workshops on investment and entrepreneurship'
-        },
-        {
-            'value': 'pitch_competition',
-            'label': 'Pitch Competition',
-            'description': 'Competitive pitching events with prizes'
-        }
-    ]
-    
-    return jsonify({'event_types': event_types}), 200
-
-@events_bp.route('/analytics', methods=['GET'])
-def get_event_analytics():
-    """Get event analytics"""
-    try:
-        user, error_response, status_code = require_auth()
-        if error_response:
-            return error_response, status_code
-        
-        # Overall event statistics
-        total_events = Event.query.count()
-        upcoming_events = Event.query.filter(
-            Event.date >= datetime.utcnow(),
-            Event.status == 'upcoming'
-        ).count()
-        
-        completed_events = Event.query.filter_by(status='completed').count()
-        
-        # Registration statistics
-        total_registrations = EventRegistration.query.count()
-        paid_registrations = EventRegistration.query.filter_by(payment_status='paid').count()
-        attended_registrations = EventRegistration.query.filter_by(attendance_status='attended').count()
-        
-        # Recent activity (last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        recent_events = Event.query.filter(Event.created_at >= thirty_days_ago).count()
-        recent_registrations = EventRegistration.query.filter(
-            EventRegistration.registration_date >= thirty_days_ago
-        ).count()
-        
-        # Event type distribution
-        event_type_stats = db.session.query(
-            Event.event_type,
-            db.func.count(Event.id).label('count')
-        ).group_by(Event.event_type).all()
-        
-        # Average attendance
-        avg_attendance = db.session.query(
-            db.func.avg(db.func.count(EventRegistration.id))
-        ).join(Event).group_by(Event.id).scalar() or 0
-        
-        analytics = {
-            'total_events': total_events,
-            'upcoming_events': upcoming_events,
-            'completed_events': completed_events,
-            'total_registrations': total_registrations,
-            'paid_registrations': paid_registrations,
-            'attended_registrations': attended_registrations,
-            'recent_events': recent_events,
-            'recent_registrations': recent_registrations,
-            'payment_rate': (paid_registrations / total_registrations * 100) if total_registrations > 0 else 0,
-            'attendance_rate': (attended_registrations / total_registrations * 100) if total_registrations > 0 else 0,
-            'average_attendance': round(avg_attendance, 1),
-            'event_type_distribution': [
-                {'type': event_type, 'count': count}
-                for event_type, count in event_type_stats
-            ]
-        }
-        
-        return jsonify({'analytics': analytics}), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+        data = reg.activity_data or {}
+        data["registration_status"] = "attended"
+        reg.activity_data = data
+        db.session.commit()
+        _sync_event_attendee_count(e)
+        return jsonify({"message": "Check-in successful"}), 200
+    except Exception as ex:
+        db.session.rollback()
+        return jsonify({"error": str(ex)}), 500

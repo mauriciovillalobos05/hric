@@ -1,320 +1,325 @@
-from flask import Blueprint, jsonify, request, session
-from src.models.user import User, InvestorProfile, EntrepreneurProfile, db
-from datetime import datetime
-import re
+from __future__ import annotations
 
-auth_bp = Blueprint('auth', __name__)
+from datetime import datetime, timezone
+import os
+from typing import Optional
 
-def validate_email(email):
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email) is not None
+import requests
+from flask import Blueprint, jsonify, request
 
-def validate_password(password):
-    # At least 8 characters, one uppercase, one lowercase, one number
-    if len(password) < 8:
-        return False
-    if not re.search(r'[A-Z]', password):
-        return False
-    if not re.search(r'[a-z]', password):
-        return False
-    if not re.search(r'\d', password):
-        return False
-    return True
+from src.extensions import db
+# add to imports at the top
+from src.models.user import User, Enterprise, EnterpriseUser, GeographicArea
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
+
+auth_bp = Blueprint("auth", __name__)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+
+# --------------------- Auth --------------------- #
+
+def require_auth():
+    """Validate Supabase JWT and return (user, token, error_tuple_or_None)."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
+
+    token = auth_header.split(" ")[1]
     try:
-        data = request.json
-        
-        # Validate required fields
-        required_fields = ['email', 'password', 'user_type', 'first_name', 'last_name']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return jsonify({'error': f'{field} is required'}), 400
-        
-        # Validate email format
-        if not validate_email(data['email']):
-            return jsonify({'error': 'Invalid email format'}), 400
-        
-        # Validate password strength
-        if not validate_password(data['password']):
-            return jsonify({'error': 'Password must be at least 8 characters with uppercase, lowercase, and number'}), 400
-        
-        # Validate user type
-        if data['user_type'] not in ['investor', 'entrepreneur']:
-            return jsonify({'error': 'User type must be investor or entrepreneur'}), 400
-        
-        # Check if user already exists
-        existing_user = User.query.filter_by(email=data['email']).first()
-        if existing_user:
-            return jsonify({'error': 'User with this email already exists'}), 409
-        
-        # Create new user
-        user = User(
-            email=data['email'],
-            user_type=data['user_type'],
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            phone=data.get('phone'),
-            location=data.get('location'),
-            bio=data.get('bio'),
-            linkedin_url=data.get('linkedin_url'),
-            website_url=data.get('website_url')
+        resp = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
+            timeout=15,
         )
-        user.set_password(data['password'])
-        
+        if resp.status_code != 200:
+            return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
+        user_id = resp.json()["id"]
+    except Exception as e:
+        return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
+
+    user = db.session.get(User, user_id)
+    if not user:
+        return None, None, (jsonify({"error": "User not found in database"}), 404)
+
+    return user, token, None
+
+
+# --------------------- Helpers --------------------- #
+
+def _role_to_enterprise_type(role: str) -> Optional[str]:
+    r = (role or "").strip().lower()
+    if r == "investor":
+        return "investor"
+    if r in ("entrepreneur", "startup", "founder"):
+        return "startup"
+    return None
+
+
+def _default_enterprise_name(first_name: str, last_name: str, ent_type: str) -> str:
+    first = (first_name or "").strip() or "New"
+    last = (last_name or "").strip() or "User"
+    if ent_type == "investor":
+        return f"{first} {last} Capital"
+    return f"{first} {last} Startup"
+
+
+def _serialize_user(u: User):
+    return {
+        "id": str(u.id),
+        "email": u.email,
+        "first_name": u.first_name,
+        "last_name": u.last_name,
+        "phone": u.phone,
+        "location": u.location,  # NEW
+        "stripe_customer_id": u.stripe_customer_id,
+        "profile_image_url": u.profile_image_url,
+        "bio": u.bio,
+        "linkedin_url": u.linkedin_url,
+        "twitter_url": u.twitter_url,
+        "website_url": u.website_url,
+        "timezone": u.timezone,
+        "language_preference": u.language_preference,
+        "onboarding_completed": bool(u.onboarding_completed),
+        "is_active": bool(u.is_active),
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+    }
+
+
+def _serialize_membership(m: EnterpriseUser):
+    return {
+        "id": str(m.id),
+        "enterprise_id": str(m.enterprise_id),
+        "user_id": str(m.user_id),
+        "role": m.role,
+        "is_active": bool(m.is_active),
+        "joined_date": m.joined_date.isoformat() if m.joined_date else None,
+    }
+
+
+def _serialize_enterprise(e: Enterprise):
+    return {
+        "id": str(e.id),
+        "name": e.name,
+        "enterprise_type": e.enterprise_type,
+        "description": e.description,
+        "website": e.website,
+        "location": e.location,
+        "status": e.status,
+        "is_verified": bool(e.is_verified),
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+    }
+
+# in auth_bp file
+
+def _serialize_membership(m: EnterpriseUser):
+    # include enterprise details inline to avoid extra client calls
+    ent = m.enterprise  # relationship access
+    ent_payload = None
+    if ent:
+        ent_payload = {
+            "id": str(ent.id),
+            "name": ent.name,
+            "enterprise_type": ent.enterprise_type,
+            "location": ent.location,
+            "website": ent.website,
+            "status": ent.status,
+        }
+    return {
+        "id": str(m.id),
+        "enterprise_id": str(m.enterprise_id),
+        "user_id": str(m.user_id),
+        "role": m.role,
+        "is_active": bool(m.is_active),
+        "joined_date": m.joined_date.isoformat() if m.joined_date else None,
+        "enterprise": ent_payload,
+        # keep a flat copy for convenience:
+        "enterprise_type": ent.enterprise_type if ent else None,
+    }
+# --------------------- Routes --------------------- #
+
+@auth_bp.route("/register-complete", methods=["POST"])
+def register_complete():
+    data = request.get_json() or {}
+    supabase_id = data.get("supabase_id")
+    email       = data.get("email")
+    first_name  = (data.get("first_name") or "").strip()
+    last_name   = (data.get("last_name") or "").strip()
+    phone       = (data.get("phone") or "").strip() or None
+    role        = (data.get("role") or "entrepreneur").lower()
+    raw_location= data.get("location")
+    location    = (raw_location or "").strip() or None  # normalize
+
+    if not (supabase_id and email):
+        return jsonify({"error": "supabase_id and email required"}), 400
+
+    # upsert (basic)
+    user = db.session.get(User, supabase_id)
+    if not user:
+        user = User(
+            id=supabase_id,
+            email=email,
+            first_name=first_name or "New",
+            last_name=last_name or "User",
+            phone=phone,
+            location=location,
+        )
         db.session.add(user)
-        db.session.flush()  # Get the user ID
-        
-        # Create profile based on user type
-        if data['user_type'] == 'investor':
-            profile = InvestorProfile(user_id=user.id)
-            db.session.add(profile)
-        else:
-            profile = EntrepreneurProfile(
-                user_id=user.id,
-                company_name=data.get('company_name', '')
-            )
-            db.session.add(profile)
-        
-        db.session.commit()
-        
-        # Set session
-        session['user_id'] = user.id
-        session['user_type'] = user.user_type
-        
-        return jsonify({
-            'message': 'User registered successfully',
-            'user': user.to_dict()
-        }), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+    else:
+        if first_name:
+            user.first_name = first_name
+        if last_name:
+            user.last_name = last_name
+        if phone is not None:
+            user.phone = phone
+        # set to None if empty string
+        user.location = location
 
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    try:
-        data = request.json
-        
-        if not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Email and password are required'}), 400
-        
-        user = User.query.filter_by(email=data['email']).first()
-        
-        if not user or not user.check_password(data['password']):
-            return jsonify({'error': 'Invalid email or password'}), 401
-        
-        if not user.is_active:
-            return jsonify({'error': 'Account is deactivated'}), 401
-        
-        # Update last login
-        user.last_login = datetime.utcnow()
-        db.session.commit()
-        
-        # Set session
-        session['user_id'] = user.id
-        session['user_type'] = user.user_type
-        
-        return jsonify({
-            'message': 'Login successful',
-            'user': user.to_dict()
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    # ensure GeographicArea row exists if we have a location
+    if location:
+        ga = db.session.query(GeographicArea).filter(GeographicArea.name.ilike(location)).first()
+        if not ga:
+            ga = GeographicArea(name=location)
+            db.session.add(ga)
 
-@auth_bp.route('/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({'message': 'Logout successful'}), 200
+    # Create enterprise + owner membership if missing (active owner)
+    ent_type = "investor" if role == "investor" else "startup"
+    ent = (
+        db.session.query(Enterprise)
+        .join(EnterpriseUser, EnterpriseUser.enterprise_id == Enterprise.id)
+        .filter(
+            EnterpriseUser.user_id == user.id,
+            EnterpriseUser.role == "owner",
+            EnterpriseUser.is_active.is_(True),
+        )
+        .first()
+    )
 
-@auth_bp.route('/me', methods=['GET'])
-def get_current_user():
-    try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        user_data = user.to_dict()
-        
-        # Include profile data
-        if user.user_type == 'investor' and user.investor_profile:
-            user_data['profile'] = user.investor_profile.to_dict()
-        elif user.user_type == 'entrepreneur' and user.entrepreneur_profile:
-            user_data['profile'] = user.entrepreneur_profile.to_dict()
-        
-        return jsonify({'user': user_data}), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    if not ent:
+        ent = Enterprise(
+            name=f"{user.first_name} {user.last_name}".strip() or "New User",
+            enterprise_type=ent_type,
+            status="active",
+        )
+        db.session.add(ent)
+        db.session.flush()  # get ent.id
 
-@auth_bp.route('/profile', methods=['PUT'])
+        db.session.add(EnterpriseUser(
+            enterprise_id=ent.id,
+            user_id=user.id,
+            role="owner",
+            is_active=True,
+        ))
+    else:
+        if ent.enterprise_type != ent_type:
+            ent.enterprise_type = ent_type
+
+    db.session.commit()
+    return jsonify({"ok": True, "redirect": f"/complete-profile/{role}"}), 200
+
+
+@auth_bp.route("/profile", methods=["PUT", "PATCH"])
 def update_profile():
+    user, _, err = require_auth()
+    if err:
+        return err
+
+    data = request.get_json() or {}
+
+    # simple fields
+    for field in [
+        "first_name", "last_name", "phone", "linkedin_url",
+        "twitter_url", "website_url", "bio", "timezone",
+        "language_preference", "profile_image_url"
+    ]:
+        if field in data:
+            setattr(user, field, data[field])
+
+    # normalize and set location (None if empty)
+    if "location" in data:
+        loc = (data.get("location") or "").strip() or None
+        user.location = loc
+        if loc:
+            ga = db.session.query(GeographicArea).filter(GeographicArea.name.ilike(loc)).first()
+            if not ga:
+                db.session.add(GeographicArea(name=loc))
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated"}), 200
+
+
+@auth_bp.route("/me", methods=["GET"])
+def me():
+    user, _, err = require_auth()
+    if err:
+        return err
     try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        data = request.json
-        
-        # Update user fields
-        user_fields = ['first_name', 'last_name', 'phone', 'location', 'bio', 'linkedin_url', 'website_url']
-        for field in user_fields:
-            if field in data:
-                setattr(user, field, data[field])
-        
-        user.updated_at = datetime.utcnow()
-        
-        # Update profile fields based on user type
-        if user.user_type == 'investor' and user.investor_profile:
-            profile = user.investor_profile
-            profile_fields = [
-                'investment_range_min', 'investment_range_max', 'risk_tolerance',
-                'investor_type', 'accredited_status', 'net_worth', 'annual_income',
-                'investment_experience', 'portfolio_size', 'advisory_availability',
-                'board_experience', 'communication_frequency', 'meeting_preference'
-            ]
-            
-            for field in profile_fields:
-                if field in data:
-                    setattr(profile, field, data[field])
-            
-            # Handle JSON fields
-            if 'investment_stages' in data:
-                profile.set_investment_stages(data['investment_stages'])
-            if 'industries' in data:
-                profile.set_industries(data['industries'])
-            if 'geographic_focus' in data:
-                profile.set_geographic_focus(data['geographic_focus'])
-            if 'expertise_areas' in data:
-                profile.set_expertise_areas(data['expertise_areas'])
-            
-            profile.updated_at = datetime.utcnow()
-        
-        elif user.user_type == 'entrepreneur' and user.entrepreneur_profile:
-            profile = user.entrepreneur_profile
-            profile_fields = [
-                'company_name', 'company_description', 'industry', 'business_model',
-                'stage', 'founded_date', 'employee_count', 'location', 'funding_stage',
-                'funding_amount_seeking', 'funding_amount_raised', 'use_of_funds',
-                'monthly_revenue', 'monthly_growth_rate', 'gross_margin', 'burn_rate',
-                'runway_months', 'team_size', 'target_market', 'market_size',
-                'competitors', 'competitive_advantage', 'looking_for_strategic_value',
-                'is_actively_fundraising', 'pitch_deck_url', 'demo_url'
-            ]
-            
-            for field in profile_fields:
-                if field in data:
-                    if field == 'founded_date' and data[field]:
-                        # Convert date string to date object
-                        from datetime import datetime
-                        setattr(profile, field, datetime.strptime(data[field], '%Y-%m-%d').date())
-                    else:
-                        setattr(profile, field, data[field])
-            
-            # Handle JSON fields
-            if 'previous_funding_rounds' in data:
-                profile.set_previous_funding_rounds(data['previous_funding_rounds'])
-            if 'key_team_members' in data:
-                profile.set_key_team_members(data['key_team_members'])
-            if 'advisors' in data:
-                profile.set_advisors(data['advisors'])
-            if 'preferred_investor_types' in data:
-                profile.set_preferred_investor_types(data['preferred_investor_types'])
-            if 'geographic_investor_preference' in data:
-                profile.set_geographic_investor_preference(data['geographic_investor_preference'])
-            
-            profile.updated_at = datetime.utcnow()
-        
+        # bump last_active_at on successful authenticated fetch
+        user.last_active_at = datetime.now(timezone.utc)
         db.session.commit()
-        
-        # Return updated user data
-        user_data = user.to_dict()
-        if user.user_type == 'investor' and user.investor_profile:
-            user_data['profile'] = user.investor_profile.to_dict()
-        elif user.user_type == 'entrepreneur' and user.entrepreneur_profile:
-            user_data['profile'] = user.entrepreneur_profile.to_dict()
-        
+
+        memberships = [_serialize_membership(m) for m in user.enterprise_memberships]
         return jsonify({
-            'message': 'Profile updated successfully',
-            'user': user_data
+            "user": _serialize_user(user),
+            "memberships": memberships,
         }), 200
-        
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+    
+@auth_bp.route("/after-login", methods=["POST"])
+def after_login():
+    user, _, err = require_auth()
+    if err:
+        return err
 
-@auth_bp.route('/change-password', methods=['POST'])
-def change_password():
     try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        data = request.json
-        
-        if not data.get('current_password') or not data.get('new_password'):
-            return jsonify({'error': 'Current password and new password are required'}), 400
-        
-        if not user.check_password(data['current_password']):
-            return jsonify({'error': 'Current password is incorrect'}), 401
-        
-        if not validate_password(data['new_password']):
-            return jsonify({'error': 'New password must be at least 8 characters with uppercase, lowercase, and number'}), 400
-        
-        user.set_password(data['new_password'])
-        user.updated_at = datetime.utcnow()
+        user.last_active_at = datetime.now(timezone.utc)
+
+        # Optional: write a UserActivity row
+        from src.models.user import UserActivity
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+        ua = request.headers.get("User-Agent")
+        db.session.add(UserActivity(
+            user_id=user.id,
+            activity_type="login",
+            activity_category="auth",
+            activity_data={},
+            ip_address=ip,
+            user_agent=ua,
+            session_id=None,
+        ))
+
         db.session.commit()
-        
-        return jsonify({'message': 'Password changed successfully'}), 200
-        
+        return jsonify({"ok": True}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-@auth_bp.route('/subscription', methods=['PUT'])
-def update_subscription():
+@auth_bp.route("/logout", methods=["POST"])
+def logout():
+    user, _, err = require_auth()
+    if err:
+        return err
     try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        data = request.json
-        
-        if 'subscription_tier' not in data:
-            return jsonify({'error': 'Subscription tier is required'}), 400
-        
-        valid_tiers = ['free', 'basic', 'premium', 'vip', 'enterprise']
-        if data['subscription_tier'] not in valid_tiers:
-            return jsonify({'error': 'Invalid subscription tier'}), 400
-        
-        user.subscription_tier = data['subscription_tier']
-        user.updated_at = datetime.utcnow()
+        from datetime import datetime, timezone
+        from src.models.user import UserActivity
+
+        user.last_active_at = datetime.now(timezone.utc)  # or last_logout_at if you add it
+        db.session.add(UserActivity(
+            user_id=user.id,
+            activity_type="logout",
+            activity_category="auth",
+            activity_data={},
+            ip_address=request.headers.get("X-Forwarded-For", request.remote_addr),
+            user_agent=request.headers.get("User-Agent"),
+            session_id=None,
+        ))
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Subscription updated successfully',
-            'subscription_tier': user.subscription_tier
-        }), 200
-        
+        return jsonify({"ok": True}), 200  # or: return ("", 204)
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify({"error": str(e)}), 500

@@ -1,16 +1,18 @@
-// src/lib/socket.js
-import { io } from "socket.io-client";
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
 
-const API_BASE =
-  (import.meta?.env?.VITE_API_BASE_URL || "").replace(/\/$/, "") ||
-  window.location.origin;
-
-export const socket = io(API_BASE, {
-  path: "/socket.io",
-  transports: ["polling", "websocket"], // 👈 polling first, then upgrade
-  autoConnect: false,
-  withCredentials: false,
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { "@": path.resolve(__dirname, "./src") },
+  },
+  server: {
+    proxy: {
+      "/api":       { target: "https://hric.onrender.com", changeOrigin: true, secure: true },
+      "/socket.io": { target: "https://hric.onrender.com", ws: true, changeOrigin: true, secure: true },
+    },
+  },
 });
-
-// optional: if you want to silence upgrade errors entirely during dev:
-// export const socket = io(API_BASE, { transports: ["polling"], upgrade: false, autoConnect: false });

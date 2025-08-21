@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import MatchCard from "./MatchCard";
+import matchCard.jsx from "./matchCard.jsx";
 import { createClient } from "@supabase/supabase-js";
 
 // Initialize Supabase client (same as in your subscription code)
@@ -56,7 +56,7 @@ function MatchFeed() {
           const founder = e.founder || {};
 
           return (
-            <MatchCard
+            <matchCard.jsx
               key={e.id}
               founder={`${founder.first_name || ""} ${founder.last_name || ""}`}
               company_name={e.name}

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import DefaultAvatar from "@/assets/default_user_image.png";
-import LocationAutocomplete from "@/components/LocationAutocomplete";
+import LocationAutocomplete from "@/components/locationAutoComplete.jsx";
 
 // --- sessionStorage helpers (same keys used in Register) ---
 const KEYS = {

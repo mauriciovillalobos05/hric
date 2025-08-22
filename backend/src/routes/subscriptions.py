@@ -18,6 +18,15 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")  # must be sk_test_... in sandbo
 
 # --------------------- Auth --------------------- #
 
+def _supabase_userinfo_url() -> str:
+    # Ensure we’re actually calling Supabase, not ourselves
+    if not SUPABASE_URL:
+        raise RuntimeError("SUPABASE_URL env is missing")
+    base = SUPABASE_URL.rstrip("/")
+    if "supabase.co" not in base:
+        raise RuntimeError(f"SUPABASE_URL looks wrong: {base} (expected https://<ref>.supabase.co)")
+    return f"{base}/auth/v1/user"
+
 def require_auth():
     """Validate Supabase JWT and return (user, token, error_tuple_or_None)."""
     auth_header = request.headers.get("Authorization", "")
@@ -26,15 +35,20 @@ def require_auth():
 
     token = auth_header.split(" ")[1]
     try:
+        url = _supabase_userinfo_url()
         resp = requests.get(
-            f"{SUPABASE_URL}/auth/v1/user",
+            url,
             headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
-            timeout=15,
+            timeout=(3, 15),
         )
         if resp.status_code != 200:
             return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
         user_id = resp.json()["id"]
+    except RecursionError:
+        current_app.logger.exception("Auth recursion detected (check SUPABASE_URL)")
+        return None, None, (jsonify({"error": "Token verification failed: recursion (bad SUPABASE_URL)"}), 500)
     except Exception as e:
+        current_app.logger.exception("Token verification failed")
         return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
 
     user = db.session.get(User, user_id)
@@ -213,7 +227,7 @@ def _ensure_stripe_price(plan: UserPlan, interval: str) -> str | None:
 
 @subscriptions_bp.route("/plans", methods=["GET"])
 def get_plans():
-    """List active plans; seed defaults if empty."""
+    """List active plans; seed defaults if empty. Fail-soft with a Free plan if DB errors."""
     try:
         _ensure_default_plans()
         plans = (
@@ -224,9 +238,37 @@ def get_plans():
         )
         return jsonify({"plans": [_plan_to_dict(p) for p in plans]}), 200
     except Exception as e:
-        # Logs full stack trace in Render logs
         current_app.logger.exception("GET /api/subscriptions/plans failed")
-        return jsonify({"error": f"/plans failed: {str(e)}"}), 500
+        # Soft fallback: return a minimal Free plan for both roles so the UI continues
+        fallback = [
+            {
+                "id": "fallback-investor-free",
+                "plan_key": "investor_free",
+                "name": "Investor Free",
+                "description": "Get started",
+                "monthly_price": 0,
+                "annual_price": 0,
+                "features": ["Basic access"],
+                "is_active": True,
+                "stripe_product_id": None,
+                "stripe_price_id_monthly": None,
+                "stripe_price_id_annual": None,
+            },
+            {
+                "id": "fallback-entrepreneur-free",
+                "plan_key": "entrepreneur_free",
+                "name": "Entrepreneur Free",
+                "description": "Get started",
+                "monthly_price": 0,
+                "annual_price": 0,
+                "features": ["Basic access"],
+                "is_active": True,
+                "stripe_product_id": None,
+                "stripe_price_id_monthly": None,
+                "stripe_price_id_annual": None,
+            },
+        ]
+        return jsonify({"plans": fallback, "warning": f"/plans failed: {str(e)}"}), 200
 
 @subscriptions_bp.route("/checkout", methods=["POST"])
 def create_checkout_session():

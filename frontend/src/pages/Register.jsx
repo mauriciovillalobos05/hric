@@ -80,7 +80,7 @@ export default function Register() {
         email,
         password,
         options: {
-          emailRedirectTo: `https://hric-unh3.vercel.app//onboarding`,
+          emailRedirectTo: `https://hric-unh3.vercel.app/onboarding`,
           data: { first_name: firstName, last_name: lastName, phone, role },
         },
       });

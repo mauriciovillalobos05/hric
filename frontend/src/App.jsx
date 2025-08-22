@@ -16,38 +16,119 @@ import EmailPendingSecondary from "./pages/emailPendingSecondary";
 import EmailConfirmationSent from "./pages/emailConfirmationSent";
 import ProfilePreview from "./pages/profileViews/ProfilePreview";
 import SelectPlan from "./pages/selectPlan";
+import ProtectedRoute from "./auth/protectedRoute";
 
-function App() {
+export default function App() {
   return (
-    <>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/" element={<HomePage />} />
-        <Route path="/select-plan" element={<SelectPlan />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+    <Routes>
+      {/* Public */}
+      <Route path="/" element={<HomePage />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/email-confirmation-sent" element={<EmailConfirmationSent />} />
 
-        {/* Keep everything public for the dummy simulation */}
-        <Route path="/portfolio" element={<Portfolio />} />
-        <Route path="/analysis" element={<Analysis />} />
-        <Route path="/email-pending-secondary" element={<EmailPendingSecondary />} />
-        <Route path="/email-confirmation-sent" element={<EmailConfirmationSent />} />
-        <Route path="/onboarding" element={<Onboarding />} />
-        <Route path="/complete-profile/investor" element={<InvestorProfile />} />
-        <Route path="/complete-profile/entrepreneur" element={<EntrepreneurProfile />} />
-        <Route path="/profile-settings" element={<ProfileSettings />} />
-        <Route path="/profile/:userId" element={<ProfilePreview />} />
+      {/* Protected (signed-in) */}
+      <Route
+        path="/select-plan"
+        element={
+          <ProtectedRoute>
+            <SelectPlan />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/portfolio"
+        element={
+          <ProtectedRoute>
+            <Portfolio />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/analysis"
+        element={
+          <ProtectedRoute>
+            <Analysis />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/email-pending-secondary"
+        element={
+          <ProtectedRoute>
+            <EmailPendingSecondary />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <Onboarding />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/complete-profile/investor"
+        element={
+          <ProtectedRoute>
+            <InvestorProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/complete-profile/entrepreneur"
+        element={
+          <ProtectedRoute>
+            <EntrepreneurProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile-settings"
+        element={
+          <ProtectedRoute>
+            <ProfileSettings />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile/:userId"
+        element={
+          <ProtectedRoute>
+            <ProfilePreview />
+          </ProtectedRoute>
+        }
+      />
 
-        {/* Dashboards (no auth required) */}
-        <Route path="/dashboard/user" element={<MainUserDashboard />} />
-        <Route path="/dashboard/investor" element={<InvestorsDashboard />} />
-        <Route path="/dashboard/entrepreneur" element={<EntrepreneurDashboard />} />
+      {/* Dashboards */}
+      <Route
+        path="/dashboard/user"
+        element={
+          <ProtectedRoute>
+            {/* Let the component resolve enterpriseType (or sessionStorage) itself */}
+            <MainUserDashboard />
+          </ProtectedRoute>
+        }
+      />
 
-        {/* Catch-all to keep SPA happy even without the Vercel rewrite */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+      {/* Enterprise-type gated dashboards */}
+      <Route
+        path="/dashboard/investor"
+        element={
+          <ProtectedRoute requiredEnterpriseTypes={["investor"]}>
+            <InvestorsDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/entrepreneur"
+        element={
+          <ProtectedRoute requiredEnterpriseTypes={["startup"]}>
+            <EntrepreneurDashboard />
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   );
 }
-
-export default App;

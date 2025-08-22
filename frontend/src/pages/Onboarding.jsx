@@ -14,11 +14,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_API_URL ||
-  "https://hric.onrender.com"
-).replace(/\/$/, "");
+// Same-origin in prod (via Vercel rewrite), explicit base in dev
+const DEV_API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const api = (path) => (import.meta.env.PROD ? path : `${DEV_API_BASE}${path}`);
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -43,7 +41,7 @@ export default function Onboarding() {
     role: "",
   });
 
-  // ✅ 1) Capture the auth fragment and persist the session
+  // Capture tokens from the URL fragment and persist session
   useEffect(() => {
     (async () => {
       const hash = window.location.hash?.replace(/^#/, "") || "";
@@ -59,41 +57,7 @@ export default function Onboarding() {
     })();
   }, []);
 
-  // Prefill from Supabase + load plans
-  useEffect(() => {
-    (async () => {
-      try {
-        const { user, role } = await fetchUserAndRole();
-        if (!user) throw new Error("User not authenticated");
-
-        setForm((prev) => ({
-          ...prev,
-          role,
-          first_name: user.user_metadata?.first_name || "",
-          last_name: user.user_metadata?.last_name || "",
-          phone: user.user_metadata?.phone || "",
-          location: user.user_metadata?.location || "",
-        }));
-
-        const res = await fetch(`${API_BASE}/api/subscriptions/plans`, {
-          headers: { Accept: "application/json" },
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to load plans (${res.status})`);
-        }
-        const json = await res.json();
-        const activePlans = Array.isArray(json.plans) ? json.plans : [];
-        setPlans(activePlans);
-      } catch (e) {
-        console.error(e);
-        setError(e.message || "Failed to load user");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  // Helper: detect free/basic plan (robust across naming/pricing)
+  // Helper: detect free/basic
   const isFreePlan = (plan) => {
     const price = Number(plan?.monthly_price ?? 0);
     const key = String(plan?.plan_key || "");
@@ -101,7 +65,7 @@ export default function Onboarding() {
     return price <= 0 || /(\b|_)(free|basic)(\b|_)/i.test(key) || /free|basic/i.test(name);
   };
 
-  // Prefill from Supabase + load plans
+  // Load user + plans
   useEffect(() => {
     (async () => {
       try {
@@ -117,10 +81,12 @@ export default function Onboarding() {
           location: user.user_metadata?.location || "",
         }));
 
-        const res = await fetch(`${API_BASE}/api/subscriptions/plans`);
+        const res = await fetch(api("/api/subscriptions/plans"), {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`Failed to load plans (${res.status})`);
         const json = await res.json();
-        const activePlans = Array.isArray(json.plans) ? json.plans : [];
-        setPlans(activePlans);
+        setPlans(Array.isArray(json.plans) ? json.plans : []);
       } catch (e) {
         console.error(e);
         setError(e.message || "Failed to load user");
@@ -136,7 +102,7 @@ export default function Onboarding() {
     return plans.filter((p) => (p.plan_key || "").startsWith(prefix));
   }, [plans, form.role]);
 
-  // Auto-select the free plan when plans load
+  // Auto-select the free plan
   useEffect(() => {
     if (selectedPlanKey) return;
     const free = visiblePlans.find(isFreePlan);
@@ -153,7 +119,6 @@ export default function Onboarding() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-
     try {
       const {
         data: { user },
@@ -166,15 +131,10 @@ export default function Onboarding() {
       const accessToken = session?.access_token;
       if (!accessToken) throw new Error("User session expired");
 
-      if (!selectedPlanKey) {
-        throw new Error("Please choose a plan to continue.");
-      }
+      if (!selectedPlanKey) throw new Error("Please choose a plan to continue.");
 
-      // Enforce: only free plan can be submitted
       const selectedPlan = visiblePlans.find((p) => p.plan_key === selectedPlanKey);
-      if (!isFreePlan(selectedPlan)) {
-        throw new Error("Only the Free plan is available at the moment.");
-      }
+      if (!isFreePlan(selectedPlan)) throw new Error("Only the Free plan is available at the moment.");
 
       // Optional avatar upload
       let profileImagePath = null;
@@ -189,38 +149,30 @@ export default function Onboarding() {
         profileImagePath = filepath;
       }
 
-      // Persist role/plan in Supabase metadata (client convenience)
+      // Persist metadata
       const { error: metadataError } = await supabase.auth.updateUser({
-        data: {
-          role: form.role,
-          plan: selectedPlanKey,
-          location: form.location || null,
-        },
+        data: { role: form.role, plan: selectedPlanKey, location: form.location || null },
       });
       if (metadataError) throw metadataError;
 
-      // Build clean payload with trimming
+      // Update profile in API
       const payload = {
         first_name: (form.first_name || "").trim(),
         last_name: (form.last_name || "").trim(),
         phone: (form.phone || "").trim(),
-        location: (form.location || "").trim(), // ← NEW
+        location: (form.location || "").trim(),
         linkedin_url: (form.linkedin_url || "").trim(),
         twitter_url: (form.twitter_url || "").trim(),
         website_url: (form.website_url || "").trim(),
         bio: (form.bio || "").trim(),
         timezone: form.timezone || "UTC",
         language_preference: form.language_preference || "en",
-        profile_image_url: profileImagePath, // may be null if not uploaded
+        profile_image_url: profileImagePath,
       };
 
-      // Update users table
-      const profileRes = await fetch(`${API_BASE}/api/auth/profile`, {
+      const profileRes = await fetch(api("/api/auth/profile"), {
         method: "PUT",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!profileRes.ok) {
@@ -228,12 +180,10 @@ export default function Onboarding() {
         throw new Error(t || "Failed to save profile");
       }
 
-      // INSERT enterprise + profile block here
-      const fullName = `${(form.first_name || "").trim()} ${(form.last_name || "")
-        .trim()}`.trim();
+      // Create enterprise + link + role-specific profile
+      const fullName = `${(form.first_name || "").trim()} ${(form.last_name || "").trim()}`.trim();
       const enterprise_type = form.role === "investor" ? "investor" : "startup";
 
-      // 1) enterprise
       const { data: ent, error: entErr } = await supabase
         .from("enterprise")
         .insert({
@@ -246,7 +196,6 @@ export default function Onboarding() {
         .single();
       if (entErr) throw entErr;
 
-      // 2) enterprise_user link
       const { error: linkErr } = await supabase.from("enterprise_user").insert({
         enterprise_id: ent.id,
         user_id: user.id,
@@ -255,61 +204,37 @@ export default function Onboarding() {
       });
       if (linkErr) throw linkErr;
 
-      // 3) role-specific profile
       if (enterprise_type === "investor") {
-        const { error } = await supabase.from("investor_profile").insert({
-          enterprise_id: ent.id,
-        });
+        const { error } = await supabase.from("investor_profile").insert({ enterprise_id: ent.id });
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("startup_profile").insert({
-          enterprise_id: ent.id,
-        });
+        const { error } = await supabase.from("startup_profile").insert({ enterprise_id: ent.id });
         if (error) throw error;
       }
 
-      // 4) convenience: store enterprise_id back to auth metadata
       await supabase.auth.updateUser({
-        data: {
-          role: enterprise_type === "investor" ? "investor" : "entrepreneur",
-          enterprise_id: ent.id,
-        },
+        data: { role: enterprise_type === "investor" ? "investor" : "entrepreneur", enterprise_id: ent.id },
       });
 
-      // Create Stripe checkout session (or redirect for free plans)
-      const checkoutRes = await fetch(
-        `${API_BASE}/api/subscriptions/checkout`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            plan_key: selectedPlanKey,
-            billing_interval: "monthly",
-          }),
-        }
-      );
+      // Free plan path (no Stripe URL expected)
+      const checkoutRes = await fetch(api("/api/subscriptions/checkout"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ plan_key: selectedPlanKey, billing_interval: "monthly" }),
+      });
 
       const resp = await checkoutRes.json().catch(() => ({}));
-      if (!checkoutRes.ok) {
-        throw new Error(resp.error || "Failed to create Stripe session");
-      }
+      if (!checkoutRes.ok) throw new Error(resp.error || "Failed to create Stripe session");
 
-      if (resp.checkout_url) {
-        window.location.href = resp.checkout_url;
-        return;
-      }
-      if (resp.redirect_url) {
-        window.location.href = resp.redirect_url;
-        return;
-      }
+      if (resp.checkout_url) return (window.location.href = resp.checkout_url);
+      if (resp.redirect_url) return (window.location.href = resp.redirect_url);
 
-      navigate(
-        form.role === "investor" ? "/dashboard/investor" : "/dashboard/entrepreneur"
-      );
+      // Default navigation for free plan
+      navigate(form.role === "investor" ? "/dashboard/investor" : "/dashboard/entrepreneur");
     } catch (err) {
       console.error("Onboarding error:", err);
       setError(err.message || "Failed to complete onboarding");
@@ -339,10 +264,7 @@ export default function Onboarding() {
         </CardHeader>
         <CardContent>
           {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
-          <form
-            onSubmit={handleSubmit}
-            className="grid grid-cols-1 md:grid-cols-2 gap-4"
-          >
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Avatar */}
             <div className="col-span-2 flex justify-center">
               <label className="relative cursor-pointer group">
@@ -354,9 +276,7 @@ export default function Onboarding() {
                 />
                 <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-gray-300 group-hover:ring-2 group-hover:ring-blue-400 transition-all">
                   <img
-                    src={
-                      file ? URL.createObjectURL(file) : "/default-profile.png"
-                    }
+                    src={file ? URL.createObjectURL(file) : "/default-profile.png"}
                     alt="Profile Preview"
                     className="w-full h-full object-cover"
                   />
@@ -395,23 +315,17 @@ export default function Onboarding() {
             <Input
               placeholder="LinkedIn URL"
               value={form.linkedin_url}
-              onChange={(e) =>
-                setForm({ ...form, linkedin_url: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, linkedin_url: e.target.value })}
             />
             <Input
               placeholder="Twitter URL"
               value={form.twitter_url}
-              onChange={(e) =>
-                setForm({ ...form, twitter_url: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, twitter_url: e.target.value })}
             />
             <Input
               placeholder="Website URL"
               value={form.website_url}
-              onChange={(e) =>
-                setForm({ ...form, website_url: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, website_url: e.target.value })}
             />
             <textarea
               placeholder="Short Bio"
@@ -435,9 +349,7 @@ export default function Onboarding() {
             </select>
             <select
               value={form.language_preference}
-              onChange={(e) =>
-                setForm({ ...form, language_preference: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, language_preference: e.target.value })}
               className="w-full border rounded-md p-2"
             >
               <option value="en">Language: English</option>
@@ -453,9 +365,7 @@ export default function Onboarding() {
               </div>
 
               {visiblePlans.length === 0 && (
-                <p className="text-sm text-gray-600">
-                  No active plans found for your role yet.
-                </p>
+                <p className="text-sm text-gray-600">No active plans found for your role yet.</p>
               )}
 
               <div className="grid md:grid-cols-3 gap-4">
@@ -487,9 +397,7 @@ export default function Onboarding() {
 
                       {plan.features?.includes?.("popular") && (
                         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                          <Badge className="bg-blue-600 text-white px-3 py-1">
-                            Most Popular
-                          </Badge>
+                          <Badge className="bg-blue-600 text-white px-3 py-1">Most Popular</Badge>
                         </div>
                       )}
                       <CardHeader className="text-center pb-4">
@@ -501,9 +409,7 @@ export default function Onboarding() {
                           <span className="text-gray-600">/month</span>
                         </div>
                         {plan.description && (
-                          <p className="text-sm mt-2 text-gray-600">
-                            {plan.description}
-                          </p>
+                          <p className="text-sm mt-2 text-gray-600">{plan.description}</p>
                         )}
                       </CardHeader>
                       <CardContent>
@@ -520,11 +426,7 @@ export default function Onboarding() {
             </div>
 
             <Button type="submit" className="col-span-2" disabled={loading}>
-              {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                "Save & Continue"
-              )}
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save & Continue"}
             </Button>
           </form>
         </CardContent>

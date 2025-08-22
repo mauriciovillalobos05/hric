@@ -1,3 +1,4 @@
+# src/main.py
 import os
 from dotenv import load_dotenv
 from flask import Flask, send_from_directory
@@ -29,12 +30,20 @@ load_dotenv()
 
 def create_app():
     app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
-    app.config['SECRET_KEY'] = 'hric-platform-secret-key-2025'
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'hric-platform-secret-key-2025')
 
-    # CORS
-    CORS(app, origins="*")
+    # ===== CORS / Socket.IO allow only client origins (NOT the backend URL) =====
+    # Configure via env so you don’t edit code later:
+    # ALLOWED_ORIGINS="https://hric-unh3.vercel.app,http://localhost:3000"
+    allowed_origins = [o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "https://hric-unh3.vercel.app,http://localhost:5173"
+    ).split(",") if o.strip()]
 
-    # DB URL (normalize postgres:// → postgresql:// for SQLAlchemy)
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+    socketio.init_app(app, cors_allowed_origins=allowed_origins)
+
+    # ===== DB, uploads, blueprints… (unchanged) =====
     db_url = os.getenv('DATABASE_URL')
     if not db_url:
         raise RuntimeError("DATABASE_URL not found in environment variables.")
@@ -52,11 +61,17 @@ def create_app():
     # Init extensions
     db.init_app(app)
     Migrate(app, db, compare_type=True, compare_server_default=True)
-    socketio.init_app(app)
+
+    # Socket.IO — init ONCE
+    socketio.init_app(app, cors_allowed_origins=[
+        "https://hric-unh3.vercel.app",
+        "http://localhost:3000",
+        "*",
+    ])
 
     # Ensure models are registered with SQLAlchemy’s metadata
     with app.app_context():
-        import src.models  # <-- important for Alembic autogenerate
+        import src.models
 
     # Blueprints
     app.register_blueprint(users_bp, url_prefix='/api')
@@ -78,7 +93,7 @@ def create_app():
     app.register_blueprint(recs_bp,  url_prefix="/api")
     app.register_blueprint(webhooks_bp, url_prefix="/stripe")
 
-    # Static files
+    # Static (not required if frontend is on Vercel, but harmless)
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def serve(path):
@@ -97,4 +112,4 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    socketio.run(app, host='0.0.0.0', port=8000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)), debug=True)

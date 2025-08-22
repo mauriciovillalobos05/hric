@@ -24,7 +24,7 @@ export default function EmailConfirmationSent() {
         </CardHeader>
         <CardContent className="text-gray-700 space-y-3">
           <p>
-            A confirmation email has been sent to both your old and new email addresses.
+            A confirmation email has been sent to your email address to keep on with the process of register.
           </p>
           <p>
             Please check your inbox and confirm your email to continue.

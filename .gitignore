@@ -46,3 +46,5 @@ yarn.lock
 
 # Optional: Build analysis artifacts
 *.tsbuildinfo
+config.bat
+node_modules

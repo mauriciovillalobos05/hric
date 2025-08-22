@@ -2,10 +2,9 @@ import React, { useRef, useState, useCallback, useEffect, useMemo } from "react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Users, Radar, BarChart3 } from "lucide-react";
 import Dashboard from "./components/Dashboard";
-import SpiderChart from "./components/SpiderChart";
-import MonteCarloResults from "./components/MonteCarloResults";
+import SpiderChart from "./SpiderChart.jsx";
+import MonteCarloResults from "./MonteCarloResults.jsx";
 import StartupCard from "./FilterPanel/StartupCard";
-
 const ACTIVE_KEY = "activeInvestorId";
 const COMPARE_KEY = "compareInvestorIds";
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import MatchCard from "./MatchCard";
+import MatchCard from "matchCard.jsx";
 import { createClient } from "@supabase/supabase-js";
 
 // Initialize Supabase client (same as in your subscription code)

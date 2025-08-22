@@ -1,7 +1,7 @@
 import React from "react";
 import { Routes, Route } from "react-router-dom";
 import HomePage from "./dashboards/HomePage";
-import MainUserDashboard from "./dashboards/MainUserDashboard";
+import MainUserDashboard from "./dashboards/mainUserDashboard.jsx";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";
 import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard";
 import ProfileSettings from "./pages/ProfileSettings/profileSettings";

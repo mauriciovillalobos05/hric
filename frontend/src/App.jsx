@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import HomePage from "./dashboards/HomePage";
 import MainUserDashboard from "./dashboards/mainUserDashboard.jsx";
 import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";
@@ -16,6 +16,7 @@ import EmailPendingSecondary from "./pages/emailPendingSecondary";
 import EmailConfirmationSent from "./pages/emailConfirmationSent";
 import ProfilePreview from "./pages/profileViews/ProfilePreview";
 import SelectPlan from "./pages/selectPlan";
+
 function App() {
   return (
     <>
@@ -41,6 +42,9 @@ function App() {
         <Route path="/dashboard/user" element={<MainUserDashboard />} />
         <Route path="/dashboard/investor" element={<InvestorsDashboard />} />
         <Route path="/dashboard/entrepreneur" element={<EntrepreneurDashboard />} />
+
+        {/* Catch-all to keep SPA happy even without the Vercel rewrite */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );

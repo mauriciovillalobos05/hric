@@ -17,6 +17,8 @@ const supabase = createClient(
 const API_BASE =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "https://hric.onrender.com";
 
+const SITE_URL = "https://hric-unh3.vercel.app";
+
 export default function Register() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -80,7 +82,7 @@ export default function Register() {
         email,
         password,
         options: {
-          emailRedirectTo: `https://hric-unh3.vercel.app/onboarding`,
+          emailRedirectTo: `${SITE_URL}/onboarding`,
           data: { first_name: firstName, last_name: lastName, phone, role },
         },
       });

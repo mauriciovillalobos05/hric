@@ -29,12 +29,11 @@ export default function Onboarding() {
   const [plans, setPlans] = useState([]);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
 
-  // Only columns that exist in public.users
   const [form, setForm] = useState({
     first_name: "",
     last_name: "",
     phone: "",
-    location: "", // ← NEW
+    location: "",
     linkedin_url: "",
     twitter_url: "",
     website_url: "",
@@ -43,6 +42,56 @@ export default function Onboarding() {
     language_preference: "en",
     role: "",
   });
+
+  // ✅ 1) Capture the auth fragment and persist the session
+  useEffect(() => {
+    (async () => {
+      const hash = window.location.hash?.replace(/^#/, "") || "";
+      if (!hash) return;
+      const p = new URLSearchParams(hash);
+      const access_token = p.get("access_token");
+      const refresh_token = p.get("refresh_token");
+      if (access_token && refresh_token) {
+        await supabase.auth.setSession({ access_token, refresh_token });
+        // Clean the URL (remove the token fragment)
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    })();
+  }, []);
+
+  // Prefill from Supabase + load plans
+  useEffect(() => {
+    (async () => {
+      try {
+        const { user, role } = await fetchUserAndRole();
+        if (!user) throw new Error("User not authenticated");
+
+        setForm((prev) => ({
+          ...prev,
+          role,
+          first_name: user.user_metadata?.first_name || "",
+          last_name: user.user_metadata?.last_name || "",
+          phone: user.user_metadata?.phone || "",
+          location: user.user_metadata?.location || "",
+        }));
+
+        const res = await fetch(`${API_BASE}/api/subscriptions/plans`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to load plans (${res.status})`);
+        }
+        const json = await res.json();
+        const activePlans = Array.isArray(json.plans) ? json.plans : [];
+        setPlans(activePlans);
+      } catch (e) {
+        console.error(e);
+        setError(e.message || "Failed to load user");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   // Helper: detect free/basic plan (robust across naming/pricing)
   const isFreePlan = (plan) => {

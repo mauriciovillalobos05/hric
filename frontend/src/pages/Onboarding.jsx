@@ -51,7 +51,6 @@ export default function Onboarding() {
       const refresh_token = p.get("refresh_token");
       if (access_token && refresh_token) {
         await supabase.auth.setSession({ access_token, refresh_token });
-        // Clean the URL (remove the token fragment)
         history.replaceState(null, "", window.location.pathname + window.location.search);
       }
     })();
@@ -65,7 +64,7 @@ export default function Onboarding() {
     return price <= 0 || /(\b|_)(free|basic)(\b|_)/i.test(key) || /free|basic/i.test(name);
   };
 
-  // Load user + plans
+  // Load user + plans (with Free fallback on failure)
   useEffect(() => {
     (async () => {
       try {
@@ -84,12 +83,46 @@ export default function Onboarding() {
         const res = await fetch(api("/api/subscriptions/plans"), {
           headers: { Accept: "application/json" },
         });
-        if (!res.ok) throw new Error(`Failed to load plans (${res.status})`);
-        const json = await res.json();
-        setPlans(Array.isArray(json.plans) ? json.plans : []);
+
+        if (!res.ok) {
+          // Backend is returning 500 → fallback to a synthetic Free plan
+          console.warn("Plans endpoint failed:", res.status);
+          const prefix = role === "investor" ? "investor_" : "entrepreneur_";
+          setPlans([
+            {
+              id: "fallback-free",
+              plan_key: `${prefix}free`,
+              name: "Free",
+              description: "Get started",
+              monthly_price: 0,
+              annual_price: 0,
+              features: ["Basic access"],
+              is_active: true,
+            },
+          ]);
+          setError(null);
+        } else {
+          const json = await res.json();
+          setPlans(Array.isArray(json.plans) ? json.plans : []);
+        }
       } catch (e) {
         console.error(e);
-        setError(e.message || "Failed to load user");
+        // Network/other error → same Free fallback
+        const role = (await supabase.auth.getUser()).data.user?.user_metadata?.role || "entrepreneur";
+        const prefix = role === "investor" ? "investor_" : "entrepreneur_";
+        setPlans([
+          {
+            id: "fallback-free",
+            plan_key: `${prefix}free`,
+            name: "Free",
+            description: "Get started",
+            monthly_price: 0,
+            annual_price: 0,
+            features: ["Basic access"],
+            is_active: true,
+          },
+        ]);
+        setError(null);
       } finally {
         setLoading(false);
       }

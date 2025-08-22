@@ -5,8 +5,7 @@ import os
 
 import requests
 import stripe
-from flask import Blueprint, jsonify, request
-
+from flask import Blueprint, jsonify, request, current_app
 from src.extensions import db
 from src.models.user import User, Subscription, UserPlan, Enterprise
 
@@ -215,14 +214,19 @@ def _ensure_stripe_price(plan: UserPlan, interval: str) -> str | None:
 @subscriptions_bp.route("/plans", methods=["GET"])
 def get_plans():
     """List active plans; seed defaults if empty."""
-    _ensure_default_plans()
-    plans = (
-        db.session.query(UserPlan)
-        .filter_by(is_active=True)
-        .order_by(UserPlan.name.asc())
-        .all()
-    )
-    return jsonify({"plans": [_plan_to_dict(p) for p in plans]}), 200
+    try:
+        _ensure_default_plans()
+        plans = (
+            db.session.query(UserPlan)
+            .filter_by(is_active=True)
+            .order_by(UserPlan.name.asc())
+            .all()
+        )
+        return jsonify({"plans": [_plan_to_dict(p) for p in plans]}), 200
+    except Exception as e:
+        # Logs full stack trace in Render logs
+        current_app.logger.exception("GET /api/subscriptions/plans failed")
+        return jsonify({"error": f"/plans failed: {str(e)}"}), 500
 
 @subscriptions_bp.route("/checkout", methods=["POST"])
 def create_checkout_session():

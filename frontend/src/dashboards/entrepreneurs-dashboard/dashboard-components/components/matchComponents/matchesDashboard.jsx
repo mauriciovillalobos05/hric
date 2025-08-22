@@ -238,11 +238,16 @@ function serializeWeightsForQuery(f) {
 }
 function serializeFiltersToQuery(f = {}, startupCity) {
   const toText = (x) =>
-    x && typeof x === "object" ? (x.label ?? x.value ?? x.name ?? "") : String(x ?? "");
+    x && typeof x === "object"
+      ? x.label ?? x.value ?? x.name ?? ""
+      : String(x ?? "");
   const params = new URLSearchParams();
 
   // Investor Type
-  const types = (f.investorTypes || []).map(toText).filter(Boolean).map((s) => s.toLowerCase());
+  const types = (f.investorTypes || [])
+    .map(toText)
+    .filter(Boolean)
+    .map((s) => s.toLowerCase());
   if (types.length) params.set("investorType", types.join(","));
 
   // Stages / Industries
@@ -452,7 +457,13 @@ const MatchesDashboard = ({
     } finally {
       setLoading(false);
     }
-  }, [minScore, order, effectiveWeightsParam, effectiveRaiseTargetUsd, filtersQSLocal]);
+  }, [
+    minScore,
+    order,
+    effectiveWeightsParam,
+    effectiveRaiseTargetUsd,
+    filtersQSLocal,
+  ]);
 
   useEffect(() => {
     loadOnce();
@@ -557,47 +568,31 @@ const MatchesDashboard = ({
           </TabsList>
 
           <TabsContent value="matches">
-            {/* Attach ref so the view observer can find cards */}
-            <div
-              ref={listRef}
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-            >
-              {matchedInvestors.map((inv) => (
-                <InvestorCard
-                  key={inv._raw?.match_id || inv.id}
-                  investor={inv}
-                  matchScore={inv.matchScore}
-                  onSimulate={() => {}}
-                  onToggleCompare={() => {}}
-                />
-              ))}
+            <div className="py-10 text-center text-sm text-gray-500">
+              Coming soon
             </div>
           </TabsContent>
 
           <TabsContent value="analytics">
-            <Dashboard
-              investors={matchedInvestors}
-              filteredInvestors={matchedInvestors}
-            />
+            <div className="py-10 text-center text-sm text-gray-500">
+              Coming soon
+            </div>
           </TabsContent>
 
           <TabsContent value="compare">
-            <SpiderChart
-              investors={
-                compareIds.length
-                  ? matchedInvestors.filter((i) => compareIds.includes(i.id))
-                  : []
-              }
-            />
+            <div className="py-10 text-center text-sm text-gray-500">
+              Coming soon
+            </div>
           </TabsContent>
 
-          <div className="mt-6">
-            <MonteCarloResults
-              selectedInvestors={activeInvestor}
-              simulationResults={
-                activeInvestor?.simulation ?? simulationResults
-              }
-            />
+          <div className="mt-6 space-y-3">
+            <h3 className="text-lg font-semibold">Monte Carlo</h3>
+            <p className="text-sm text-gray-600">
+              This runs many random simulations to estimate outcomes of your
+              fundraising pipeline. It varies inputs like win rate, check size,
+              and time-to-close to produce a distribution of results (median,
+              P10/P90 ranges, and the probability of hitting a target).
+            </p>
           </div>
         </Tabs>
       </div>

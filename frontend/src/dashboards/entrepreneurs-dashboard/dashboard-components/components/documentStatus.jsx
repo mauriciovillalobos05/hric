@@ -108,89 +108,18 @@ export default function DocumentStatus({ initialDocuments = [] }) {
   };
 
   return (
-    <section className="bg-white border rounded-lg shadow-sm p-6 mt-6">
-      <div
-        {...getRootProps()}
-        className={`p-6 border-2 border-dashed rounded-md cursor-pointer text-center ${
-          isDragActive ? "border-blue-500 bg-blue-50" : "border-gray-300"
-        }`}
-      >
-        <input {...getInputProps()} />
-        {isDragActive ? (
-          <p className="text-blue-700">Drop the files here ...</p>
-        ) : (
-          <p className="text-gray-600">
-            Drag & drop your documents here, or click to browse.
-          </p>
-        )}
-        {uploadProgress !== null && (
-          <div className="mt-2 text-sm text-blue-700">
-            Uploading... {uploadProgress}%
-          </div>
-        )}
-      </div>
-
-      <h2 className="text-lg font-semibold mt-8 mb-4 text-gray-800">
-        Uploaded Documents
-      </h2>
-      {documents.length === 0 ? (
-        <p className="text-gray-500 text-sm italic">
-          No documents uploaded yet.
-        </p>
-      ) : (
-        <div className="space-y-4">
-          {documents.map((doc) => (
-            <div
-              key={doc.id}
-              className="border rounded-md p-4 flex justify-between items-start"
-            >
-              <div className="flex-1">
-                {editingDocId === doc.id ? (
-                  <>
-                    <input
-                      type="text"
-                      className="border rounded px-2 py-1 mb-1 w-full"
-                      defaultValue={doc.filename}
-                      onBlur={(e) =>
-                        handleSave(doc.id, "filename", e.target.value)
-                      }
-                    />
-                  </>
-                ) : (
-                  <p className="font-medium">{doc.filename}</p>
-                )}
-                <p className="text-sm text-gray-500">
-                  Uploaded on {new Date(doc.created_at).toLocaleDateString()}
-                </p>
-                <div className="flex gap-3 mt-2">
-                  <button
-                    onClick={() => handleEdit(doc.id)}
-                    className="text-sm text-blue-600 flex items-center"
-                  >
-                    <Pencil className="w-4 h-4 mr-1" />
-                    Rename
-                  </button>
-                  <a
-                    href={
-                      supabase.storage
-                        .from("user-documents")
-                        .getPublicUrl(doc.file_path).data.publicUrl
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm text-gray-600 flex items-center"
-                  >
-                    <Eye className="w-4 h-4 mr-1" />
-                    View
-                  </a>
-                </div>
-              </div>
-
-              <CheckCircle className="w-5 h-5 text-green-500 mt-1" />
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
+  <div className="relative w-full min-h-[520px] flex items-center justify-center overflow-hidden rounded-2xl border bg-white">
+    {/* soft gradient glow */}
+    <div className="pointer-events-none absolute -inset-24 opacity-60 blur-2xl animate-pulse
+                    bg-[radial-gradient(60rem_30rem_at_50%_-10%,theme(colors.blue.200),transparent),
+                        radial-gradient(40rem_20rem_at_-10%_120%,theme(colors.purple.200),transparent),
+                        radial-gradient(40rem_20rem_at_110%_120%,theme(colors.teal.200),transparent)]" />
+    {/* card-ish chip */}
+    <div className="relative rounded-2xl border bg-white/80 backdrop-blur px-10 py-7 shadow-xl">
+      <span className="select-none text-3xl font-semibold tracking-tight text-gray-800">
+        Coming soon
+      </span>
+    </div>
+  </div>
+);
 }

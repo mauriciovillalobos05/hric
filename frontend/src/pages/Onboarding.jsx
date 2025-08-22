@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import LocationAutocomplete from "./cmpnnts/Location";
 import { fetchUserAndRole } from "@/helpers/role";
@@ -14,8 +14,11 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-const API_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  "https://hric.onrender.com"
+).replace(/\/$/, "");
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -40,6 +43,14 @@ export default function Onboarding() {
     language_preference: "en",
     role: "",
   });
+
+  // Helper: detect free/basic plan (robust across naming/pricing)
+  const isFreePlan = (plan) => {
+    const price = Number(plan?.monthly_price ?? 0);
+    const key = String(plan?.plan_key || "");
+    const name = String(plan?.name || "");
+    return price <= 0 || /(\b|_)(free|basic)(\b|_)/i.test(key) || /free|basic/i.test(name);
+  };
 
   // Prefill from Supabase + load plans
   useEffect(() => {
@@ -70,11 +81,18 @@ export default function Onboarding() {
     })();
   }, []);
 
-  const visiblePlans = plans.filter((p) => {
-    if (!form.role) return false;
+  const visiblePlans = useMemo(() => {
+    if (!form.role) return [];
     const prefix = form.role === "investor" ? "investor_" : "entrepreneur_";
-    return (p.plan_key || "").startsWith(prefix);
-  });
+    return plans.filter((p) => (p.plan_key || "").startsWith(prefix));
+  }, [plans, form.role]);
+
+  // Auto-select the free plan when plans load
+  useEffect(() => {
+    if (selectedPlanKey) return;
+    const free = visiblePlans.find(isFreePlan);
+    if (free?.plan_key) setSelectedPlanKey(free.plan_key);
+  }, [visiblePlans, selectedPlanKey]);
 
   const prettyPrice = (num) => {
     const n = Number(num || 0);
@@ -101,6 +119,12 @@ export default function Onboarding() {
 
       if (!selectedPlanKey) {
         throw new Error("Please choose a plan to continue.");
+      }
+
+      // Enforce: only free plan can be submitted
+      const selectedPlan = visiblePlans.find((p) => p.plan_key === selectedPlanKey);
+      if (!isFreePlan(selectedPlan)) {
+        throw new Error("Only the Free plan is available at the moment.");
       }
 
       // Optional avatar upload
@@ -156,9 +180,8 @@ export default function Onboarding() {
       }
 
       // INSERT enterprise + profile block here
-      const fullName = `${(form.first_name || "").trim()} ${(
-        form.last_name || ""
-      ).trim()}`.trim();
+      const fullName = `${(form.first_name || "").trim()} ${(form.last_name || "")
+        .trim()}`.trim();
       const enterprise_type = form.role === "investor" ? "investor" : "startup";
 
       // 1) enterprise
@@ -236,9 +259,7 @@ export default function Onboarding() {
       }
 
       navigate(
-        form.role === "investor"
-          ? "/dashboard/investor"
-          : "/dashboard/entrepreneur"
+        form.role === "investor" ? "/dashboard/investor" : "/dashboard/entrepreneur"
       );
     } catch (err) {
       console.error("Onboarding error:", err);
@@ -377,7 +398,10 @@ export default function Onboarding() {
 
             {/* Plan selection */}
             <div className="col-span-2">
-              <h3 className="text-lg font-semibold mb-2">Choose Your Plan</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold">Choose Your Plan</h3>
+                <span className="text-xs text-gray-600">Only Free is available right now.</span>
+              </div>
 
               {visiblePlans.length === 0 && (
                 <p className="text-sm text-gray-600">
@@ -386,46 +410,63 @@ export default function Onboarding() {
               )}
 
               <div className="grid md:grid-cols-3 gap-4">
-                {visiblePlans.map((plan) => (
-                  <Card
-                    key={plan.id}
-                    className={`border relative cursor-pointer transition-all hover:shadow-md ${
-                      selectedPlanKey === plan.plan_key
-                        ? "border-blue-600 ring-2 ring-blue-500"
-                        : "border-gray-200"
-                    }`}
-                    onClick={() => setSelectedPlanKey(plan.plan_key)}
-                  >
-                    {plan.features?.includes?.("popular") && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                        <Badge className="bg-blue-600 text-white px-3 py-1">
-                          Most Popular
-                        </Badge>
-                      </div>
-                    )}
-                    <CardHeader className="text-center pb-4">
-                      <CardTitle className="text-xl">{plan.name}</CardTitle>
-                      <div className="mt-2">
-                        <span className="text-2xl font-bold text-gray-900">
-                          {prettyPrice(plan.monthly_price)}
-                        </span>
-                        <span className="text-gray-600">/month</span>
-                      </div>
-                      {plan.description && (
-                        <p className="text-sm mt-2 text-gray-600">
-                          {plan.description}
-                        </p>
+                {visiblePlans.map((plan) => {
+                  const selectable = isFreePlan(plan);
+                  const isSelected = selectedPlanKey === plan.plan_key;
+
+                  return (
+                    <Card
+                      key={plan.id}
+                      className={`border relative transition-all ${
+                        selectable
+                          ? `cursor-pointer hover:shadow-md ${
+                              isSelected ? "border-blue-600 ring-2 ring-blue-500" : "border-gray-200"
+                            }`
+                          : "cursor-not-allowed border-gray-200 opacity-60 saturate-0"
+                      }`}
+                      onClick={() => {
+                        if (selectable) setSelectedPlanKey(plan.plan_key);
+                      }}
+                    >
+                      {!selectable && (
+                        <div className="absolute inset-0 rounded-md bg-gray-200/30 flex items-start justify-end p-2">
+                          <Badge variant="secondary" className="gap-1">
+                            <Lock className="h-3 w-3" /> Locked
+                          </Badge>
+                        </div>
                       )}
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="text-sm text-gray-700 space-y-1">
-                        {(plan.features || []).slice(0, 6).map((f) => (
-                          <li key={String(f)}>• {String(f)}</li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                ))}
+
+                      {plan.features?.includes?.("popular") && (
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                          <Badge className="bg-blue-600 text-white px-3 py-1">
+                            Most Popular
+                          </Badge>
+                        </div>
+                      )}
+                      <CardHeader className="text-center pb-4">
+                        <CardTitle className="text-xl">{plan.name}</CardTitle>
+                        <div className="mt-2">
+                          <span className="text-2xl font-bold text-gray-900">
+                            {prettyPrice(plan.monthly_price)}
+                          </span>
+                          <span className="text-gray-600">/month</span>
+                        </div>
+                        {plan.description && (
+                          <p className="text-sm mt-2 text-gray-600">
+                            {plan.description}
+                          </p>
+                        )}
+                      </CardHeader>
+                      <CardContent>
+                        <ul className="text-sm text-gray-700 space-y-1">
+                          {(plan.features || []).slice(0, 6).map((f) => (
+                            <li key={String(f)}>• {String(f)}</li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
 

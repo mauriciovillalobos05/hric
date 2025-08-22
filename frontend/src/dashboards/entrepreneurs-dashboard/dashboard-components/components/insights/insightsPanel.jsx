@@ -56,80 +56,21 @@ export default function InsightsPanel({
   };
 
   return (
-    <section className="mx-auto max-w-7xl">
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* LEFT: KPIs + Chart */}
-        <div className="lg:col-span-2 space-y-4 bg-white rounded-lg shadow-sm p-4">
-          {/* KPIs */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
-            <KPI
-              color="blue"
-              label="Deck Views"
-              value={stats?.deckViews ?? 0}
-            />
-            <KPI color="green" label="Messages" value={stats?.messages ?? 0} />
-            <KPI
-              color="purple"
-              label="Favorites"
-              value={stats?.favorites ?? 0}
-            />
-          </div>
+  <div className="relative w-full min-h-[520px] flex items-center justify-center overflow-hidden rounded-2xl border bg-white">
+    {/* soft gradient glow */}
+    <div className="pointer-events-none absolute -inset-24 opacity-60 blur-2xl animate-pulse
+                    bg-[radial-gradient(60rem_30rem_at_50%_-10%,theme(colors.blue.200),transparent),
+                        radial-gradient(40rem_20rem_at_-10%_120%,theme(colors.purple.200),transparent),
+                        radial-gradient(40rem_20rem_at_110%_120%,theme(colors.teal.200),transparent)]" />
+    {/* card-ish chip */}
+    <div className="relative rounded-2xl border bg-white/80 backdrop-blur px-10 py-7 shadow-xl">
+      <span className="select-none text-3xl font-semibold tracking-tight text-gray-800">
+        Coming soon
+      </span>
+    </div>
+  </div>
+);
 
-          {/* Chart */}
-          <div className="relative bg-gray-50 p-3 rounded-md h-80">
-            {!isPremium && <PremiumGate onUpgrade={onUpgrade} />}
-            <h3 className="text-xs font-semibold text-gray-700 mb-2">
-              Weekly Engagement
-            </h3>
-            <Suspense
-              fallback={
-                <div className="h-full animate-pulse bg-gray-200 rounded" />
-              }
-            >
-              <Line data={chartData} options={options} />
-            </Suspense>
-          </div>
-        </div>
-        {/* RIGHT: Viewers */}
-        <div className="relative bg-white rounded-lg shadow-sm p-4">
-          {!isPremium && <PremiumGate onUpgrade={onUpgrade} />}
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">
-            Recent Deck Viewers
-          </h3>
-          <ul className="space-y-2">
-            {(viewers ?? []).slice(0, 6).map((v) => (
-              <li
-                key={v.id ?? v.name}
-                className="flex items-center justify-between p-2 bg-gray-50 rounded-md"
-              >
-                <div className="flex items-center gap-3">
-                  <img
-                    src={v.image}
-                    alt={v.name}
-                    className="h-8 w-8 rounded-full object-cover"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">
-                      {v.name}
-                    </p>
-                    <p className="text-xs text-gray-500">{v.title}</p>
-                  </div>
-                </div>
-                <button className="text-xs text-blue-600 hover:underline">
-                  View
-                </button>
-              </li>
-            ))}
-            {!viewers?.length && (
-              <div className="text-sm text-muted-foreground">
-                No viewers yet
-              </div>
-            )}
-          </ul>
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function KPI({ color, label, value }) {

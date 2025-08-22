@@ -480,24 +480,6 @@ function EntrepreneurDashboard() {
           missingOptional={missingOptional}
           onUpdateClick={() => navigate("/complete-profile/entrepreneur")}
         />
-        {/* Nice-to-have list badge strip (optional visual) */}
-        {missingOptional.length > 0 && (
-          <div className="mt-3">
-            <p className="text-xs font-medium text-gray-600 mb-1">
-              Nice to have:
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {missingOptional.map((m) => (
-                <span
-                  key={`opt-${m}`}
-                  className="px-2 py-1 text-xs rounded-full border bg-white"
-                >
-                  {m}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* NOTE:

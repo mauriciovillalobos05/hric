@@ -15,7 +15,7 @@ const supabase = createClient(
 );
 
 const API_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "https://hric.onrender.com";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -159,7 +159,7 @@ export default function Register() {
                 className="border rounded px-3 py-2 w-full text-sm"
               />
               <p className="text-xs text-gray-500 mt-1">
-                We’ll use this for login or contact if needed
+                We'll use this for login or contact if needed
               </p>
             </div>
 
@@ -204,7 +204,6 @@ export default function Register() {
                 <option value="" disabled>
                   Select a role
                 </option>
-                <option value="investor">Investor</option>
                 <option value="entrepreneur">Entrepreneur</option>
               </select>
             </div>

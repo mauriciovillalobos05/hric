@@ -31,86 +31,78 @@ export default function App() {
       <Route
         path="/select-plan"
         element={
-          <ProtectedRoute>
+
             <SelectPlan />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/portfolio"
         element={
-          <ProtectedRoute>
+
             <Portfolio />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/analysis"
         element={
-          <ProtectedRoute>
+
             <Analysis />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/email-pending-secondary"
         element={
-          <ProtectedRoute>
+
             <EmailPendingSecondary />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/onboarding"
         element={
-          <ProtectedRoute>
+
             <Onboarding />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/complete-profile/investor"
         element={
-          <ProtectedRoute>
+
             <InvestorProfile />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/complete-profile/entrepreneur"
         element={
-          <ProtectedRoute>
+
             <EntrepreneurProfile />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/profile-settings"
         element={
-          <ProtectedRoute>
+
             <ProfileSettings />
-          </ProtectedRoute>
+
         }
       />
       <Route
         path="/profile/:userId"
         element={
-          <ProtectedRoute>
+
             <ProfilePreview />
-          </ProtectedRoute>
+
         }
       />
 
       {/* Dashboards */}
-      <Route
-        path="/dashboard/user"
-        element={
-          <ProtectedRoute>
-            {/* Let the component resolve enterpriseType (or sessionStorage) itself */}
-            <MainUserDashboard />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/dashboard/user" element={<MainUserDashboard />} />
 
       {/* Enterprise-type gated dashboards */}
       <Route
@@ -124,9 +116,7 @@ export default function App() {
       <Route
         path="/dashboard/entrepreneur"
         element={
-          <ProtectedRoute requiredEnterpriseTypes={["startup"]}>
             <EntrepreneurDashboard />
-          </ProtectedRoute>
         }
       />
     </Routes>

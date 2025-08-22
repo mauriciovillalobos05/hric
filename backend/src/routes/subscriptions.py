@@ -202,36 +202,31 @@ def get_plans():
         return jsonify({"plans": [_plan_to_dict(p) for p in plans]}), 200
     except Exception as e:
         current_app.logger.exception("GET /api/subscriptions/plans failed")
-        # Soft fallback: return a minimal Free plan for both roles so the UI continues
-        fallback = [
-            {
-                "id": "fallback-investor-free",
-                "plan_key": "investor_free",
-                "name": "Investor Free",
-                "description": "Get started",
-                "monthly_price": 0,
-                "annual_price": 0,
-                "features": ["Basic access"],
-                "is_active": True,
-                "stripe_product_id": None,
-                "stripe_price_id_monthly": None,
-                "stripe_price_id_annual": None,
-            },
-            {
-                "id": "fallback-entrepreneur-free",
-                "plan_key": "entrepreneur_free",
-                "name": "Entrepreneur Free",
-                "description": "Get started",
-                "monthly_price": 0,
-                "annual_price": 0,
-                "features": ["Basic access"],
-                "is_active": True,
-                "stripe_product_id": None,
-                "stripe_price_id_monthly": None,
-                "stripe_price_id_annual": None,
-            },
-        ]
-        return jsonify({"plans": fallback, "warning": f"/plans failed: {str(e)}"}), 200
+        return jsonify({
+            "plans": [
+                {
+                    "id": "fallback-investor-free",
+                    "plan_key": "investor_free",
+                    "name": "Investor Free",
+                    "description": "Get started",
+                    "monthly_price": 0,
+                    "annual_price": 0,
+                    "features": ["Basic access"],
+                    "is_active": True,
+                },
+                {
+                    "id": "fallback-entrepreneur-free",
+                    "plan_key": "entrepreneur_free",
+                    "name": "Entrepreneur Free",
+                    "description": "Get started",
+                    "monthly_price": 0,
+                    "annual_price": 0,
+                    "features": ["Basic access"],
+                    "is_active": True,
+                },
+            ],
+            "warning": f"/plans failed: {str(e)}"
+        }), 200
 
 @subscriptions_bp.route("/checkout", methods=["POST"])
 def create_checkout_session():

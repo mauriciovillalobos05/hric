@@ -18,7 +18,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")  # must be sk_test_... in sandbo
 
 # --------------------- Auth --------------------- #
 
-from src.routes.supabase_auth import require_auth  # reuse from supabase_auth.py
+from src.routes.supabase_auth import require_auth as require_supabase_auth
 
 # --------------------- Helpers --------------------- #
 
@@ -234,7 +234,7 @@ def create_checkout_session():
     Create a Stripe Checkout Session for a given plan_key and billing_interval.
     body: { "plan_key": "...", "billing_interval": "monthly"|"annual" }
     """
-    user, _, err = require_auth()
+    user, _, err = require_supabase_auth()
     if err:
         return err
 
@@ -298,7 +298,7 @@ def create_checkout_session():
 @subscriptions_bp.route("/current", methods=["GET"])
 def get_user_subscription():
     """Return the user's current active/trialing subscription, if any."""
-    user, _, err = require_auth()
+    user, _, err = require_supabase_auth()
     if err:
         return err
 
@@ -326,7 +326,7 @@ def change_plan():
     Switch to a FREE/internal plan immediately (no Stripe).
     For paid plans, use /subscriptions/checkout instead.
     """
-    user, _, err = require_auth()
+    user, _, err = require_supabase_auth()
     if err:
         return err
 
@@ -389,7 +389,7 @@ def cancel_subscription():
     - If Stripe sub, set cancel_at_period_end=True at Stripe; webhook will finalize.
     - If free/local sub, cancel immediately.
     """
-    user, _, err = require_auth()
+    user, _, err = require_supabase_auth()
     if err:
         return err
 

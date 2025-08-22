@@ -79,18 +79,23 @@ def _serialize_membership(m: EnterpriseUser):
 def register_complete():
     data = request.get_json() or {}
     supabase_id = data.get("supabase_id")
-    email       = data.get("email")
-    first_name  = (data.get("first_name") or "").strip()
-    last_name   = (data.get("last_name") or "").strip()
-    phone       = (data.get("phone") or "").strip() or None
-    role        = (data.get("role") or "entrepreneur").lower()
-    raw_location= data.get("location")
-    location    = (raw_location or "").strip() or None
+    email       = (data.get("email") or "").strip().lower()
 
     if not (supabase_id and email):
         return jsonify({"error": "supabase_id and email required"}), 400
 
+    first_name  = (data.get("first_name") or "").strip()
+    last_name   = (data.get("last_name") or "").strip()
+    phone       = (data.get("phone") or "").strip() or None
+    role        = (data.get("role") or "entrepreneur").strip().lower()
+    location    = (data.get("location") or "").strip() or None
+
+    # Prefer existing-by-id, else existing-by-email, else create
     user = db.session.get(User, supabase_id)
+    if not user:
+        user = db.session.query(User).filter(User.email.ilike(email)).first()
+
+    # Create only if absolutely new (no id and no email match)
     if not user:
         user = User(
             id=supabase_id,
@@ -102,6 +107,7 @@ def register_complete():
         )
         db.session.add(user)
     else:
+        # Idempotent update of profile fields (no PK change here)
         if first_name:
             user.first_name = first_name
         if last_name:
@@ -110,11 +116,13 @@ def register_complete():
             user.phone = phone
         user.location = location
 
+    # Geo tag (idempotent)
     if location:
         ga = db.session.query(GeographicArea).filter(GeographicArea.name.ilike(location)).first()
         if not ga:
             db.session.add(GeographicArea(name=location))
 
+    # Ensure an active owner enterprise for this person
     ent_type = "investor" if role == "investor" else "startup"
     ent = (
         db.session.query(Enterprise)
@@ -126,7 +134,6 @@ def register_complete():
         )
         .first()
     )
-
     if not ent:
         ent = Enterprise(
             name=f"{user.first_name} {user.last_name}".strip() or "New User",
@@ -136,10 +143,7 @@ def register_complete():
         db.session.add(ent)
         db.session.flush()
         db.session.add(EnterpriseUser(
-            enterprise_id=ent.id,
-            user_id=user.id,
-            role="owner",
-            is_active=True,
+            enterprise_id=ent.id, user_id=user.id, role="owner", is_active=True
         ))
     else:
         if ent.enterprise_type != ent_type:

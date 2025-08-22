@@ -5,7 +5,7 @@ export const userTypes = [
   { value: "Venture Capital", label: "Venture Capital" },
   { value: "Corporate Investor", label: "Corporate Investor" },
   { value: "Accelerator", label: "Accelerator" },
-  { value: "Founder/ Entrepreneur", label: "Founder/ Entrepreneur" }
+  { value: "Entrepreneur", label: "Entrepreneur" }
 ];
 
 export const stagePreferences = [

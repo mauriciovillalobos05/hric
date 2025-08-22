@@ -234,7 +234,7 @@ def create_checkout_session():
     Create a Stripe Checkout Session for a given plan_key and billing_interval.
     body: { "plan_key": "...", "billing_interval": "monthly"|"annual" }
     """
-    user, _, err = require_supabase_auth()
+    user, _, err = require_supabase_auth(db, User)
     if err:
         return err
 

@@ -18,44 +18,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")  # must be sk_test_... in sandbo
 
 # --------------------- Auth --------------------- #
 
-def _supabase_userinfo_url() -> str:
-    # Ensure we’re actually calling Supabase, not ourselves
-    if not SUPABASE_URL:
-        raise RuntimeError("SUPABASE_URL env is missing")
-    base = SUPABASE_URL.rstrip("/")
-    if "supabase.co" not in base:
-        raise RuntimeError(f"SUPABASE_URL looks wrong: {base} (expected https://<ref>.supabase.co)")
-    return f"{base}/auth/v1/user"
-
-def require_auth():
-    """Validate Supabase JWT and return (user, token, error_tuple_or_None)."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return None, None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
-
-    token = auth_header.split(" ")[1]
-    try:
-        url = _supabase_userinfo_url()
-        resp = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
-            timeout=(3, 15),
-        )
-        if resp.status_code != 200:
-            return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
-        user_id = resp.json()["id"]
-    except RecursionError:
-        current_app.logger.exception("Auth recursion detected (check SUPABASE_URL)")
-        return None, None, (jsonify({"error": "Token verification failed: recursion (bad SUPABASE_URL)"}), 500)
-    except Exception as e:
-        current_app.logger.exception("Token verification failed")
-        return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
-
-    user = db.session.get(User, user_id)
-    if not user:
-        return None, None, (jsonify({"error": "User not found in database"}), 404)
-
-    return user, token, None
+from src.routes.supabase_auth import require_auth  # reuse from supabase_auth.py
 
 # --------------------- Helpers --------------------- #
 

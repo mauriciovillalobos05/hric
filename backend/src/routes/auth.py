@@ -1,65 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import os
 from typing import Optional
-import requests
-from flask import Blueprint, jsonify, request, current_app
+
+from flask import Blueprint, jsonify, request
 
 from src.extensions import db
-# add to imports at the top
 from src.models.user import User, Enterprise, EnterpriseUser, GeographicArea
-from src.routes.supabase_auth import require_auth
+from src.routes.supabase_auth import require_auth as require_supabase_auth  # ← alias to avoid shadowing
 
 auth_bp = Blueprint("auth", __name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-
-
-# --------------------- Auth --------------------- #
-
-def _supabase_userinfo_url() -> str:
-    if not SUPABASE_URL:
-        raise RuntimeError("SUPABASE_URL env is missing")
-    if "supabase.co" not in SUPABASE_URL:
-        # Prevent accidental loops to your own API/reverse proxy
-        raise RuntimeError(
-            f"SUPABASE_URL looks wrong: {SUPABASE_URL} (expected https://<ref>.supabase.co)"
-        )
-    return f"{SUPABASE_URL}/auth/v1/user"
-
-def require_auth(db, User):
-    """
-    Validate Supabase JWT against Supabase's /auth/v1/user endpoint and
-    return (user, token, error_tuple_or_None). On error, returns a Flask
-    (json_response, status_code) as the 3rd element.
-    """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return None, None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
-
-    token = auth_header.split(" ", 1)[1]
-    try:
-        url = _supabase_userinfo_url()
-        resp = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
-            timeout=(3, 15),  # (connect, read)
-        )
-        if resp.status_code != 200:
-            return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
-        user_id = resp.json()["id"]
-    except Exception as e:
-        current_app.logger.exception("Token verification failed")
-        return None, None, (jsonify({"error": f"Token verification failed: {str(e)}"}), 500)
-
-    user = db.session.get(User, user_id)
-    if not user:
-        return None, None, (jsonify({"error": "User not found in database"}), 404)
-
-    return user, token, None
-
+# --------------------- Helpers --------------------- #
 
 def _role_to_enterprise_type(role: str) -> Optional[str]:
     r = (role or "").strip().lower()
@@ -199,11 +151,12 @@ def register_complete():
 
 @auth_bp.route("/profile", methods=["PUT", "PATCH"])
 def update_profile():
-    user, _, err = require_auth(db, User)
+    user, _, err = require_supabase_auth(db, User)   # ← use alias
     if err:
         return err
 
     data = request.get_json() or {}
+
     for field in [
         "first_name", "last_name", "phone", "linkedin_url",
         "twitter_url", "website_url", "bio", "timezone",
@@ -226,7 +179,7 @@ def update_profile():
 
 @auth_bp.route("/me", methods=["GET"])
 def me():
-    user, _, err = require_auth(db, User)  # << use shared helper
+    user, _, err = require_supabase_auth(db, User)   # ← use alias
     if err:
         return err
     try:
@@ -238,9 +191,10 @@ def me():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+
 @auth_bp.route("/after-login", methods=["POST"])
 def after_login():
-    user, _, err = require_auth(db, User)  # << use shared helper
+    user, _, err = require_supabase_auth(db, User)   # ← use alias
     if err:
         return err
     try:
@@ -263,9 +217,10 @@ def after_login():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-    user, _, err = require_auth(db, User)  # << use shared helper
+    user, _, err = require_supabase_auth(db, User)   # ← use alias
     if err:
         return err
     try:

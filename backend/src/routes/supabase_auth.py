@@ -1,4 +1,4 @@
-# src/utils/supabase_auth.py
+# src/routes/supabase_auth.py
 from __future__ import annotations
 import os
 from flask import request, jsonify, current_app

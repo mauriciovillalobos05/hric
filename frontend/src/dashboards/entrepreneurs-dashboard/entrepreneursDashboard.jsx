@@ -77,8 +77,8 @@ function EntrepreneurDashboard() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
   // View controls for matches list
-  const [minScore, setMinScore] = useState(0);     // applied to server-side view_score (0..100)
-  const [order, setOrder] = useState("desc");      // "desc" | "asc"
+  const [minScore, setMinScore] = useState(0); // applied to server-side view_score (0..100)
+  const [order, setOrder] = useState("desc"); // "desc" | "asc"
 
   // Debounce/derive transform payloads whenever filters change
   const tf = useMemo(() => transformFilters(filters), [filters]);
@@ -88,7 +88,10 @@ function EntrepreneurDashboard() {
   const handleFilterChange = (newFilters) => {
     setFilters((prev) => ({ ...prev, ...newFilters }));
     // Optionally persist to sessionStorage for shareable state across sessions:
-    sessionStorage.setItem("entrepreneurMatchFilters", JSON.stringify({ ...filters, ...newFilters }));
+    sessionStorage.setItem(
+      "entrepreneurMatchFilters",
+      JSON.stringify({ ...filters, ...newFilters })
+    );
   };
 
   // On "Simulate" click from a card
@@ -127,7 +130,7 @@ function EntrepreneurDashboard() {
 
   // Fetch user + enterprise + events (mock/demo option kept)
   useEffect(() => {
-    const HARDCODE_MODE = true; // set false when wiring to Supabase data fully
+    const HARDCODE_MODE = false; // set false when wiring to Supabase data fully
 
     const fetchData = async () => {
       try {
@@ -149,8 +152,18 @@ function EntrepreneurDashboard() {
           });
 
           setMessages([
-            { sender: "Investor JP", preview: "Interested in your KPIs...", time: "10:14", read: false },
-            { sender: "Ana (HRIC)", preview: "Event reminder for Thu", time: "09:21", read: true },
+            {
+              sender: "Investor JP",
+              preview: "Interested in your KPIs...",
+              time: "10:14",
+              read: false,
+            },
+            {
+              sender: "Ana (HRIC)",
+              preview: "Event reminder for Thu",
+              time: "09:21",
+              read: true,
+            },
           ]);
 
           const upcoming = [
@@ -175,7 +188,13 @@ function EntrepreneurDashboard() {
           ];
           setEvents(upcoming);
 
-          setNotifications([{ title: "You have a new investor match", time: "Just now", read: false }]);
+          setNotifications([
+            {
+              title: "You have a new investor match",
+              time: "Just now",
+              read: false,
+            },
+          ]);
           setLoading(false);
           return;
         }
@@ -186,29 +205,90 @@ function EntrepreneurDashboard() {
         if (!session?.user) return;
         const userId = session.user.id;
 
-        const { data: user, error: userErr } = await supabase
-          .from("user")
-          .select("first_name, last_name, profile_image, email, role")
+        const { data: userRow, error: userErr } = await supabase
+          .from("users")
+          .select("first_name,last_name,profile_image_url,email")
           .eq("id", userId)
           .single();
         if (userErr) throw userErr;
 
-        setEntrepreneurName(`${user.first_name} ${user.last_name}`);
-        setUserRole(user.role);
+        setEntrepreneurName(`${userRow.first_name} ${userRow.last_name}`);
 
-        const resolvedAvatarUrl =
-          user.profile_image && user.profile_image.trim().length > 0
-            ? supabase.storage.from("profile-images").getPublicUrl(user.profile_image).data?.publicUrl
-            : defaultAvatar;
-        setAvatarUrl(resolvedAvatarUrl);
+        const resolvedAvatarUrl = userRow.profile_image_url
+          ? supabase.storage
+              .from("profile-images")
+              .getPublicUrl(userRow.profile_image_url).data?.publicUrl
+          : null; // set null so you don’t render an empty src
+        setAvatarUrl(resolvedAvatarUrl || defaultAvatar);
 
-        const { data: enterpriseData, error: enterpriseErr } = await supabase
-          .from("enterprise")
-          .select("*")
-          .eq("user_id", userId)
+        const { data: memberships, error: mErr } = await supabase
+          .from("enterprise_user")
+          .select(
+            `
+    role,
+    is_active,
+    enterprise:enterprise_id (
+      id, name, enterprise_type, location, website, description, logo_url, status
+    )
+  `
+          )
+          .eq("user_id", userId);
+        if (mErr) throw mErr;
+
+        const owner = (memberships || []).find(
+          (m) => m.role === "owner" && m.is_active
+        );
+        const enterprise = owner?.enterprise || null;
+
+        const { data: sp } = await supabase
+          .from("startup_profile")
+          .select(
+            `
+    business_model,
+    revenue_model,
+    team_size,
+    current_revenue,
+    monthly_growth_rate,
+    customer_count,
+    market_size,
+    addressable_market,
+    mrr_usd,
+    arr_usd,
+    current_valuation_usd,
+    competitive_advantages,
+    current_investors,
+    technical_founders_pct,
+    previous_exits_pct,
+    traction_metrics
+  `
+          )
+          .eq("enterprise_id", enterprise.id)
           .single();
-        if (enterpriseErr) throw enterpriseErr;
-        setEnterprise(enterpriseData);
+
+        // fetch enterprise_profile for tags
+        const { data: ep } = await supabase
+          .from("enterprise_profile")
+          .select("headline_tags")
+          .eq("enterprise_id", enterprise.id)
+          .single();
+
+        const tm = sp?.traction_metrics || {};
+        const enterpriseForUI = {
+          ...(enterprise || {}),
+          ...(sp || {}),
+          // flatten traction_metrics to top-level so ProfileStatusCard can read them
+          industry: tm.industry || null,
+          stage: tm.stage || null,
+          pitch_deck_url: tm.pitch_deck_url || null,
+          funding_needed: tm.funding_needed ?? null,
+          demo_url: tm.demo_url || null,
+          headline_tags: ep?.headline_tags || [], // from enterprise_profile
+        };
+
+        setEnterprise(enterpriseForUI);
+
+        const enterpriseType = enterprise?.enterprise_type;
+        setUserRole(enterpriseType === "investor" ? "investor" : "startup");
 
         const { data: msgData } = await supabase
           .from("message")
@@ -227,28 +307,24 @@ function EntrepreneurDashboard() {
         const { data: eventsData, error: eventsErr } = await supabase
           .from("event")
           .select(
-            `
-              id,
-              title,
-              description,
-              date,
-              agenda,
-              presenters,
-              event_registration!left(user_id, registration_status)
-            `
+            "id,title,description,start_time,agenda,speakers,status,location"
           )
-          .gte("date", new Date().toISOString())
-          .order("date", { ascending: true })
+          .gte("start_time", new Date().toISOString())
+          .order("start_time", { ascending: true })
           .limit(20);
         if (eventsErr) throw eventsErr;
 
-        const withStatus = (eventsData || []).map((e) => {
-          const reg = (e.event_registration || []).find((r) => r.user_id === userId);
-          return { ...e, registration_status: reg?.registration_status || null };
-        });
-        setEvents(withStatus);
+        setEvents(
+          (eventsData || []).map((e) => ({ ...e, registration_status: null }))
+        );
 
-        setNotifications([{ title: "You have a new investor match", time: "Just now", read: false }]);
+        setNotifications([
+          {
+            title: "You have a new investor match",
+            time: "Just now",
+            read: false,
+          },
+        ]);
       } catch (err) {
         console.error("Entrepreneur dashboard fetch error:", err);
       } finally {
@@ -259,8 +335,8 @@ function EntrepreneurDashboard() {
     fetchData();
   }, []);
 
-  // Profile completion calc
-  const requiredFields = [
+  // --- REQUIRED for profile to unlock (tier 1) ---
+  const REQUIRED = [
     "name",
     "industry",
     "stage",
@@ -268,30 +344,74 @@ function EntrepreneurDashboard() {
     "team_size",
     "funding_needed",
     "pitch_deck_url",
-    "financials",
     "business_model",
   ];
-  const totalFields = requiredFields.length;
-  const filledFields = requiredFields.filter((field) => enterprise[field]);
-  const completion = Math.round((filledFields.length / totalFields) * 100);
+
+  // --- NICE TO HAVE (shows as “missing” but not required to unlock) ---
+  const OPTIONAL = [
+    "revenue_model",
+    "current_revenue",
+    "customer_count",
+    "mrr_usd",
+    "arr_usd",
+    "market_size",
+    "addressable_market",
+    "current_valuation_usd",
+    "headline_tags",
+    "competitive_advantages",
+    "demo_url",
+  ];
+
+  const isFilled = (val) => {
+    if (val === 0) return true; // 0 is valid
+    if (val == null) return false;
+    if (typeof val === "string") return val.trim().length > 0;
+    if (Array.isArray(val)) return val.length > 0;
+    if (typeof val === "object") return Object.keys(val).length > 0;
+    return Boolean(val);
+  };
+
+  const LABELS = {
+    name: "Name",
+    industry: "Industry",
+    stage: "Stage",
+    location: "Location",
+    team_size: "Team Size",
+    funding_needed: "Funding Needs",
+    pitch_deck_url: "Pitch Deck",
+    business_model: "Business Model",
+    revenue_model: "Revenue Model",
+    current_revenue: "Current Revenue",
+    customer_count: "Customer Count",
+    mrr_usd: "MRR (USD)",
+    arr_usd: "ARR (USD)",
+    market_size: "Market Size (USD)",
+    addressable_market: "Addressable Market (USD)",
+    current_valuation_usd: "Current Valuation (USD)",
+    headline_tags: "Headline Tags",
+    competitive_advantages: "Competitive Advantages",
+    demo_url: "Demo URL",
+  };
+
+  const missingRequired = REQUIRED.filter(
+    (k) => !isFilled(enterprise?.[k])
+  ).map((k) => LABELS[k] || k);
+  const missingOptional = OPTIONAL.filter(
+    (k) => !isFilled(enterprise?.[k])
+  ).map((k) => LABELS[k] || k);
+
+  // % complete is based only on REQUIRED
+  const completion = Math.round(
+    ((REQUIRED.length - missingRequired.length) / REQUIRED.length) * 100
+  );
+
+  // Gate matches until ≥ 90%
+  const isLocked = completion < 90;
 
   const handleOpenRegister = (event) => {
     setSelectedEvent(event);
     setShowRegisterModal(true);
   };
-
-  const missingSections = requiredFields
-    .filter((field) => !enterprise[field])
-    .map((field) => {
-      switch (field) {
-        case "pitch_deck_url":
-          return "Pitch Deck";
-        case "funding_needed":
-          return "Funding Needs";
-        default:
-          return field.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase());
-      }
-    });
 
   const handleSubmitRegistration = async (answers) => {
     try {
@@ -309,7 +429,11 @@ function EntrepreneurDashboard() {
       if (error) throw error;
 
       setEvents((prev) =>
-        prev.map((e) => (e.id === selectedEvent.id ? { ...e, registration_status: "registered" } : e))
+        prev.map((e) =>
+          e.id === selectedEvent.id
+            ? { ...e, registration_status: "registered" }
+            : e
+        )
       );
       setShowRegisterModal(false);
     } catch (e) {
@@ -320,10 +444,13 @@ function EntrepreneurDashboard() {
   const handleOpenChat = (msg) => {
     setOpenChats((prev) => {
       const alreadyOpen = prev.some((chat) => chat.sender === msg.sender);
-      return alreadyOpen ? prev : [...prev, { sender: msg.sender, history: [msg] }];
+      return alreadyOpen
+        ? prev
+        : [...prev, { sender: msg.sender, history: [msg] }];
     });
   };
-  const handleCloseChat = (sender) => setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
+  const handleCloseChat = (sender) =>
+    setOpenChats((prev) => prev.filter((chat) => chat.sender !== sender));
 
   if (loading) {
     return (
@@ -346,13 +473,31 @@ function EntrepreneurDashboard() {
         />
       </div>
 
-      {/* Profile Completion */}
-      <div id="profile-completion">
+      <div id="profile-completion" className="mb-6">
         <ProfileStatusCard
           completion={completion}
-          missingSections={missingSections}
+          missingRequired={missingRequired}
+          missingOptional={missingOptional}
           onUpdateClick={() => navigate("/complete-profile/entrepreneur")}
         />
+        {/* Nice-to-have list badge strip (optional visual) */}
+        {missingOptional.length > 0 && (
+          <div className="mt-3">
+            <p className="text-xs font-medium text-gray-600 mb-1">
+              Nice to have:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {missingOptional.map((m) => (
+                <span
+                  key={`opt-${m}`}
+                  className="px-2 py-1 text-xs rounded-full border bg-white"
+                >
+                  {m}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* NOTE:
@@ -364,43 +509,67 @@ function EntrepreneurDashboard() {
           to its internal MatchesDashboard component, which (in your adapted code)
           will call GET /matching/matches/entrepreneur with these query params.
       */}
-      <EntrepreneurTabs
-        selectedTab="matches"
-        onTabChange={() => {}}
-        // filters
-        filters={filters}
-        onFilterChange={handleFilterChange}
-        onResetFilters={resetFilters}
-        // computed query params for matches
-        weightsParam={tf.weightsParam}           // -> ?weights=<JSON>
-        raiseTargetUsd={tf.raiseTargetUsd}       // -> ?raise_target_usd=<number>
-        minScore={minScore}                      // -> ?min_score=
-        order={order}                            // -> ?order=desc|asc
-        // matches (optional back-compat; MatchesDashboard will fetch itself)
-        matchedInvestors={matchedInvestors}
-        activeInvestor={activeInvestor}
-        compareIds={compareIds}
-        onSimulate={handleSimulate}
-        onToggleCompare={toggleCompare}
-        simulationResults={simulationResults}
-        // overview
-        enterprise={enterprise}
-        events={events}
-        onRegisterClick={handleOpenRegister}
-        registerModalOpen={showRegisterModal}
-        onCloseRegisterModal={() => setShowRegisterModal(false)}
-        selectedEvent={selectedEvent}
-        onSubmitRegistration={handleSubmitRegistration}
-        userRole={userRole}
-        // messages
-        messages={messages}
-        onOpenChat={handleOpenChat}
-        openChats={openChats}
-        onCloseChat={handleCloseChat}
-        // optional UI handlers to change score/order from a control bar you add later
-        onChangeMinScore={setMinScore}
-        onChangeOrder={setOrder}
-      />
+      {/* Matches area with lock until profile completion >= 90% */}
+      <div className="relative">
+        <div className={isLocked ? "pointer-events-none opacity-40" : ""}>
+          <EntrepreneurTabs
+            selectedTab="matches"
+            onTabChange={() => {}}
+            // filters
+            filters={filters}
+            onFilterChange={handleFilterChange}
+            onResetFilters={resetFilters}
+            // computed query params for matches
+            weightsParam={tf.weightsParam}
+            raiseTargetUsd={tf.raiseTargetUsd}
+            minScore={minScore}
+            order={order}
+            // matches (optional back-compat; MatchesDashboard will fetch itself)
+            matchedInvestors={matchedInvestors}
+            activeInvestor={activeInvestor}
+            compareIds={compareIds}
+            onSimulate={handleSimulate}
+            onToggleCompare={toggleCompare}
+            simulationResults={simulationResults}
+            // overview
+            enterprise={enterprise}
+            events={events}
+            onRegisterClick={handleOpenRegister}
+            registerModalOpen={showRegisterModal}
+            onCloseRegisterModal={() => setShowRegisterModal(false)}
+            selectedEvent={selectedEvent}
+            onSubmitRegistration={handleSubmitRegistration}
+            userRole={userRole}
+            // messages
+            messages={messages}
+            onOpenChat={handleOpenChat}
+            openChats={openChats}
+            onCloseChat={handleCloseChat}
+            // score/order handlers
+            onChangeMinScore={setMinScore}
+            onChangeOrder={setOrder}
+          />
+        </div>
+
+        {isLocked && (
+          <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm">
+            <div className="rounded-xl bg-white p-4 shadow border text-center max-w-sm">
+              <p className="font-medium mb-2">
+                Finish your startup profile to unlock the dashboard
+              </p>
+              <p className="text-sm text-gray-600 mb-3">
+                Missing: {missingRequired.join(", ")}
+              </p>
+              <button
+                onClick={() => navigate("/complete-profile/entrepreneur")}
+                className="px-4 py-2 rounded-md bg-black text-white"
+              >
+                Complete profile
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Events */}
       <div id="events">

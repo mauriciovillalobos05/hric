@@ -1,61 +1,81 @@
-// src/pages/EntrepreneurProfile.jsx
-// Simulation-only version: NO Supabase, NO backend. Persists to sessionStorage.
-
+// src/pages/EntrepreneurProfile.jsx  (DB-backed, fixed updates)
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import LocationAutocomplete from "../cmpnnts/Location";
 
-// ---------- sessionStorage helpers ----------
-const KEYS = {
-  USERS: "hri:users",          // map: { [email]: { ...userRecord, entrepreneurProfile? } }
-  SESSION: "hri:authSession",  // { email, issuedAt }
-};
+// --- Supabase ---
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
-const read = (key) => {
-  try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-};
-
-const write = (key, value) => {
-  sessionStorage.setItem(key, JSON.stringify(value));
-};
-
-// ---------- helpers ----------
-const teamSizeOptionsDefault = ["1-2","3-5","6-10","11-20","21-50","51-100","100+"];
-const stageOptionsDefault = ["Idea","Pre-seed","Seed","Series A","Series B","Series C","Growth","IPO"];
+// --- helpers ---
+const teamSizeOptionsDefault = [
+  "1-2",
+  "3-5",
+  "6-10",
+  "11-20",
+  "21-50",
+  "51-100",
+  "100+",
+];
+const stageOptionsDefault = [
+  "Idea",
+  "Pre-seed",
+  "Seed",
+  "Series A",
+  "Series B",
+  "Series C",
+  "Growth",
+  "IPO",
+];
 const industryOptionsDefault = [
-  "Technology","Healthcare","Finance","Education","Agriculture","Energy",
-  "E-commerce","Transportation","Media","Real Estate",
+  "Technology",
+  "Healthcare",
+  "Finance",
+  "Education",
+  "Agriculture",
+  "Energy",
+  "E-commerce",
+  "Transportation",
+  "Media",
+  "Real Estate",
 ];
 const targetMarketOptions = [
-  "Young Adults (18-25)","Adults (26-40)","Middle-aged (41-60)","Seniors (60+)",
-  "Parents","Students","Working Professionals","High-Income Individuals",
-  "Budget-Conscious Consumers","Urban Residents","Rural Communities",
-  "Tech-Savvy Users","Non-Tech-Savvy Users","Health-Conscious Consumers",
-  "Sustainability-Focused Consumers","Small Businesses","Enterprises",
-  "Freelancers / Creators","B2B (Business to Business)","B2C (Business to Consumer)",
+  "Young Adults (18-25)",
+  "Adults (26-40)",
+  "Middle-aged (41-60)",
+  "Seniors (60+)",
+  "Parents",
+  "Students",
+  "Working Professionals",
+  "High-Income Individuals",
+  "Budget-Conscious Consumers",
+  "Urban Residents",
+  "Rural Communities",
+  "Tech-Savvy Users",
+  "Non-Tech-Savvy Users",
+  "Health-Conscious Consumers",
+  "Sustainability-Focused Consumers",
+  "Small Businesses",
+  "Enterprises",
+  "Freelancers / Creators",
+  "B2B (Business to Business)",
+  "B2C (Business to Consumer)",
 ];
 
-const teamSizeToInt = (v) => {
-  if (v == null || v === "") return null;
-  if (typeof v === "number") return v;
-  const s = String(v);
-  if (s.endsWith("+")) return parseInt(s, 10) || null;
-  if (s.includes("-")) {
-    const parts = s.split("-").map((x) => parseInt(x, 10)).filter(Number.isFinite);
-    return parts.length ? Math.max(...parts) : null;
-  }
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) ? n : null;
-};
+const csvToArray = (s) =>
+  (s || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+const arrayToCSV = (arr) => (Array.isArray(arr) ? arr.join(", ") : "");
 
 const toNumber = (v) => {
   if (v === "" || v == null) return null;
@@ -69,13 +89,21 @@ const toPct = (v) => {
   return Math.max(0, Math.min(100, n));
 };
 
-const csvToArray = (s) =>
-  (s || "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-const arrayToCSV = (arr) => (Array.isArray(arr) ? arr.join(", ") : "");
+const teamSizeToInt = (v) => {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return v;
+  const s = String(v);
+  if (s.endsWith("+")) return parseInt(s, 10) || null;
+  if (s.includes("-")) {
+    const parts = s
+      .split("-")
+      .map((x) => parseInt(x, 10))
+      .filter(Number.isFinite);
+    return parts.length ? Math.max(...parts) : null;
+  }
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+};
 
 const numberOrEmpty = (n) => (n == null ? "" : String(n));
 
@@ -91,23 +119,6 @@ const pickTeamSizeOption = (n) => {
   return "";
 };
 
-const cleanPayload = (obj) => {
-  if (Array.isArray(obj)) {
-    const arr = obj.map(cleanPayload).filter((v) => v !== "" && v !== null);
-    return arr;
-  }
-  if (obj && typeof obj === "object") {
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) {
-      const cv = cleanPayload(v);
-      if (cv !== "" && cv !== null && !(Array.isArray(cv) && cv.length === 0)) out[k] = cv;
-    }
-    return out;
-  }
-  return obj === "" ? null : obj;
-};
-
-// ---------- component ----------
 export default function EntrepreneurProfile() {
   const navigate = useNavigate();
 
@@ -118,6 +129,10 @@ export default function EntrepreneurProfile() {
   const [industryOptions] = useState(industryOptionsDefault);
   const [stageOptions] = useState(stageOptionsDefault);
   const [teamSizeOptions] = useState(teamSizeOptionsDefault);
+
+  // DB identifiers we discover/create
+  const [userId, setUserId] = useState(null);
+  const [enterpriseId, setEnterpriseId] = useState(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -141,7 +156,8 @@ export default function EntrepreneurProfile() {
     customer_count: "",
     market_size: "",
     addressable_market: "",
-    intellectual_property: "", // freeform notes
+    intellectual_property: "", // notes
+
     // NEW metrics
     mrr_usd: "",
     arr_usd: "",
@@ -151,7 +167,7 @@ export default function EntrepreneurProfile() {
     previous_exits_pct: "",
   });
 
-  // ARR auto from MRR if empty
+  // keep ARR auto-fill from MRR
   useEffect(() => {
     if (form.mrr_usd && !form.arr_usd) {
       const mrr = Number(form.mrr_usd);
@@ -166,98 +182,243 @@ export default function EntrepreneurProfile() {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // ---------- initial load from sessionStorage ----------
+  // ---------- Boot: load user -> enterprise -> startup_profile ----------
   useEffect(() => {
-    try {
-      const session = read(KEYS.SESSION); // { email, issuedAt }
-      if (!session?.email) throw new Error("Not authenticated. Please register or log in.");
+    (async () => {
+      try {
+        setBooting(true);
+        setError(null);
 
-      const users = read(KEYS.USERS);
-      const user = users[session.email];
-      if (!user) throw new Error("User record not found. Please register again.");
+        // 1) who is logged in
+        const { data: sessionData, error: sessErr } =
+          await supabase.auth.getSession();
+        if (sessErr) throw sessErr;
+        const sUser = sessionData?.session?.user;
+        if (!sUser) throw new Error("Not authenticated. Please log in.");
+        setUserId(sUser.id);
 
-      // Prefill from any existing entrepreneurProfile
-      const profile = user.entrepreneurProfile || {};
+        // 2) get enterprise via membership (owner) — created in onboarding
+        //    If for some reason it doesn't exist, we create a startup enterprise.
+        let entId = null;
 
-      const fetchedTeamSizeNumber =
-        typeof profile.team_size === "number" ? profile.team_size : null;
+        const { data: memberships, error: memErr } = await supabase
+          .from("enterprise_user")
+          .select(
+            `
+            enterprise_id,
+            role,
+            is_active,
+            enterprise:enterprise(id, name, location, enterprise_type)
+          `
+          )
+          .eq("user_id", sUser.id)
+          .eq("is_active", true);
 
-      setForm((prev) => ({
-        ...prev,
-        name: profile.name || "",
-        location: profile.location || "",
-        industry: profile.industry || "",
-        stage: profile.stage || "",
-        pitch_deck_url: profile.pitch_deck_url || "",
-        demo_url: profile.demo_url || "",
-        team_size: pickTeamSizeOption(fetchedTeamSizeNumber) || profile.team_size || "",
-        funding_needed: numberOrEmpty(profile.funding_needed),
-        financials: {
-          funding_goal: numberOrEmpty(profile.financials?.funding_goal),
-        },
-        revenue_model: profile.revenue_model || "",
-        competitive_advantages: arrayToCSV(profile.competitive_advantages),
-        current_revenue: numberOrEmpty(profile.current_revenue),
-        monthly_growth_rate: numberOrEmpty(profile.monthly_growth_rate),
-        customer_count: numberOrEmpty(profile.customer_count),
-        market_size: numberOrEmpty(profile.market_size),
-        addressable_market: numberOrEmpty(profile.addressable_market),
-        intellectual_property:
-          (profile.intellectual_property &&
-            (profile.intellectual_property.notes ||
-              JSON.stringify(profile.intellectual_property))) || "",
-        target_market: profile.target_market || "",
-        business_model: profile.business_model || "",
-        problem_solved: profile.problem_solved || "",
-        traction_summary: profile.traction_summary || "",
-        headline_tags: arrayToCSV(profile.headline_tags),
+        if (memErr) throw memErr;
 
-        // NEW metrics
-        mrr_usd: numberOrEmpty(profile.mrr_usd),
-        arr_usd: numberOrEmpty(profile.arr_usd),
-        current_valuation_usd: numberOrEmpty(profile.current_valuation_usd),
-        current_investors: arrayToCSV(profile.current_investors),
-        technical_founders_pct: numberOrEmpty(profile.technical_founders_pct),
-        previous_exits_pct: numberOrEmpty(profile.previous_exits_pct),
-      }));
-    } catch (e) {
-      console.error("Boot error:", e);
-      setError(e.message || "Failed to load profile.");
-    } finally {
-      setBooting(false);
-    }
+        const owner = (memberships || []).find((m) => m.role === "owner");
+        if (owner?.enterprise_id) {
+          entId = owner.enterprise_id;
+        }
+
+        // create missing enterprise (startup) + membership
+        if (!entId) {
+          const first = sUser.user_metadata?.first_name || "";
+          const last = sUser.user_metadata?.last_name || "";
+          const fullName = (first + " " + last).trim();
+          // ensure non-null name — avoid "null value in column 'name'"
+          const fallbackName =
+            fullName ||
+            sUser.email ||
+            `Startup ${String(sUser.id).slice(0, 8)}`;
+
+          const { data: ent, error: entErr } = await supabase
+            .from("enterprise")
+            .insert({
+              name: fallbackName,
+              enterprise_type: "startup",
+              status: "active",
+            })
+            .select("id")
+            .single();
+          if (entErr) throw entErr;
+          entId = ent.id;
+
+          const { error: linkErr } = await supabase
+            .from("enterprise_user")
+            .insert({
+              enterprise_id: entId,
+              user_id: sUser.id,
+              role: "owner",
+              is_active: true,
+            });
+          if (linkErr) throw linkErr;
+        }
+
+        setEnterpriseId(entId);
+
+        // 3) load startup_profile, create if missing
+        const { data: sp, error: spErr } = await supabase
+          .from("startup_profile")
+          .select("*")
+          .eq("enterprise_id", entId)
+          .single();
+
+        let startup = sp;
+        if (spErr && spErr.code === "PGRST116") {
+          // not found -> create blank
+          const { data: created, error: createErr } = await supabase
+            .from("startup_profile")
+            .insert({ enterprise_id: entId })
+            .select("*")
+            .single();
+          if (createErr) throw createErr;
+          startup = created;
+        } else if (spErr) {
+          throw spErr;
+        }
+
+        const tm = startup?.traction_metrics || {};
+
+        // 3b) enterprise_profile (for headline_tags)
+        const { data: ep } = await supabase
+          .from("enterprise_profile")
+          .select("headline_tags")
+          .eq("enterprise_id", entId)
+          .single();
+
+        // 4) base enterprise data (name/location)
+        const { data: entRow, error: entGetErr } = await supabase
+          .from("enterprise")
+          .select("name, location")
+          .eq("id", entId)
+          .single();
+        if (entGetErr) throw entGetErr;
+
+        // 5) hydrate the form from enterprise + startup_profile
+        setForm((prev) => ({
+          ...prev,
+          name: entRow?.name || "",
+          location: entRow?.location || "",
+          // from traction_metrics JSON
+          industry: tm.industry || "",
+          stage: tm.stage || "",
+          pitch_deck_url: tm.pitch_deck_url || "",
+          demo_url: tm.demo_url || "",
+          funding_needed: numberOrEmpty(tm.funding_needed),
+          financials: {
+            funding_goal: numberOrEmpty(tm?.financials?.funding_goal),
+          },
+
+          // structured columns from startup_profile
+          team_size: pickTeamSizeOption(startup?.team_size ?? null),
+          revenue_model: startup?.revenue_model || "",
+          competitive_advantages: arrayToCSV(startup?.competitive_advantages),
+          current_revenue: numberOrEmpty(startup?.current_revenue),
+          monthly_growth_rate: numberOrEmpty(startup?.monthly_growth_rate),
+          customer_count: numberOrEmpty(startup?.customer_count),
+          market_size: numberOrEmpty(startup?.market_size),
+          addressable_market: numberOrEmpty(startup?.addressable_market),
+          intellectual_property:
+            startup?.intellectual_property?.notes ??
+            (startup?.intellectual_property
+              ? JSON.stringify(startup.intellectual_property)
+              : ""),
+          business_model: startup?.business_model || "",
+          target_market: startup?.target_market || "",
+          mrr_usd: numberOrEmpty(startup?.mrr_usd),
+          arr_usd: numberOrEmpty(startup?.arr_usd),
+          current_valuation_usd: numberOrEmpty(startup?.current_valuation_usd),
+          current_investors: arrayToCSV(startup?.current_investors),
+          technical_founders_pct: numberOrEmpty(
+            startup?.technical_founders_pct
+          ),
+          previous_exits_pct: numberOrEmpty(startup?.previous_exits_pct),
+
+          // headline_tags from enterprise_profile
+          headline_tags: arrayToCSV(ep?.headline_tags),
+        }));
+      } catch (e) {
+        console.error("Boot error:", e);
+        setError(e.message || "Failed to load profile.");
+      } finally {
+        setBooting(false);
+      }
+    })();
   }, []);
 
-  // ---------- submit (save to sessionStorage only) ----------
+  // ---------- submit (save to DB) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!userId || !enterpriseId) return;
+
     setSaving(true);
     setError(null);
 
     try {
-      const session = read(KEYS.SESSION);
-      if (!session?.email) throw new Error("Not authenticated.");
+      // 0) First, update the enterprise row (name, location)
+      //    This was the missing piece that made it look like updates never applied.
+      {
+        const safeName = (form.name || "").trim();
+        const finalName = safeName || `Startup ${String(userId).slice(0, 8)}`; // ensure NOT NULL
+        const { error: entUpErr } = await supabase
+          .from("enterprise")
+          .update({
+            name: finalName,
+            location: form.location || null,
+          })
+          .eq("id", enterpriseId);
+        if (entUpErr) throw entUpErr;
+      }
 
-      const users = read(KEYS.USERS);
-      const user = users[session.email];
-      if (!user) throw new Error("User record not found.");
+      // 1) read current traction_metrics so we can MERGE with deletes
+      const { data: existingSP, error: readSpErr } = await supabase
+        .from("startup_profile")
+        .select("traction_metrics")
+        .eq("enterprise_id", enterpriseId)
+        .single();
+      if (readSpErr && readSpErr.code !== "PGRST116") throw readSpErr;
 
-      const payloadRaw = {
-        // enterprise
-        name: form.name,
-        location: form.location,
+      // helper: set or delete a top-level tm key
+      const tmNext = { ...(existingSP?.traction_metrics ?? {}) };
+      const setOrDelete = (key, rawVal) => {
+        const val = typeof rawVal === "string" ? rawVal.trim() : rawVal;
+        if (val === "" || val == null) {
+          delete tmNext[key];
+        } else {
+          tmNext[key] = val;
+        }
+      };
 
-        // lookups by name (simulated)
-        industry: form.industry,
-        stage: form.stage,
+      // primitive keys in traction_metrics
+      setOrDelete("industry", form.industry);
+      setOrDelete("stage", form.stage);
+      setOrDelete("pitch_deck_url", form.pitch_deck_url);
+      setOrDelete("demo_url", form.demo_url);
+      setOrDelete("funding_needed", toNumber(form.funding_needed));
 
-        // enterprise_profile / description + links + tags
-        problem_solved: form.problem_solved,
-        pitch_deck_url: form.pitch_deck_url,
-        demo_url: form.demo_url,
-        headline_tags: csvToArray(form.headline_tags),
-        revenue_model: form.revenue_model,
-        competitive_advantages: csvToArray(form.competitive_advantages),
+      // OPTIONAL: include problem_solved / traction_summary in traction_metrics
+      setOrDelete("problem_solved", form.problem_solved);
+      setOrDelete("traction_summary", form.traction_summary);
+
+      // nested financials.funding_goal in traction_metrics
+      const fg = toNumber(form.financials?.funding_goal);
+      if (fg == null) {
+        if (tmNext.financials) {
+          delete tmNext.financials.funding_goal;
+          if (Object.keys(tmNext.financials).length === 0)
+            delete tmNext.financials;
+        }
+      } else {
+        tmNext.financials = { ...(tmNext.financials || {}), funding_goal: fg };
+      }
+
+      // 2) structured columns go in startup_profile
+      const startupPayload = {
+        enterprise_id: enterpriseId,
+        business_model: form.business_model || null,
+        revenue_model: form.revenue_model || null,
+        team_size: teamSizeToInt(form.team_size),
         current_revenue: toNumber(form.current_revenue),
         monthly_growth_rate: toNumber(form.monthly_growth_rate),
         customer_count: toNumber(form.customer_count),
@@ -265,48 +426,67 @@ export default function EntrepreneurProfile() {
         addressable_market: toNumber(form.addressable_market),
         intellectual_property: form.intellectual_property
           ? { notes: form.intellectual_property }
-          : undefined,
-
-        // key metrics / market / team
-        team_size: teamSizeToInt(form.team_size),
-        funding_needed: toNumber(form.funding_needed),
-        financials: { funding_goal: toNumber(form.financials.funding_goal) },
-        target_market: form.target_market,
-
-        // startup_profile text
-        business_model: form.business_model,
-        traction_summary: form.traction_summary,
-
-        // NEW numeric & list fields
+          : null,
+        target_market: form.target_market || null,
         mrr_usd: toNumber(form.mrr_usd),
         arr_usd:
           toNumber(form.arr_usd) ??
           (toNumber(form.mrr_usd) ? Number(form.mrr_usd) * 12 : null),
         current_valuation_usd: toNumber(form.current_valuation_usd),
-        current_investors: csvToArray(form.current_investors),
+        current_investors: csvToArray(form.current_investors), // empty -> []
         technical_founders_pct: toPct(form.technical_founders_pct),
         previous_exits_pct: toPct(form.previous_exits_pct),
-
-        savedAt: Date.now(),
+        competitive_advantages: csvToArray(form.competitive_advantages), // empty -> []
+        traction_metrics: tmNext, // <-- merged JSONB
       };
 
-      const profile = cleanPayload(payloadRaw);
+      // Upsert requires UPDATE permission under RLS when conflict is hit.
+      const { error: spErr } = await supabase
+        .from("startup_profile")
+        .upsert(startupPayload, { onConflict: "enterprise_id" });
+      if (spErr) throw spErr;
 
-      // Persist under the current user
-      users[session.email] = {
-        ...user,
-        entrepreneurProfile: profile,
-        updatedAt: Date.now(),
-      };
-      write(KEYS.USERS, users);
+      // 3) headline_tags as ARRAY; allow clearing to []
+      {
+        const tags = csvToArray(form.headline_tags); // "" -> []
+        const { error: epErr } = await supabase
+          .from("enterprise_profile")
+          .upsert(
+            {
+              enterprise_id: enterpriseId,
+              headline_tags: tags.length ? tags : [],
+            },
+            { onConflict: "enterprise_id" }
+          );
+        if (epErr) throw epErr;
+      }
 
-      // Done — go to the simulated dashboard
       navigate("/dashboard/entrepreneur");
     } catch (err) {
-      console.error("Profile error:", err);
+      console.error("Profile save error:", err);
       setError(err.message || "Could not submit profile");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ---------- complete later (skip for now) ----------
+  const handleCompleteLater = async () => {
+    try {
+      // Mark user as not fully onboarded (optional but nice for gating UIs)
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sUser = sessionData?.session?.user;
+      if (sUser) {
+        await supabase
+          .from("users")
+          .update({ onboarding_completed: false })
+          .eq("id", sUser.id);
+      }
+    } catch (e) {
+      // non-blocking; we still navigate
+      console.warn("Complete later flag failed:", e?.message || e);
+    } finally {
+      navigate("/dashboard/entrepreneur");
     }
   };
 
@@ -324,10 +504,10 @@ export default function EntrepreneurProfile() {
       <Card className="w-full max-w-2xl shadow-lg">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">
-            Entrepreneur Profile (Simulation)
+            Entrepreneur Profile
           </CardTitle>
           <p className="text-sm text-gray-500">
-            This saves locally to sessionStorage — no backend involved.
+            This version reads/writes to Supabase.
           </p>
         </CardHeader>
         <CardContent>
@@ -371,7 +551,9 @@ export default function EntrepreneurProfile() {
 
             <LocationAutocomplete
               value={form.location}
-              onChange={(value) => setForm((prev) => ({ ...prev, location: value }))}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, location: value }))
+              }
             />
 
             <select
@@ -417,7 +599,10 @@ export default function EntrepreneurProfile() {
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  financials: { ...prev.financials, funding_goal: e.target.value },
+                  financials: {
+                    ...prev.financials,
+                    funding_goal: e.target.value,
+                  },
                 }))
               }
             />
@@ -461,7 +646,6 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
 
-            {/* headline tags */}
             <Input
               name="headline_tags"
               placeholder="Headline tags (comma-separated, e.g. AI, Fintech, DevTools)"
@@ -469,7 +653,6 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
 
-            {/* key metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Input
                 name="revenue_model"
@@ -549,7 +732,6 @@ export default function EntrepreneurProfile() {
               <Input
                 name="technical_founders_pct"
                 type="number"
-                step="1"
                 min="0"
                 max="100"
                 placeholder="Technical founders %"
@@ -559,7 +741,6 @@ export default function EntrepreneurProfile() {
               <Input
                 name="previous_exits_pct"
                 type="number"
-                step="1"
                 min="0"
                 max="100"
                 placeholder="Team previous exits %"
@@ -577,9 +758,28 @@ export default function EntrepreneurProfile() {
               onChange={handleChange}
             />
 
-            <Button type="submit" disabled={saving} className="w-full">
-              {saving ? <Loader2 className="animate-spin h-5 w-5" /> : "Submit"}
-            </Button>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between pt-2">
+              <Button
+                type="submit"
+                disabled={saving}
+                className="w-full md:w-auto"
+              >
+                {saving ? (
+                  <Loader2 className="animate-spin h-5 w-5" />
+                ) : (
+                  "Submit"
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full md:w-auto"
+                onClick={handleCompleteLater}
+              >
+                Complete later
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>

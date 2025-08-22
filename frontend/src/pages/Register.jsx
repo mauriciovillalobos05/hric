@@ -1,110 +1,109 @@
-// src/pages/Register.jsx
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import PhoneInput from "react-phone-number-input";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-import { isValidPhoneNumber } from "react-phone-number-input";
 
-// --- Minimal sessionStorage helpers ---
-const KEYS = {
-  USERS: "hri:users",
-  SESSION: "hri:authSession",
-};
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
-const read = (key) => {
-  try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-};
-
-const write = (key, value) => {
-  sessionStorage.setItem(key, JSON.stringify(value));
-};
-
-const emailExists = (email) => {
-  const users = read(KEYS.USERS);
-  return Boolean(users[email?.toLowerCase?.()]);
-};
-
-async function sha256Hex(str) {
-  const buf = new TextEncoder().encode(str);
-  const hash = await crypto.subtle.digest("SHA-256", buf);
-  return [...new Uint8Array(hash)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+const API_BASE =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 export default function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const defaultRole = queryParams.get("role");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState(""); // will be filled from sessionStorage
+  const [role, setRole] = useState(defaultRole || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Pull role from sessionStorage.registrationRole on mount
-  useEffect(() => {
-    const storedRole = sessionStorage.getItem("registrationRole");
-    if (storedRole) setRole(storedRole);
-  }, []);
+  async function seedRegisterComplete({ supabase_id }) {
+    try {
+      // NOTE: backend route is /api/register-complete (not /api/auth/…)
+      const res = await fetch(`${API_BASE}/api/auth/register-complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          supabase_id,
+          email,
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          role, // "investor" | "entrepreneur"
+        }),
+      });
+      if (!res.ok && res.status !== 409) {
+        const txt = await res.text().catch(() => "");
+        console.warn("register-complete warning:", res.status, txt);
+      }
+    } catch (e) {
+      console.warn("register-complete call failed:", e);
+    }
+  }
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
+    if (!role) {
+      setError("Please select a role.");
+      setLoading(false);
+      return;
+    }
+    if (phone && !isValidPhoneNumber(phone)) {
+      setError("Please enter a valid phone number.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      if (!role) {
-        throw new Error("No role found. Please start from the role selection step.");
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/onboarding`,
+          data: { first_name: firstName, last_name: lastName, phone, role },
+        },
+      });
+      if (signUpError) throw signUpError;
+
+      // Save role for onboarding fallback
+      // Put the chosen role into auth metadata so onboarding can read it.
+      try {
+        await supabase.auth.updateUser({
+          data: { role }, 
+        });
+      } catch {}
+
+      // Create Enterprise + owner membership in your DB now
+      const supabaseId = data?.user?.id;
+      if (supabaseId) {
+        seedRegisterComplete({ supabase_id: supabaseId });
       }
-      if (!isValidPhoneNumber(phone)) {
-        throw new Error("Please enter a valid phone number.");
-      }
-      if (password.length < 8) {
-        throw new Error("Password must be at least 8 characters.");
-      }
-      if (emailExists(email)) {
-        throw new Error("An account with this email already exists.");
-      }
 
-      const users = read(KEYS.USERS);
-      const emailKey = email.toLowerCase();
-
-      const userRecord = {
-        id: crypto.randomUUID(),
-        email: emailKey,
-        firstName,
-        lastName,
-        phone,
-        role,
-        passwordHash: await sha256Hex(password), // demo only
-        verified: true, // skipping email verification in this flow
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      users[emailKey] = userRecord;
-      write(KEYS.USERS, users);
-
-      // Create a simple session so the app considers the user "signed in"
-      write(KEYS.SESSION, { email: emailKey, issuedAt: Date.now() });
-
-      // Go straight to onboarding
-      navigate("/onboarding");
+      navigate("/email-confirmation-sent");
     } catch (err) {
-      setError(err.message || "Something went wrong");
+      console.error(err);
+      setError(err.message || "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -120,13 +119,6 @@ export default function Register() {
           <CardTitle className="text-2xl font-bold text-gray-900">
             Register
           </CardTitle>
-          {role && (
-            <div className="mt-2">
-              <Badge className="bg-gray-100 text-gray-800">
-                Role: {role.charAt(0).toUpperCase() + role.slice(1)}
-              </Badge>
-            </div>
-          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleRegister} className="space-y-4">
@@ -193,33 +185,29 @@ export default function Register() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Minimum 8 characters
-              </p>
             </div>
 
-            {/* Role select is intentionally removed; role is sourced from sessionStorage.
-                If you want a fallback UI when it's missing, uncomment below:
-            {!role && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Select Role
-                </label>
-                <select
-                  value={role}
-                  onChange={(e) => {
-                    setRole(e.target.value);
-                    sessionStorage.setItem("registrationRole", e.target.value);
-                  }}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="" disabled>Select a role</option>
-                  <option value="investor">Investor</option>
-                  <option value="entrepreneur">Entrepreneur</option>
-                </select>
-              </div>
-            )} */}
+            <div>
+              <label
+                htmlFor="role"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Select Role
+              </label>
+              <select
+                id="role"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                required
+              >
+                <option value="" disabled>
+                  Select a role
+                </option>
+                <option value="investor">Investor</option>
+                <option value="entrepreneur">Entrepreneur</option>
+              </select>
+            </div>
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -12,9 +12,9 @@ import InvestorTools from "./investorTools.jsx";
 import AnalyticsDashboard from "./analyticComponents/AnalyticsDashboard.jsx";
 
 import EventList from "@/pages/eventShowcaseComponents/eventShowcaseAccess.jsx";
-import RegisterModal from "@/pages/eventShowcaseComponents/registerModal.jsx";
+import RegisterModal from "@/pages/eventShowcaseComponents/RegisterModal.jsx";
 
-import MessagesDashboard from "./messagesComponents/messagesDashboard.jsx";
+import MessagesDashboard from "./messagesComponents/MessagesDashboard.jsx";
 import { mockMessages } from "./messagesComponents/mockMessages.js";
 
 import { InvestorMatcher } from "./matchComponents/algorithms/matchingAlgorithm.js";

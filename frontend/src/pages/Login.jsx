@@ -7,19 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle } from "lucide-react";
-import { connectSocketWithToken } from "@/lib/socket";
 
-// ---- ENV ----
-// Set these in Vercel/Preview/Dev:
-// VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_BASE_URL
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
 const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "") ||
-  "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -32,74 +27,60 @@ function Login() {
     setError(null);
 
     // 1) Supabase sign-in
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { data, error: signInError } = await supabase.auth.signInWithPassword(
+      {
+        email,
+        password,
+      }
+    );
     if (signInError) {
       setError(signInError.message);
       return;
     }
 
-    const accessToken = data?.session?.access_token;
     const user = data?.user;
-
-    if (!accessToken || !user) {
-      setError("Login failed: no session returned.");
+    if (!user) {
+      setError("Login failed: no user returned.");
       return;
     }
 
     try {
-      // Persist token for later app usage (reconnect sockets, API calls, etc.)
-      sessionStorage.setItem("hric_token", accessToken);
+      // 2) Read role straight from DB
+      // Find the active OWNER membership and its enterprise type
+      const { data: memberships, error: memErr } = await supabase
+        .from("enterprise_user")
+        .select(
+          `
+        role,
+        is_active,
+        enterprise:enterprise_id (
+          id,
+          enterprise_type
+        )
+      `
+        )
+        .eq("user_id", user.id);
 
-      // 2) Optional: notify backend after login (last_active_at, activity logs)
-      await fetch(`${API_BASE}/api/auth/after-login`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({}),
-      }).catch(() => {});
+      if (memErr) throw memErr;
 
-      // 3) Ask backend who we are
-      const meRes = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: "application/json",
-        },
-      });
-
-      if (!meRes.ok) {
-        const body = await meRes.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to fetch profile");
-      }
-
-      const me = await meRes.json();
-
-      // 4) Initialize Socket.IO once we have a token
-      connectSocketWithToken(accessToken);
-
-      // 5) Decide where to go
-      const owner = (me.memberships || []).find(
-        (m) => m.role === "owner" && m.is_active
+      const owner = (memberships || []).find(
+        (m) => m.role === "owner" && m.is_active && m.enterprise
       );
 
-      const enterpriseType =
-        owner?.enterprise?.enterprise_type || owner?.enterprise_type;
-
-      const metaRole = user?.user_metadata?.role || user?.user_metadata?.plan;
-
+      // 3) Decide route
       let route = "/dashboard/user";
+      const enterpriseType = owner?.enterprise?.enterprise_type;
+
       if (enterpriseType === "investor") route = "/dashboard/investor";
       else if (enterpriseType === "startup") route = "/dashboard/entrepreneur";
-      else if (typeof metaRole === "string") {
-        const r = metaRole.toLowerCase();
-        if (r.includes("investor")) route = "/dashboard/investor";
-        else if (r.includes("entrepreneur") || r.includes("startup"))
+      else {
+        // Fallback to auth metadata if membership hasn't been created yet
+        const metaRole = (user.user_metadata?.role || "").toLowerCase();
+        if (metaRole.includes("investor")) route = "/dashboard/investor";
+        else if (
+          metaRole.includes("entrepreneur") ||
+          metaRole.includes("startup")
+        )
           route = "/dashboard/entrepreneur";
       }
 
@@ -132,7 +113,9 @@ function Login() {
               />
             </div>
             <div>
-              <label className="block mb-1 text-sm text-gray-700">Password</label>
+              <label className="block mb-1 text-sm text-gray-700">
+                Password
+              </label>
               <Input
                 type="password"
                 placeholder="••••••••"

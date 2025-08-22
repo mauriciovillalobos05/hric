@@ -1,7 +1,4 @@
 # src/main.py
-import eventlet
-eventlet.monkey_patch()
-
 import os
 from dotenv import load_dotenv
 from flask import Flask, send_from_directory

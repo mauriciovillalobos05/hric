@@ -1,26 +1,21 @@
 import React from "react";
 import { Routes, Route } from "react-router-dom";
-
-// DASHBOARDS (match exact filenames in repo)
-import HomePage from "./dashboards/HomePage.jsx";
-import MainUserDashboard from "./dashboards/mainUserDashboard.jsx";
-import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard.jsx";
-import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard.jsx";
-
-// PAGES (these likely already match; add .jsx if you hit case/extension issues)
-import ProfileSettings from "./pages/ProfileSettings/profileSettings.jsx";
-import Login from "./pages/Login.jsx";
-import Register from "./pages/Register.jsx";
-import Onboarding from "./pages/Onboarding.jsx";
-import Portfolio from "./pages/Portfolio/Portfolio.jsx";
-import Analysis from "./pages/AnalysisMonteCarlo/Analysis.jsx";
-import InvestorProfile from "./pages/complete-profile/InvestorProfile.jsx";
-import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile.jsx";
-import EmailPendingSecondary from "./pages/emailPendingSecondary.jsx";
-import EmailConfirmationSent from "./pages/emailConfirmationSent.jsx";
-import ProfilePreview from "./pages/profileViews/ProfilePreview.jsx";
-import SelectPlan from "./pages/selectPlan.jsx";
-
+import HomePage from "./dashboards/HomePage";
+import MainUserDashboard from "./dashboards/MainUserDashboard";
+import InvestorsDashboard from "./dashboards/investors-dashboard/investorsDashboard";
+import EntrepreneurDashboard from "./dashboards/entrepreneurs-dashboard/entrepreneursDashboard";
+import ProfileSettings from "./pages/ProfileSettings/profileSettings";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import Onboarding from "./pages/Onboarding";
+import Portfolio from "./pages/Portfolio/Portfolio";
+import Analysis from "./pages/AnalysisMonteCarlo/Analysis";
+import InvestorProfile from "./pages/complete-profile/InvestorProfile";
+import EntrepreneurProfile from "./pages/complete-profile/EntrepreneurProfile";
+import EmailPendingSecondary from "./pages/emailPendingSecondary";
+import EmailConfirmationSent from "./pages/emailConfirmationSent";
+import ProfilePreview from "./pages/profileViews/ProfilePreview";
+import SelectPlan from "./pages/selectPlan";
 function App() {
   return (
     <>

@@ -11,8 +11,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api":       { target: "https://hric.onrender.com", changeOrigin: true, secure: true },
-      "/socket.io": { target: "https://hric.onrender.com", ws: true, changeOrigin: true, secure: true },
+      '/api': 'http://localhost:8000', // Flask backend proxy
     },
   },
 });

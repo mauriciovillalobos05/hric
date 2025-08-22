@@ -507,7 +507,6 @@ export default function EntrepreneurProfile() {
             Entrepreneur Profile
           </CardTitle>
           <p className="text-sm text-gray-500">
-            This version reads/writes to Supabase.
           </p>
         </CardHeader>
         <CardContent>

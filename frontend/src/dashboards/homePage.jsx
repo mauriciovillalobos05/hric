@@ -256,6 +256,10 @@ function HomePage() {
                 investment community at Hyatt Residence.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
+                <Button size="lg" className="text-lg px-8 py-4" onClick={() => handleNavigate('investor')}>
+                  Join as Investor
+                  <ArrowRight className="ml-2 h-5 w-5" />
+                </Button>
                 <Button variant="outline" size="lg" className="text-lg px-8 py-4" onClick={() => handleNavigate('entrepreneur')}>
                   Apply as Entrepreneur
                 </Button>
@@ -499,7 +503,11 @@ function HomePage() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" variant="outline" className="text-lg px-8 py-4 border-white hover:bg-white hover:text-blue-600">
+            <Button size="lg" variant="secondary" className="text-lg px-8 py-4">
+              <Building className="mr-2 h-5 w-5" />
+              Join as Investor
+            </Button>
+            <Button size="lg" variant="outline" className="text-lg px-8 py-4 text-white border-white hover:bg-white hover:text-blue-600">
               <Zap className="mr-2 h-5 w-5" />
               Apply as Entrepreneur
             </Button>

@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request, current_app
 from src.extensions import db
 # add to imports at the top
 from src.models.user import User, Enterprise, EnterpriseUser, GeographicArea
-
+from src.routes.supabase_auth import require_auth
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -199,12 +199,11 @@ def register_complete():
 
 @auth_bp.route("/profile", methods=["PUT", "PATCH"])
 def update_profile():
-    user, _, err = require_auth(db, User)  # << use shared helper
+    user, _, err = require_auth(db, User)
     if err:
         return err
 
     data = request.get_json() or {}
-
     for field in [
         "first_name", "last_name", "phone", "linkedin_url",
         "twitter_url", "website_url", "bio", "timezone",

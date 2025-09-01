@@ -57,7 +57,7 @@ def _require_cfg(*keys: str) -> Tuple[Optional[str], Optional[tuple]]:
     missing = [k for k in keys if not os.getenv(k)]
     if missing:
         return None, (jsonify({"error": f"Server not configured: missing {', '.join(missing)}"}), 500)
-    return "ok", None
+    return None
 
 def _sign_outgoing(ts: str, payload_dict: dict, secret: str) -> str:
     """

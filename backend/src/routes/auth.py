@@ -52,12 +52,14 @@ def _now() -> dt.datetime:
 def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-def _require_cfg(*keys: str) -> Tuple[Optional[str], Optional[tuple]]:
-    """Return (None, (resp,code)) if any required key missing."""
+def _require_cfg(*keys: str):
     missing = [k for k in keys if not os.getenv(k)]
     if missing:
-        return None, (jsonify({"error": f"Server not configured: missing {', '.join(missing)}"}), 500)
+        msg = f"Server not configured: missing {', '.join(missing)}"
+        current_app.logger.error("[cfg] %s", msg)
+        return jsonify({"error": msg}), 500
     return None
+
 
 def _sign_outgoing(ts: str, payload_dict: dict, secret: str) -> str:
     """

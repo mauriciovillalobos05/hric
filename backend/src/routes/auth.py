@@ -378,7 +378,7 @@ def intelleges_initiate():
     hmac_key  = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
     source    = os.getenv("INTELLEGES_SOURCE", "HRIC")
     locale    = os.getenv("INTELLEGES_LOCALE", "en-US")
-    redirect  = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:3000/return")
+    redirect  = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:5173/dashboard/entrepreneur")
 
     body = request.get_json(silent=True) or {}
     email = (user.email or "").lower()

@@ -446,7 +446,7 @@ def intelleges_initiate():
         reg.registration_id   = data.get("registration_id") or reg.registration_id
         reg.questionnaire_link= data.get("questionnaire_link") or reg.questionnaire_link
         # Canonicalize status to spec (they return QUESTIONNAIRE_LINK_ISSUED here)  :contentReference[oaicite:4]{index=4}
-        upstream_status       = (data.get("status") or "QUESTIONNAIRE_LINK_ISSUED").upper()
+        upstream_status = (data.get("status") or "QUESTIONNAIRE_LINK_ISSUED").upper()
         if upstream_status not in STATUSES:
             upstream_status = "QUESTIONNAIRE_LINK_ISSUED"
         reg.status = upstream_status
@@ -597,7 +597,7 @@ def intelleges_webhook():
 
 @auth_bp.route("/profile", methods=["PUT", "PATCH"])
 def update_profile():
-    user, _, err = user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
+    user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
     if err:
         return err
 
@@ -625,7 +625,7 @@ def update_profile():
 
 @auth_bp.route("/me", methods=["GET"])
 def me():
-    user, _, err = user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
+    user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
     if err:
         return err
     try:
@@ -641,7 +641,7 @@ def me():
 
 @auth_bp.route("/after-login", methods=["POST"])
 def after_login():
-    user, _, err = user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
+    user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
     if err:
         return err
     try:
@@ -668,7 +668,7 @@ def after_login():
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-    user, _, err = user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
+    user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
     if err:
         return err
     try:

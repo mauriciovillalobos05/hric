@@ -1,34 +1,53 @@
 # migrations/env.py
+import os
 from logging.config import fileConfig
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-import os
+from sqlalchemy import create_engine, pool
+from dotenv import load_dotenv
 
-# 🟢 import your app factory and models Base
-from src.main import create_app            
-from src.models.user import Base as ModelBase
+# Load .env so Alembic sees the same vars as your app
+load_dotenv()
+
+import src.models.user as models  # must import WITHOUT creating the Flask app
 
 config = context.config
-if config.config_file_name:
+
+# Prefer DATABASE_URL (same as your Flask app), fallback to SUPABASE_DB_URL
+DB_URL = os.environ.get("DATABASE_URL")
+
+if not DB_URL:
+    raise RuntimeError(
+        "Set DATABASE_URL for Alembic.\n"
+        "Example: postgresql+psycopg2://postgres:<PASSWORD>@db.<PROJECT_REF>.supabase.co:5432/postgres?sslmode=require"
+    )
+
+# Normalize scheme
+if DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+elif DB_URL.startswith("postgresql://"):
+    DB_URL = DB_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+config.set_main_option("sqlalchemy.url", DB_URL)
+
+if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = ModelBase.metadata
+target_metadata = models.Base.metadata
 
-def get_url():
-    # prefer env var if provided (CI/CLI friendly)
-    env_url = os.getenv("DATABASE_URL")
-    if env_url:
-        return env_url
-    app = create_app()
-    with app.app_context():
-        return app.config["SQLALCHEMY_DATABASE_URI"]
+def include_object(obj, name, type_, reflected, compare_to):
+    # If a table exists in the DB (reflected=True) but not in metadata (compare_to is None),
+    # skip it so autogenerate does NOT propose dropping it.
+    if type_ == "table" and reflected and compare_to is None:
+        return False
+    return True
 
 def run_migrations_offline():
     context.configure(
-        url=get_url(),
+        url=DB_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
         compare_type=True,
         compare_server_default=True,
     )
@@ -36,15 +55,16 @@ def run_migrations_offline():
         context.run_migrations()
 
 def run_migrations_online():
-    connectable = engine_from_config(
-        {"sqlalchemy.url": get_url()},
-        prefix="sqlalchemy.",
+    engine = create_engine(
+        DB_URL,
         poolclass=pool.NullPool,
+        connect_args={"sslmode": "require"},
     )
-    with connectable.connect() as connection:
+    with engine.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_object=include_object,
             compare_type=True,
             compare_server_default=True,
         )

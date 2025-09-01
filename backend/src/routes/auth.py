@@ -359,44 +359,59 @@ def onboarding_startup():
 @auth_bp.route("/intelleges/initiate", methods=["POST"])
 def intelleges_initiate():
     """
-    HRIC → Intelleges: initiate registration and return a questionnaire deep-link.
+    HRIC → Intelleges: initiate a registration and return a questionnaire deep-link.
 
-    Uses HMAC client auth to Intelleges per spec. Idempotent on (email, tier).
-    Saves/updates IntellegesRegistration with canonical statuses.
+    DEV mode (DEV_FAKE_INTELLEGES=true): synthesizes a link, no external call required.
+    PROD mode  : requires INTELLEGES_API_BASE and INTELLEGES_CLIENT_HMAC_SECRET.
+    Idempotent behavior: if a non-COMPLETED registration already exists for (email, tier),
+    reuse it and just return its link/status.
     """
-    # Auth: HRIC user must be signed in
+    # 0) Auth
     user, _, err = require_supabase_auth(db, User)
     if err:
         return err
 
-    # Required config
-    _, cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_CLIENT_HMAC_SECRET")
-    if cfg_err:
-        return cfg_err
-
-    api_base  = os.getenv("INTELLEGES_API_BASE").rstrip("/")
-    hmac_key  = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
-    source    = os.getenv("INTELLEGES_SOURCE", "HRIC")
-    locale    = os.getenv("INTELLEGES_LOCALE", "en-US")
-    redirect  = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:5173/dashboard/entrepreneur")
-
+    # 1) Inputs
     body = request.get_json(silent=True) or {}
-    email = (user.email or "").lower()
-    country = (body.get("country_of_origin") or "MX").upper()       # minimal example
-    tier = (body.get("product_tier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
+    email   = (user.email or "").lower().strip()
+    tier    = (body.get("product_tier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
+    country = (body.get("country_of_origin") or "MX").upper()
 
-    # Build idempotency key (email|tier|day) – deterministic for a day
-    idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
-    idk = _sha256_hex(idk_seed)
+    DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "true").lower() == "true"
 
-    # Upsert (no explicit transaction; single commit to avoid nesting)
-    try:
+    # 2) PROD-only required config
+    if not DEV_FAKE_INTELLEGES:
+        _, cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_CLIENT_HMAC_SECRET")
+        if cfg_err:
+            current_app.logger.error("[intelleges_initiate] missing config for PROD")
+            return cfg_err
+
+    # 3) Try to reuse an in-flight registration first (idempotent by (email, tier))
+    reg = (
+        db.session.query(IntellegesRegistration)
+        .filter(
+            func.lower(IntellegesRegistration.email) == email,
+            IntellegesRegistration.product_tier == tier,
+            IntellegesRegistration.status != "COMPLETED",
+        )
+        .order_by(IntellegesRegistration.created_at.desc())
+        .first()
+    )
+
+    # 4) If none, create a fresh row with a deterministic idempotency key (per-day)
+    if not reg:
+        idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
+        idk = _sha256_hex(idk_seed)
+
+        # Also check by idempotency_key in case the same call is retried quickly
         reg = (
             db.session.query(IntellegesRegistration)
             .filter(func.lower(IntellegesRegistration.idempotency_key) == idk)
             .one_or_none()
         )
+
         if not reg:
+            current_app.logger.info("[intelleges_initiate] create new registration row (email=%s tier=%s)", email, tier)
             reg = IntellegesRegistration(
                 user_id=user.id,
                 email=email,
@@ -404,32 +419,59 @@ def intelleges_initiate():
                 status="EMAIL_SUBMITTED",
                 idempotency_key=idk,
             )
-            # store country if your model has it
             if hasattr(reg, "country_of_origin"):
                 reg.country_of_origin = country
             db.session.add(reg)
             db.session.flush()
 
-        # Call Intelleges initiate endpoint (idempotent on their side too)
-        # Spec: POST /api/hric/registrations/initiate with email, country_of_origin, product_tier, source, redirect_base_url, locale, idempotency_key
-        # Response 201: { registration_id, email, product_tier, questionnaire_link, status: "QUESTIONNAIRE_LINK_ISSUED", link_expires_at }  :contentReference[oaicite:3]{index=3}
-        payload = {
-            "email": email,
-            "country_of_origin": country,
-            "product_tier": tier,
-            "source": source,
-            "redirect_base_url": redirect,
-            "locale": locale,
-            "idempotency_key": idk,
-        }
-        ts = _now().isoformat()
-        msg = ts + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        sig = hashlib.sha256(hmac_key.encode("utf-8") + msg.encode("utf-8")).hexdigest()
+    # 5) DEV path: synthesize a link so FE can continue
+    if DEV_FAKE_INTELLEGES:
+        rid = reg.registration_id or f"ilgs_{hashlib.sha1(f'{email}|{tier}|{_now().isoformat()}'.encode()).hexdigest()[:16]}"
+        reg.registration_id = rid
+        if not reg.questionnaire_link:
+            reg.questionnaire_link = f"https://example.intelleges/qs/{rid}"
+        if not getattr(reg, "link_expires_at", None):
+            reg.link_expires_at = _now() + timedelta(days=2)
+        reg.status = "QUESTIONNAIRE_LINK_ISSUED"
+        if hasattr(user, "intelleges_status"):
+            user.intelleges_status = reg.status
 
-        current_app.logger.info("[intelleges_initiate] POST %s payload=%s", api_base + "/api/hric/registrations/initiate", payload)
+        db.session.commit()
+        current_app.logger.info("[intelleges_initiate][DEV] ok reg=%s link=%s", reg.registration_id, reg.questionnaire_link)
+        return jsonify({
+            "registration_id": reg.registration_id,
+            "questionnaire_link": reg.questionnaire_link,
+            "status": reg.status,
+            "link_expires_at": reg.link_expires_at.isoformat() if reg.link_expires_at else None,
+            "mode": "dev-fake",
+        }), 200
 
-        ilgs = requests.post(
-            f"{api_base}/api/hric/registrations/initiate",
+    # 6) PROD path: call Intelleges per spec
+    api_base = os.getenv("INTELLEGES_API_BASE").rstrip("/")
+    hmac_key = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
+    source   = os.getenv("INTELLEGES_SOURCE", "HRIC")
+    locale   = os.getenv("INTELLEGES_LOCALE", "en-US")
+    redirect = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:5173/dashboard/entrepreneur")
+
+    payload = {
+        "email": email,
+        "country_of_origin": country,
+        "product_tier": tier,
+        "source": source,
+        "redirect_base_url": redirect,
+        "locale": locale,
+        "idempotency_key": reg.idempotency_key,
+    }
+    ts  = _now().isoformat()
+    msg = ts + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    sig = hashlib.sha256(hmac_key.encode("utf-8") + msg.encode("utf-8")).hexdigest()
+
+    try:
+        url = f"{api_base}/api/hric/registrations/initiate"
+        current_app.logger.info("[intelleges_initiate][PROD] POST %s payload=%s", url, payload)
+
+        resp = requests.post(
+            url,
             headers={
                 "Content-Type": "application/json",
                 "X-Timestamp": ts,
@@ -438,37 +480,40 @@ def intelleges_initiate():
             json=payload,
             timeout=(5, 20),
         )
-        if ilgs.status_code not in (200, 201):
-            current_app.logger.warning("Intelleges initiate failed: %s %s", ilgs.status_code, ilgs.text[:500])
-            return jsonify({"error": "Intelleges initiate failed", "upstream_status": ilgs.status_code}), 502
+        if resp.status_code not in (200, 201):
+            txt = resp.text[:500]
+            current_app.logger.warning("[intelleges_initiate][PROD] upstream %s: %s", resp.status_code, txt)
+            return jsonify({"error": "Intelleges initiate failed", "upstream_status": resp.status_code}), 502
 
-        data = ilgs.json()
-        reg.registration_id   = data.get("registration_id") or reg.registration_id
-        reg.questionnaire_link= data.get("questionnaire_link") or reg.questionnaire_link
-        # Canonicalize status to spec (they return QUESTIONNAIRE_LINK_ISSUED here)  :contentReference[oaicite:4]{index=4}
+        data = resp.json()
+        reg.registration_id     = data.get("registration_id") or reg.registration_id
+        reg.questionnaire_link  = data.get("questionnaire_link") or reg.questionnaire_link
+
         upstream_status = (data.get("status") or "QUESTIONNAIRE_LINK_ISSUED").upper()
         if upstream_status not in STATUSES:
+            current_app.logger.warning("[intelleges_initiate][PROD] unknown upstream status %s; coercing", upstream_status)
             upstream_status = "QUESTIONNAIRE_LINK_ISSUED"
         reg.status = upstream_status
 
-        # link expiry
-        if hasattr(reg, "link_expires_at"):
-            try:
-                reg.link_expires_at = dt.datetime.fromisoformat(
-                    (data.get("link_expires_at") or "").replace("Z", "+00:00")
-                )
-            except Exception:
-                reg.link_expires_at = _now() + dt.timedelta(hours=24)
+        # Try to parse expiry, default to +24h
+        try:
+            iso = (data.get("link_expires_at") or "").replace("Z", "+00:00")
+            reg.link_expires_at = dt.datetime.fromisoformat(iso) if iso else (_now() + dt.timedelta(hours=24))
+        except Exception:
+            reg.link_expires_at = _now() + dt.timedelta(hours=24)
 
-        # keep user mirror status aligned (UI gate)  :contentReference[oaicite:5]{index=5}
-        _upsert_user_status(user, reg.status)
+        if hasattr(user, "intelleges_status"):
+            user.intelleges_status = reg.status
 
         db.session.commit()
+        current_app.logger.info("[intelleges_initiate][PROD] ok reg=%s link=%s", reg.registration_id, reg.questionnaire_link)
+
         return jsonify({
             "registration_id": reg.registration_id,
             "questionnaire_link": reg.questionnaire_link,
             "status": reg.status,
             "link_expires_at": reg.link_expires_at.isoformat() if reg.link_expires_at else None,
+            "mode": "prod",
         }), 200
 
     except Exception as e:

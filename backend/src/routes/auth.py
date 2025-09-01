@@ -456,16 +456,26 @@ def intelleges_initiate():
         "locale": locale,
         "idempotency_key": idk,
     }
-    ts = _now().isoformat()
-    sig = _sign_outgoing(ts, payload, hmac_secret)
+    payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    ts = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    sig = hmac.new(
+        hmac_secret.encode("utf-8"),
+        (ts + payload_str).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
     try:
         url = f"{api_base}/api/hric/registrations/initiate"
         current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
         resp = requests.post(
             url,
-            headers={"Content-Type": "application/json", "X-Timestamp": ts, "X-Signature": sig},
-            json=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Timestamp": ts,
+                "X-Signature": sig,
+                "Accept": "application/json",
+            },
+            data=payload_str,
             timeout=(5, 20),
         )
         if resp.status_code not in (200, 201):

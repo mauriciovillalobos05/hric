@@ -36,94 +36,6 @@ auth_bp = Blueprint("auth", __name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-STATUSES = {
-    "NOT_STARTED",
-    "EMAIL_SUBMITTED",
-    "EMAIL_VERIFIED",
-    "QUESTIONNAIRE_LINK_ISSUED",
-    "IN_PROGRESS",
-    "COMPLETED",
-}
-
-def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-def _sha256_hex(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
-def _require_cfg(*keys: str):
-    missing = [k for k in keys if not os.getenv(k)]
-    if missing:
-        msg = f"Server not configured: missing {', '.join(missing)}"
-        current_app.logger.error("[cfg] %s", msg)
-        return jsonify({"error": msg}), 500
-    return None
-
-
-def _sign_outgoing(ts: str, payload_dict: dict, secret: str) -> str:
-    """
-    Intelleges HMAC: sha256( timestamp + compact_json(payload), shared_secret ) -> hex
-    """
-    msg = ts + json.dumps(payload_dict, separators=(",", ":"), ensure_ascii=False)
-    return hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
-
-def _verify_incoming(ts: str, raw_body: bytes, provided_sig: str, secret: str) -> bool:
-    if not ts or not provided_sig:
-        return False
-    try:
-        sent = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return False
-    if abs((_now() - sent).total_seconds()) > 300:
-        return False  # >5 minutes skew
-
-    expected = hmac.new(secret.encode("utf-8"), (ts + raw_body.decode("utf-8")).encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, provided_sig)
-
-def _upsert_user_status(user: User, status: str) -> None:
-    if hasattr(user, "intelleges_status") and status in STATUSES:
-        user.intelleges_status = status
-
-def _hmac_signature(secret: str, timestamp: str, raw_body: bytes) -> str:
-    # spec: X-Signature = sha256(timestamp + body, shared_secret)  (hex)
-    msg = timestamp.encode("utf-8") + raw_body
-    return hashlib.sha256(secret.encode("utf-8") + msg).hexdigest()
-
-def _verify_webhook_hmac() -> Optional[tuple]:
-    """
-    Verify Intelleges → HRIC webhook HMAC.
-    Headers:
-      X-Timestamp: UTC ISO8601
-      X-Signature: hex sha256(secret + (timestamp + body))
-    Reject if clock skew > 5 minutes.
-    """
-    secret = os.getenv("INTELLEGES_WEBHOOK_SECRET")
-    if not secret:
-        current_app.logger.warning("[intelleges_webhook] no INTELLEGES_WEBHOOK_SECRET set; skipping HMAC verify")
-        return None
-
-    ts = request.headers.get("X-Timestamp", "")
-    sig = request.headers.get("X-Signature", "")
-    if not ts or not sig:
-        return (jsonify({"error": "Missing HMAC headers"}), 401)
-
-    try:
-        sent = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return (jsonify({"error": "Invalid X-Timestamp"}), 401)
-
-    if abs((_now() - sent).total_seconds()) > 300:
-        return (jsonify({"error": "Clock skew too large"}), 401)
-
-    raw = request.get_data(cache=False)  # raw body (works for JSON and multipart)
-    expected = _hmac_signature(secret, ts, raw)
-    if not hmac.compare_digest(expected, sig):
-        current_app.logger.warning("[intelleges_webhook] bad signature; expected %s, got %s", expected, sig)
-        return (jsonify({"error": "Invalid signature"}), 401)
-
-    return None
-
 def _upsert_user_status(user: User, status: str) -> None:
     if hasattr(user, "intelleges_status") and status in STATUSES:
         user.intelleges_status = status
@@ -197,37 +109,100 @@ def _validate_plan_key(plan_key: str) -> Optional[str]:
     )
     return plan.plan_key if plan else None
 
-# ---- Intelleges client stubs (replace with your actual client) -------------
+STATUSES = {
+    "NOT_STARTED",
+    "EMAIL_SUBMITTED",
+    "EMAIL_VERIFIED",
+    "QUESTIONNAIRE_LINK_ISSUED",
+    "IN_PROGRESS",
+    "COMPLETED",
+}
 
-DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "false").lower() == "false"
-INTELLEGES_WEBHOOK_SECRET = os.getenv("INTELLEGES_WEBHOOK_SECRET", "dev-secret")
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
 
-def _intelleges_create_registration(email: str, product_tier: str) -> Dict[str, Any]:
-    """
-    Replace this with a real client call.
-    Must return: {registration_id, questionnaire_link, expires_at (utc iso8601)}
-    """
-    if DEV_FAKE_INTELLEGES:
-        rid = f"ilgs_{hashlib.sha1(f'{email}|{product_tier}|{_now().isoformat()}'.encode()).hexdigest()[:16]}"
-        return {
-            "registration_id": rid,
-            "questionnaire_link": f"https://example.intelleges/qs/{rid}",
-            "expires_at": (_now() + timedelta(days=2)).isoformat(),
-        }
-    raise RuntimeError("Intelleges client not configured")
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-def _verify_webhook_signature(raw_body: bytes, signature: str | None) -> bool:
+def _require_cfg(*keys: str):
     """
-    HMAC SHA-256 verifier. Intelleges should send a header like X-Intelleges-Signature.
+    Returns (Response, code) if any required key is missing; otherwise returns None.
+    Callers should do:  cfg_err = _require_cfg(...);  if cfg_err: return cfg_err
     """
+    missing = [k for k in keys if not os.getenv(k)]
+    if missing:
+        msg = f"Server not configured: missing {', '.join(missing)}"
+        current_app.logger.error("[cfg] %s", msg)
+        return jsonify({"error": msg}), 500
+    return None
+
+def _sign_outgoing(ts: str, payload_dict: dict, secret: str) -> str:
+    """
+    Intelleges HMAC: sha256( timestamp + compact_json(payload), shared_secret ) -> hex
+    """
+    msg = ts + json.dumps(payload_dict, separators=(",", ":"), ensure_ascii=False)
+    return hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+def _verify_incoming(ts: str, raw_body: bytes, provided_sig: str, secret: str) -> bool:
+    if not ts or not provided_sig:
+        return False
     try:
-        if not signature:
-            return DEV_FAKE_INTELLEGES  # allow in dev
-        mac = hmac.new(INTELLEGES_WEBHOOK_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
-        # constant-time compare
-        return hmac.compare_digest(mac, signature)
+        sent = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except Exception:
         return False
+    if abs((_now() - sent).total_seconds()) > 300:
+        return False  # >5 minutes skew
+    expected = hmac.new(secret.encode("utf-8"), (ts + raw_body.decode("utf-8")).encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, provided_sig)
+
+def _upsert_user_status(user: User, status: str) -> None:
+    if hasattr(user, "intelleges_status") and status in STATUSES:
+        user.intelleges_status = status
+
+def _hmac_signature(secret: str, timestamp: str, raw_body: bytes) -> str:
+    # spec: X-Signature = sha256(timestamp + body, shared_secret)  (hex)
+    msg = timestamp.encode("utf-8") + raw_body
+    return hashlib.sha256(secret.encode("utf-8") + msg).hexdigest()
+
+def _verify_webhook_hmac() -> Optional[tuple]:
+    """
+    Verify Intelleges → HRIC webhook HMAC.
+    Headers:
+      X-Timestamp: UTC ISO8601
+      X-Signature: hex sha256(secret + (timestamp + body))
+    Reject if clock skew > 5 minutes.
+    """
+    secret = os.getenv("INTELLEGES_WEBHOOK_SECRET")
+    if not secret:
+        current_app.logger.warning("[intelleges_webhook] no INTELLEGES_WEBHOOK_SECRET set; skipping HMAC verify")
+        return None
+
+    ts = request.headers.get("X-Timestamp", "")
+    sig = request.headers.get("X-Signature", "")
+    if not ts or not sig:
+        return jsonify({"error": "Missing HMAC headers"}), 401
+
+    try:
+        sent = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return jsonify({"error": "Invalid X-Timestamp"}), 401
+
+    if abs((_now() - sent).total_seconds()) > 300:
+        return jsonify({"error": "Clock skew too large"}), 401
+
+    raw = request.get_data(cache=False)  # raw body (works for JSON and multipart)
+    expected = _hmac_signature(secret, ts, raw)
+    if not hmac.compare_digest(expected, sig):
+        current_app.logger.warning("[intelleges_webhook] bad signature; expected %s, got %s", expected, sig)
+        return jsonify({"error": "Invalid signature"}), 401
+
+    return None
+
+# ---- Intelleges client flags / secrets -------------------------------------
+
+# IMPORTANT: this must be exactly "true" to enable the DEV fake path.
+DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "false").lower() == "true"
+INTELLEGES_WEBHOOK_SECRET = os.getenv("INTELLEGES_WEBHOOK_SECRET", "dev-secret")
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -381,23 +356,59 @@ def onboarding_startup():
         current_app.logger.exception("onboarding_startup failed")
         return jsonify({"error": str(e)}), 500
 
+# ---------- POST /intelleges/initiate ----------
 @auth_bp.route("/intelleges/initiate", methods=["POST"])
 def intelleges_initiate():
     """
     HRIC → Intelleges: initiate and persist the REAL questionnaire link.
-
-    Calls Intelleges:
-      POST {INTELLEGES_API_BASE}/api/hric/registrations/initiate
-      Body: { email, country_of_origin, product_tier, source, redirect_base_url, locale, idempotency_key }
-    Returns 201 with { registration_id, questionnaire_link, status: QUESTIONNAIRE_LINK_ISSUED, link_expires_at }.
-    (Spec confirms shapes and statuses.) :contentReference[oaicite:1]{index=1}
     """
     # Auth
     user, _, err = require_supabase_auth(db, User)
     if err:
         return err
 
-    # Required config
+    # If DEV fake is enabled, synthesize a link (useful for local dev)
+    if DEV_FAKE_INTELLEGES:
+        email = (user.email or "").strip().lower()
+        body = request.get_json(silent=True) or {}
+        tier = (body.get("product_tier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
+
+        # idempotent per-day record
+        idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
+        idk = _sha256_hex(idk_seed)
+        reg = (
+            db.session.query(IntellegesRegistration)
+            .filter(func.lower(IntellegesRegistration.idempotency_key) == idk)
+            .one_or_none()
+        )
+        if not reg:
+            reg = IntellegesRegistration(
+                user_id=user.id,
+                email=email,
+                product_tier=tier,
+                status="EMAIL_SUBMITTED",
+                idempotency_key=idk,
+            )
+            db.session.add(reg)
+            db.session.flush()
+
+        rid = reg.registration_id or f"ilgs_{hashlib.sha1(f'{email}|{tier}|{_now().isoformat()}'.encode()).hexdigest()[:16]}"
+        reg.registration_id = rid
+        reg.questionnaire_link = reg.questionnaire_link or f"https://example.intelleges/qs/{rid}"
+        reg.link_expires_at = reg.link_expires_at or (_now() + dt.timedelta(days=2))
+        reg.status = "QUESTIONNAIRE_LINK_ISSUED"
+        _upsert_user_status(user, reg.status)
+        db.session.commit()
+
+        return jsonify({
+            "registration_id": reg.registration_id,
+            "questionnaire_link": reg.questionnaire_link,
+            "status": reg.status,
+            "link_expires_at": reg.link_expires_at.isoformat() if reg.link_expires_at else None,
+            "mode": "dev-fake",
+        }), 200
+
+    # PROD path: require config
     cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_CLIENT_HMAC_SECRET")
     if cfg_err:
         return cfg_err
@@ -406,7 +417,7 @@ def intelleges_initiate():
     hmac_secret = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
     source = os.getenv("INTELLEGES_SOURCE", "HRIC")
     locale = os.getenv("INTELLEGES_LOCALE", "en-US")
-    redirect = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:5173/dashboard/entrepreneur")
+    redirect = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "https://hric-fe.vercel.app").rstrip("/")
 
     body = request.get_json(silent=True) or {}
     email = (user.email or "").strip().lower()
@@ -450,7 +461,7 @@ def intelleges_initiate():
 
     try:
         url = f"{api_base}/api/hric/registrations/initiate"
-        current_app.logger.info("[intelleges_initiate] POST %s  payload=%s", url, payload)
+        current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
         resp = requests.post(
             url,
             headers={"Content-Type": "application/json", "X-Timestamp": ts, "X-Signature": sig},
@@ -463,7 +474,7 @@ def intelleges_initiate():
             return jsonify({"error": "Intelleges initiate failed", "upstream_status": resp.status_code}), 502
 
         data = resp.json()
-        # Persist the REAL link and status from Intelleges (QUESTIONNAIRE_LINK_ISSUED at this step) :contentReference[oaicite:2]{index=2}
+        # Persist the REAL link and status from Intelleges (QUESTIONNAIRE_LINK_ISSUED at this step)
         reg.registration_id = data.get("registration_id") or reg.registration_id
         reg.questionnaire_link = data.get("questionnaire_link") or reg.questionnaire_link
         upstream_status = (data.get("status") or "QUESTIONNAIRE_LINK_ISSUED").upper()
@@ -484,6 +495,7 @@ def intelleges_initiate():
             "questionnaire_link": reg.questionnaire_link,
             "status": reg.status,
             "link_expires_at": reg.link_expires_at.isoformat() if reg.link_expires_at else None,
+            "mode": "prod",
         }), 200
 
     except Exception as e:
@@ -491,12 +503,11 @@ def intelleges_initiate():
         current_app.logger.exception("intelleges_initiate failed")
         return jsonify({"error": str(e)}), 500
 
-
 @auth_bp.route("/intelleges/status", methods=["GET"])
 def intelleges_status_proxy():
     """
     Optional: HRIC → Intelleges status check (used by HRIC on login).
-    Mirrors Intelleges /status?email= and updates our local registration row. :contentReference[oaicite:3]{index=3}
+    Mirrors Intelleges /status?email= and updates our local registration row.
     """
     # Auth (user must be signed in, we use their email)
     user, _, err = require_supabase_auth(db, User)
@@ -564,7 +575,6 @@ def intelleges_status_proxy():
         current_app.logger.exception("intelleges_status failed")
         return jsonify({"error": str(e)}), 500
 
-
 @auth_bp.route("/intelleges/webhook", methods=["POST"])
 def intelleges_webhook():
     """
@@ -573,7 +583,6 @@ def intelleges_webhook():
       - JSON journey update: { event_id, type:'registration.progress', registration_id, email, status, occurred_at_utc }
       - multipart/form-data on completion with fields:
           payload (JSON like above, but status:'COMPLETED'), answers_csv (file)
-    Shapes & CSV filename schema per spec. :contentReference[oaicite:4]{index=4}
     """
     # Verify HMAC (if configured)
     secret = os.getenv("INTELLEGES_WEBHOOK_SECRET", "")
@@ -600,9 +609,9 @@ def intelleges_webhook():
 
         csv_file = request.files.get("answers_csv")
         if not csv_file:
-            return jsonify({"error": "Missing answers_csv"}), 400
+            return jsonify({"error": "Missing answers_csv file"}), 400
 
-        # Save CSV per filename convention answers_{registration_id}_{yyyymmddHHMM}.csv :contentReference[oaicite:5]{index=5}
+        # Save CSV per filename convention answers_{registration_id}_{yyyymmddHHMM}.csv
         stamp = dt.datetime.fromisoformat(occurred.replace("Z", "+00:00")).strftime("%Y%m%d%H%M")
         folder = os.getenv("INTELLEGES_CSV_DIR", "/tmp/intelleges")
         os.makedirs(folder, exist_ok=True)
@@ -675,7 +684,7 @@ def intelleges_webhook():
         db.session.rollback()
         current_app.logger.exception("intelleges_webhook failed")
         return jsonify({"error": str(e)}), 500
-    
+
 # ---------------------------------------------------------------------------
 # Existing utility endpoints
 # ---------------------------------------------------------------------------
@@ -707,7 +716,6 @@ def update_profile():
     db.session.commit()
     return jsonify({"message": "Profile updated"}), 200
 
-
 @auth_bp.route("/me", methods=["GET"])
 def me():
     user, claims, err = require_supabase_auth(db, User, allow_missing_user=False)
@@ -722,7 +730,6 @@ def me():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
 
 @auth_bp.route("/after-login", methods=["POST"])
 def after_login():
@@ -749,7 +756,6 @@ def after_login():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():

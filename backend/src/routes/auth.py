@@ -59,6 +59,30 @@ def _require_cfg(*keys: str) -> Tuple[Optional[str], Optional[tuple]]:
         return None, (jsonify({"error": f"Server not configured: missing {', '.join(missing)}"}), 500)
     return "ok", None
 
+def _sign_outgoing(ts: str, payload_dict: dict, secret: str) -> str:
+    """
+    Intelleges HMAC: sha256( timestamp + compact_json(payload), shared_secret ) -> hex
+    """
+    msg = ts + json.dumps(payload_dict, separators=(",", ":"), ensure_ascii=False)
+    return hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+def _verify_incoming(ts: str, raw_body: bytes, provided_sig: str, secret: str) -> bool:
+    if not ts or not provided_sig:
+        return False
+    try:
+        sent = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return False
+    if abs((_now() - sent).total_seconds()) > 300:
+        return False  # >5 minutes skew
+
+    expected = hmac.new(secret.encode("utf-8"), (ts + raw_body.decode("utf-8")).encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, provided_sig)
+
+def _upsert_user_status(user: User, status: str) -> None:
+    if hasattr(user, "intelleges_status") and status in STATUSES:
+        user.intelleges_status = status
+
 def _hmac_signature(secret: str, timestamp: str, raw_body: bytes) -> str:
     # spec: X-Signature = sha256(timestamp + body, shared_secret)  (hex)
     msg = timestamp.encode("utf-8") + raw_body
@@ -173,7 +197,7 @@ def _validate_plan_key(plan_key: str) -> Optional[str]:
 
 # ---- Intelleges client stubs (replace with your actual client) -------------
 
-DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "true").lower() == "true"
+DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "false").lower() == "false"
 INTELLEGES_WEBHOOK_SECRET = os.getenv("INTELLEGES_WEBHOOK_SECRET", "dev-secret")
 
 def _intelleges_create_registration(email: str, product_tier: str) -> Dict[str, Any]:
@@ -355,103 +379,60 @@ def onboarding_startup():
         current_app.logger.exception("onboarding_startup failed")
         return jsonify({"error": str(e)}), 500
 
-# ---------- POST /intelleges/initiate ----------
 @auth_bp.route("/intelleges/initiate", methods=["POST"])
 def intelleges_initiate():
     """
-    HRIC → Intelleges: initiate a registration and return a questionnaire deep-link.
+    HRIC → Intelleges: initiate and persist the REAL questionnaire link.
 
-    DEV mode (DEV_FAKE_INTELLEGES=true): synthesizes a link, no external call required.
-    PROD mode  : requires INTELLEGES_API_BASE and INTELLEGES_CLIENT_HMAC_SECRET.
-    Idempotent behavior: if a non-COMPLETED registration already exists for (email, tier),
-    reuse it and just return its link/status.
+    Calls Intelleges:
+      POST {INTELLEGES_API_BASE}/api/hric/registrations/initiate
+      Body: { email, country_of_origin, product_tier, source, redirect_base_url, locale, idempotency_key }
+    Returns 201 with { registration_id, questionnaire_link, status: QUESTIONNAIRE_LINK_ISSUED, link_expires_at }.
+    (Spec confirms shapes and statuses.) :contentReference[oaicite:1]{index=1}
     """
-    # 0) Auth
+    # Auth
     user, _, err = require_supabase_auth(db, User)
     if err:
         return err
 
-    # 1) Inputs
+    # Required config
+    cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_CLIENT_HMAC_SECRET")
+    if cfg_err:
+        return cfg_err
+
+    api_base = os.getenv("INTELLEGES_API_BASE").rstrip("/")
+    hmac_secret = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
+    source = os.getenv("INTELLEGES_SOURCE", "HRIC")
+    locale = os.getenv("INTELLEGES_LOCALE", "en-US")
+    redirect = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:5173/dashboard/entrepreneur")
+
     body = request.get_json(silent=True) or {}
-    email   = (user.email or "").lower().strip()
-    tier    = (body.get("product_tier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
-    country = (body.get("country_of_origin") or "MX").upper()
+    email = (user.email or "").strip().lower()
+    country = (body.get("country_of_origin") or "MX").strip().upper()
+    tier = (body.get("product_tier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
 
-    DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "true").lower() == "true"
+    # Idempotency: per-day key keeps retries stable while allowing regeneration next day
+    idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
+    idk = _sha256_hex(idk_seed)
 
-    # 2) PROD-only required config
-    if not DEV_FAKE_INTELLEGES:
-        _, cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_CLIENT_HMAC_SECRET")
-        if cfg_err:
-            current_app.logger.error("[intelleges_initiate] missing config for PROD")
-            return cfg_err
-
-    # 3) Try to reuse an in-flight registration first (idempotent by (email, tier))
+    # Upsert a local row so UI can reflect status and we can mirror webhooks
     reg = (
         db.session.query(IntellegesRegistration)
-        .filter(
-            func.lower(IntellegesRegistration.email) == email,
-            IntellegesRegistration.product_tier == tier,
-            IntellegesRegistration.status != "COMPLETED",
-        )
-        .order_by(IntellegesRegistration.created_at.desc())
-        .first()
+        .filter(func.lower(IntellegesRegistration.idempotency_key) == idk)
+        .one_or_none()
     )
-
-    # 4) If none, create a fresh row with a deterministic idempotency key (per-day)
     if not reg:
-        idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
-        idk = _sha256_hex(idk_seed)
-
-        # Also check by idempotency_key in case the same call is retried quickly
-        reg = (
-            db.session.query(IntellegesRegistration)
-            .filter(func.lower(IntellegesRegistration.idempotency_key) == idk)
-            .one_or_none()
+        reg = IntellegesRegistration(
+            user_id=user.id,
+            email=email,
+            product_tier=tier,
+            status="EMAIL_SUBMITTED",
+            idempotency_key=idk,
         )
-
-        if not reg:
-            current_app.logger.info("[intelleges_initiate] create new registration row (email=%s tier=%s)", email, tier)
-            reg = IntellegesRegistration(
-                user_id=user.id,
-                email=email,
-                product_tier=tier,
-                status="EMAIL_SUBMITTED",
-                idempotency_key=idk,
-            )
-            if hasattr(reg, "country_of_origin"):
-                reg.country_of_origin = country
-            db.session.add(reg)
-            db.session.flush()
-
-    # 5) DEV path: synthesize a link so FE can continue
-    if DEV_FAKE_INTELLEGES:
-        rid = reg.registration_id or f"ilgs_{hashlib.sha1(f'{email}|{tier}|{_now().isoformat()}'.encode()).hexdigest()[:16]}"
-        reg.registration_id = rid
-        if not reg.questionnaire_link:
-            reg.questionnaire_link = f"https://example.intelleges/qs/{rid}"
-        if not getattr(reg, "link_expires_at", None):
-            reg.link_expires_at = _now() + timedelta(days=2)
-        reg.status = "QUESTIONNAIRE_LINK_ISSUED"
-        if hasattr(user, "intelleges_status"):
-            user.intelleges_status = reg.status
-
-        db.session.commit()
-        current_app.logger.info("[intelleges_initiate][DEV] ok reg=%s link=%s", reg.registration_id, reg.questionnaire_link)
-        return jsonify({
-            "registration_id": reg.registration_id,
-            "questionnaire_link": reg.questionnaire_link,
-            "status": reg.status,
-            "link_expires_at": reg.link_expires_at.isoformat() if reg.link_expires_at else None,
-            "mode": "dev-fake",
-        }), 200
-
-    # 6) PROD path: call Intelleges per spec
-    api_base = os.getenv("INTELLEGES_API_BASE").rstrip("/")
-    hmac_key = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
-    source   = os.getenv("INTELLEGES_SOURCE", "HRIC")
-    locale   = os.getenv("INTELLEGES_LOCALE", "en-US")
-    redirect = os.getenv("INTELLEGES_REDIRECT_BASE_URL", "http://localhost:5173/dashboard/entrepreneur")
+        if hasattr(reg, "country_of_origin"):
+            reg.country_of_origin = country
+        db.session.add(reg)
+        db.session.flush()
 
     payload = {
         "email": email,
@@ -460,60 +441,47 @@ def intelleges_initiate():
         "source": source,
         "redirect_base_url": redirect,
         "locale": locale,
-        "idempotency_key": reg.idempotency_key,
+        "idempotency_key": idk,
     }
-    ts  = _now().isoformat()
-    msg = ts + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-    sig = hashlib.sha256(hmac_key.encode("utf-8") + msg.encode("utf-8")).hexdigest()
+    ts = _now().isoformat()
+    sig = _sign_outgoing(ts, payload, hmac_secret)
 
     try:
         url = f"{api_base}/api/hric/registrations/initiate"
-        current_app.logger.info("[intelleges_initiate][PROD] POST %s payload=%s", url, payload)
-
+        current_app.logger.info("[intelleges_initiate] POST %s  payload=%s", url, payload)
         resp = requests.post(
             url,
-            headers={
-                "Content-Type": "application/json",
-                "X-Timestamp": ts,
-                "X-Signature": sig,
-            },
+            headers={"Content-Type": "application/json", "X-Timestamp": ts, "X-Signature": sig},
             json=payload,
             timeout=(5, 20),
         )
         if resp.status_code not in (200, 201):
-            txt = resp.text[:500]
-            current_app.logger.warning("[intelleges_initiate][PROD] upstream %s: %s", resp.status_code, txt)
+            txt = (resp.text or "")[:500]
+            current_app.logger.warning("[intelleges_initiate] upstream %s: %s", resp.status_code, txt)
             return jsonify({"error": "Intelleges initiate failed", "upstream_status": resp.status_code}), 502
 
         data = resp.json()
-        reg.registration_id     = data.get("registration_id") or reg.registration_id
-        reg.questionnaire_link  = data.get("questionnaire_link") or reg.questionnaire_link
-
+        # Persist the REAL link and status from Intelleges (QUESTIONNAIRE_LINK_ISSUED at this step) :contentReference[oaicite:2]{index=2}
+        reg.registration_id = data.get("registration_id") or reg.registration_id
+        reg.questionnaire_link = data.get("questionnaire_link") or reg.questionnaire_link
         upstream_status = (data.get("status") or "QUESTIONNAIRE_LINK_ISSUED").upper()
-        if upstream_status not in STATUSES:
-            current_app.logger.warning("[intelleges_initiate][PROD] unknown upstream status %s; coercing", upstream_status)
-            upstream_status = "QUESTIONNAIRE_LINK_ISSUED"
-        reg.status = upstream_status
+        reg.status = upstream_status if upstream_status in STATUSES else "QUESTIONNAIRE_LINK_ISSUED"
 
-        # Try to parse expiry, default to +24h
+        # Link expiry handling
         try:
             iso = (data.get("link_expires_at") or "").replace("Z", "+00:00")
-            reg.link_expires_at = dt.datetime.fromisoformat(iso) if iso else (_now() + dt.timedelta(hours=24))
+            reg.link_expires_at = dt.datetime.fromisoformat(iso) if iso else None
         except Exception:
-            reg.link_expires_at = _now() + dt.timedelta(hours=24)
+            reg.link_expires_at = None
 
-        if hasattr(user, "intelleges_status"):
-            user.intelleges_status = reg.status
-
+        _upsert_user_status(user, reg.status)
         db.session.commit()
-        current_app.logger.info("[intelleges_initiate][PROD] ok reg=%s link=%s", reg.registration_id, reg.questionnaire_link)
 
         return jsonify({
             "registration_id": reg.registration_id,
             "questionnaire_link": reg.questionnaire_link,
             "status": reg.status,
             "link_expires_at": reg.link_expires_at.isoformat() if reg.link_expires_at else None,
-            "mode": "prod",
         }), 200
 
     except Exception as e:
@@ -522,25 +490,99 @@ def intelleges_initiate():
         return jsonify({"error": str(e)}), 500
 
 
-# ---------- POST /intelleges/webhook ----------
+@auth_bp.route("/intelleges/status", methods=["GET"])
+def intelleges_status_proxy():
+    """
+    Optional: HRIC → Intelleges status check (used by HRIC on login).
+    Mirrors Intelleges /status?email= and updates our local registration row. :contentReference[oaicite:3]{index=3}
+    """
+    # Auth (user must be signed in, we use their email)
+    user, _, err = require_supabase_auth(db, User)
+    if err:
+        return err
+
+    cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_CLIENT_HMAC_SECRET")
+    if cfg_err:
+        return cfg_err
+
+    api_base = os.getenv("INTELLEGES_API_BASE").rstrip("/")
+    hmac_secret = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
+
+    email = (request.args.get("email") or user.email or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+
+    # For GET, spec signature still uses sha256(timestamp + body) (empty JSON "{}")
+    payload = {}
+    ts = _now().isoformat()
+    sig = _sign_outgoing(ts, payload, hmac_secret)
+
+    try:
+        url = f"{api_base}/api/hric/registrations/status"
+        current_app.logger.info("[intelleges_status] GET %s?email=%s", url, email)
+        resp = requests.get(
+            url,
+            params={"email": email},
+            headers={"X-Timestamp": ts, "X-Signature": sig},
+            timeout=(5, 15),
+        )
+        if resp.status_code != 200:
+            current_app.logger.warning("[intelleges_status] upstream %s: %s", resp.status_code, (resp.text or "")[:300])
+            return jsonify({"error": "Intelleges status fetch failed", "upstream_status": resp.status_code}), 502
+
+        data = resp.json()
+        # Update our local mirror
+        reg = None
+        if data.get("registration_id"):
+            reg = (
+                db.session.query(IntellegesRegistration)
+                .filter(IntellegesRegistration.registration_id == data["registration_id"])
+                .first()
+            )
+        if not reg:
+            reg = (
+                db.session.query(IntellegesRegistration)
+                .filter(func.lower(IntellegesRegistration.email) == email)
+                .order_by(IntellegesRegistration.created_at.desc())
+                .first()
+            )
+        if reg:
+            status = (data.get("status") or "").upper()
+            if status in STATUSES:
+                reg.status = status
+                usr = db.session.get(User, reg.user_id)
+                if usr:
+                    _upsert_user_status(usr, status)
+            db.session.commit()
+
+        return jsonify(data), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("intelleges_status failed")
+        return jsonify({"error": str(e)}), 500
+
 
 @auth_bp.route("/intelleges/webhook", methods=["POST"])
 def intelleges_webhook():
     """
     Intelleges → HRIC webhooks.
-
-    Two shapes supported:
-      1) JSON journey update { event_id, type: 'registration.progress', registration_id, email, status, occurred_at_utc }
-      2) multipart/form-data with fields:
-         - payload: JSON (type 'registration.completed', status 'COMPLETED', ...)
-         - answers_csv: file (CSV with columns per spec)
+    Supports:
+      - JSON journey update: { event_id, type:'registration.progress', registration_id, email, status, occurred_at_utc }
+      - multipart/form-data on completion with fields:
+          payload (JSON like above, but status:'COMPLETED'), answers_csv (file)
+    Shapes & CSV filename schema per spec. :contentReference[oaicite:4]{index=4}
     """
-    # Verify webhook HMAC (if configured)
-    hmac_err = _verify_webhook_hmac()
-    if hmac_err:
-        return hmac_err
+    # Verify HMAC (if configured)
+    secret = os.getenv("INTELLEGES_WEBHOOK_SECRET", "")
+    if secret:
+        ts = request.headers.get("X-Timestamp", "")
+        sig = request.headers.get("X-Signature", "")
+        raw = request.get_data(cache=False)  # must read raw for signature
+        if not _verify_incoming(ts, raw, sig, secret):
+            return jsonify({"error": "Invalid webhook signature"}), 401
 
-    # multipart completion (CSV) ?
+    # --- multipart (COMPLETED + CSV) ---
     if request.content_type and "multipart/form-data" in request.content_type:
         try:
             payload_json = request.form.get("payload") or "{}"
@@ -549,16 +591,16 @@ def intelleges_webhook():
             return jsonify({"error": "Invalid JSON in 'payload'"}), 400
 
         event_id = payload.get("event_id")
-        etype    = payload.get("type")
-        reg_id   = payload.get("registration_id")
-        status   = (payload.get("status") or "").upper()
+        etype = payload.get("type")
+        reg_id = payload.get("registration_id")
+        status = (payload.get("status") or "").upper()
         occurred = payload.get("occurred_at_utc") or _now().isoformat()
 
         csv_file = request.files.get("answers_csv")
         if not csv_file:
-            return jsonify({"error": "Missing answers_csv file"}), 400
+            return jsonify({"error": "Missing answers_csv"}), 400
 
-        # Save CSV to storage with required naming: answers_{registration_id}_{yyyymmddHHMM}.csv  :contentReference[oaicite:6]{index=6}
+        # Save CSV per filename convention answers_{registration_id}_{yyyymmddHHMM}.csv :contentReference[oaicite:5]{index=5}
         stamp = dt.datetime.fromisoformat(occurred.replace("Z", "+00:00")).strftime("%Y%m%d%H%M")
         folder = os.getenv("INTELLEGES_CSV_DIR", "/tmp/intelleges")
         os.makedirs(folder, exist_ok=True)
@@ -567,9 +609,9 @@ def intelleges_webhook():
         csv_file.save(fpath)
 
         try:
-            # upsert event (dedupe by event_id)
-            existing = db.session.query(IntellegesEvent).filter_by(event_id=event_id).first()
-            if not existing:
+            # dedupe event
+            ex = db.session.query(IntellegesEvent).filter_by(event_id=event_id).first()
+            if not ex:
                 db.session.add(IntellegesEvent(
                     event_id=event_id,
                     registration_id=reg_id,
@@ -584,8 +626,6 @@ def intelleges_webhook():
                     reg.status = status
                 reg.answers_csv_path = fpath
                 reg.answers_csv_received_at = _now()
-
-                # Mirror to user row for gating
                 usr = db.session.get(User, reg.user_id)
                 if usr:
                     _upsert_user_status(usr, reg.status)
@@ -598,26 +638,24 @@ def intelleges_webhook():
             current_app.logger.exception("intelleges_webhook (multipart) failed")
             return jsonify({"error": str(e)}), 500
 
-    # JSON journey updates (progress, link clicked, etc.)
+    # --- JSON journey updates (progress/link-issued etc.) ---
     try:
         event = request.get_json(silent=True) or {}
-        event_id = event.get("event_id") or event.get("id")  # tolerate either key
-        etype    = event.get("type")
-        reg_id   = event.get("registration_id")
-        status   = (event.get("status") or "").upper()
+        event_id = event.get("event_id") or event.get("id")
+        etype = event.get("type")
+        reg_id = event.get("registration_id")
+        status = (event.get("status") or "").upper()
 
-        # dedupe events
-        existing = db.session.query(IntellegesEvent).filter_by(event_id=event_id).first()
-        if not existing:
+        ex = db.session.query(IntellegesEvent).filter_by(event_id=event_id).first()
+        if not ex:
             db.session.add(IntellegesEvent(
                 event_id=event_id,
                 registration_id=reg_id,
                 type=etype,
                 occurred_at_utc=_now(),
-                payload_json=event
+                payload_json=event,
             ))
 
-        # on progress/completed, update registration + user gate  :contentReference[oaicite:7]{index=7}
         if status in STATUSES:
             reg = db.session.query(IntellegesRegistration).filter_by(registration_id=reg_id).first()
             if reg:
@@ -635,7 +673,7 @@ def intelleges_webhook():
         db.session.rollback()
         current_app.logger.exception("intelleges_webhook failed")
         return jsonify({"error": str(e)}), 500
-
+    
 # ---------------------------------------------------------------------------
 # Existing utility endpoints
 # ---------------------------------------------------------------------------

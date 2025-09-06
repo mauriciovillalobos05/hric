@@ -466,7 +466,8 @@ def intelleges_initiate():
 
     body_str = _compact_json(payload)
     ts = _rfc3339_z()
-    url  = f"{api_base}"
+    path= _intelleges_paths()["initiate"]
+    url  = f"{api_base}{path}"
 
     try:
         sig = _sign_canonical("POST", ts, body_str, hmac_secret)
@@ -554,7 +555,8 @@ def intelleges_status_proxy():
             return jsonify({"error": "registration id not found"}), 404
         rid = reg.registration_id
 
-    path  = f"{['status']}/{rid}"
+    paths = _intelleges_paths()
+    path  = f"{paths['status']}/{rid}"
     ts    = _rfc3339_z()
     body_str = ""  # GET canonical empty body
     url   = f"{api_base}{path}"

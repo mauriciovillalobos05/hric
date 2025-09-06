@@ -136,19 +136,6 @@ def _require_cfg(*keys: str):
 def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-def _sign_canonical(method: str, path: str, ts: str, body_str: str, b64_secret: str) -> str:
-    """
-    Canonical per docs: "{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}"
-    Secret is BASE64 and must be decoded before HMAC-SHA256.
-    Returns hex digest.
-    """
-    try:
-        secret = base64.b64decode(b64_secret, validate=True)
-    except Exception:
-        raise ValueError("INTELLEGES_CLIENT_HMAC_SECRET must be valid base64")
-    canonical = "\n".join([method.upper(), path, ts, body_str])
-    return hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
-
 def _intelleges_paths():
     return {
         "initiate": os.getenv("INTELLEGES_INITIATE_PATH", "/api/hric/verification/initiate"),
@@ -164,9 +151,27 @@ def _upsert_user_status(user: User, status: str) -> None:
 DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "false").lower() == "true"
 INTELLEGES_WEBHOOK_SECRET = os.getenv("INTELLEGES_WEBHOOK_SECRET", "dev-secret")
 
-# --- add near the top (helpers) ---
+def _unix_ts() -> str:
+    # UNIX timestamp (seconds, UTC) as a string, e.g. "1757176441"
+    return str(int(dt.datetime.now(dt.timezone.utc).timestamp()))
+
 def _strip_quotes(s: str) -> str:
     return s[1:-1] if s and len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"') else s
+
+def _sign_canonical(method: str, path: str, ts: str, body_str: str, b64_secret: str) -> str:
+    """
+    Canonical: "{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}"
+    TIMESTAMP must match the value you put in X-Timestamp (UNIX seconds).
+    Secret is BASE64; return signature as BASE64 (not hex).
+    """
+    try:
+        secret = base64.b64decode(_strip_quotes(b64_secret), validate=True)
+    except Exception:
+        raise ValueError("INTELLEGES_CLIENT_HMAC_SECRET must be valid base64")
+
+    canonical = "\n".join([method.upper(), path, ts, body_str])
+    digest = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("ascii")
 
 def _build_payload_pascal(*, email: str, country: str, tier: str,
                           source: str, redirect: str, locale: str,
@@ -358,9 +363,10 @@ def onboarding_startup():
         current_app.logger.exception("onboarding_startup failed")
         return jsonify({"error": str(e)}), 500
 
+# ---------- POST /intelleges/initiate ----------
 @auth_bp.route("/intelleges/initiate", methods=["POST"])
 def intelleges_initiate():
-    user, _, err = require_supabase_auth(db, User)
+    user, claims, err = require_supabase_auth(db, User)
     if err:
         return err
 
@@ -369,7 +375,7 @@ def intelleges_initiate():
     country = (body.get("Country") or body.get("country") or body.get("country_of_origin") or body.get("countryOfOrigin") or "US").strip().upper()
     tier    = (body.get("Tier") or body.get("product_tier") or body.get("productTier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
 
-    # DEV short-circuit (unchanged)
+    # DEV short-circuit unchanged
     if DEV_FAKE_INTELLEGES:
         idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
         idk = _sha256_hex(idk_seed)
@@ -402,17 +408,19 @@ def intelleges_initiate():
     hmac_secret = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
     source      = os.getenv("INTELLEGES_SOURCE", "Test")
     locale      = os.getenv("INTELLEGES_LOCALE", "en-US")
-    # match the sample you provided
     redirect    = (os.getenv("INTELLEGES_REDIRECT_BASE_URL") or "https://login.intelleges.com/").rstrip("/")
 
     host = (urlsplit(api_base).hostname or "").lower()
     if host.startswith("login."):
         current_app.logger.warning("[intelleges_initiate] Using login.* as API base per vendor instruction: %s", host)
 
-    # IdempotencyKey = sha256(email|timestamp)
-    ts_for_idk = _rfc3339_z()
-    idk = _sha256_hex(f"{email}|{ts_for_idk}")
+    # UNIX timestamp for headers + signing
+    ts_unix = _unix_ts()
 
+    # IdempotencyKey per vendor hint: sha256(email|timestamp)
+    idk = _sha256_hex(f"{email}|{ts_unix}")
+
+    # Upsert local registration shell
     reg = db.session.query(IntellegesRegistration)\
           .filter(func.lower(IntellegesRegistration.idempotency_key) == idk).one_or_none()
     if not reg:
@@ -439,7 +447,6 @@ def intelleges_initiate():
         "LinkTtlMinutes": ttl_minutes,
     }
     body_str = _compact_json(payload)
-    ts = _rfc3339_z()
 
     # Try multiple path candidates (env overrides first)
     candidates = [
@@ -454,20 +461,19 @@ def intelleges_initiate():
         url = f"{api_base}{path}"
         tried.append(path)
         try:
-            sig = _sign_canonical("POST", path, ts, body_str, hmac_secret)
-            current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
-            resp = requests.post(
-                url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "X-Timestamp": ts,
-                    "X-Signature": sig,
-                    "X-Api-Key": api_key,
-                },
-                data=body_str,
-                timeout=(10, 30),
-            )
+            sig = _sign_canonical("POST", path, ts_unix, body_str, hmac_secret)  # BASE64
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-Timestamp": ts_unix,                # UNIX seconds
+                "X-Signature": sig,                    # base64
+                "X-Api-Key": api_key,
+                "Authorization": f"HMAC-SHA256 Credential={api_key}, Signature={sig}",
+            }
+            current_app.logger.info("[intelleges_initiate] POST %s headers=%s payload=%s", url,
+                                    {k: (v if k != "Authorization" else "HMAC-SHA256 Credential=<redacted>, Signature=<redacted>") for k,v in headers.items()},
+                                    payload)
+            resp = requests.post(url, headers=headers, data=body_str, timeout=(10, 30))
             last_resp = resp
             if resp.status_code == 404:
                 current_app.logger.warning("[intelleges_initiate] 404 on %s, trying next candidate", path)
@@ -540,7 +546,7 @@ def intelleges_status_proxy():
             return jsonify({"error": "registration id not found"}), 404
         rid = reg.registration_id
 
-    ts = _rfc3339_z()
+    ts_unix = _unix_ts()
     candidates = [
         (os.getenv("INTELLEGES_STATUS_PATH") or "/api/hric/verification/status") + f"/{rid}",
         f"/api/HRIC/Verification/Status/{rid}",
@@ -553,18 +559,17 @@ def intelleges_status_proxy():
         url = f"{api_base}{path}"
         tried.append(path)
         try:
-            sig = _sign_canonical("GET", path, ts, "", hmac_secret)
-            current_app.logger.info("[intelleges_status] GET %s", url)
-            resp = requests.get(
-                url,
-                headers={
-                    "Accept": "application/json",
-                    "X-Timestamp": ts,
-                    "X-Signature": sig,
-                    "X-Api-Key": api_key,
-                },
-                timeout=(10, 20),
-            )
+            sig = _sign_canonical("GET", path, ts_unix, "", hmac_secret)  # BASE64
+            headers = {
+                "Accept": "application/json",
+                "X-Timestamp": ts_unix,                # UNIX seconds
+                "X-Signature": sig,                    # base64
+                "X-Api-Key": api_key,
+                "Authorization": f"HMAC-SHA256 Credential={api_key}, Signature={sig}",
+            }
+            current_app.logger.info("[intelleges_status] GET %s headers=%s", url,
+                                    {k: (v if k != "Authorization" else "HMAC-SHA256 Credential=<redacted>, Signature=<redacted>") for k,v in headers.items()})
+            resp = requests.get(url, headers=headers, timeout=(10, 20))
             last_resp = resp
             if resp.status_code == 404:
                 current_app.logger.warning("[intelleges_status] 404 on %s, trying next candidate", path)

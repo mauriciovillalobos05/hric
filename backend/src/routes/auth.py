@@ -408,7 +408,7 @@ def intelleges_initiate():
 
     try:
         sig = _sign_canonical("POST", path, ts, body_str, hmac_secret)
-        url = f"{api_base}{path}"
+        url = f"{api_base}"
         current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
         resp = requests.post(
             url,
@@ -494,7 +494,7 @@ def intelleges_status_proxy():
 
     try:
         sig = _sign_canonical("GET", path, ts, body_str, hmac_secret)
-        url = f"{api_base}{path}"
+        url = f"{api_base}"
         current_app.logger.info("[intelleges_status] GET %s", url)
         resp = requests.get(
             url,

@@ -470,7 +470,7 @@ def intelleges_initiate():
     url  = f"{api_base}{path}"
 
     try:
-        sig = _sign_canonical("POST", ts, body_str, hmac_secret)
+        sig = _sign_canonical("POST", path, ts, body_str, hmac_secret)
         current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
         resp = requests.post(
             url,

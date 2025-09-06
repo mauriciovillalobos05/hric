@@ -360,13 +360,6 @@ def onboarding_startup():
 
 @auth_bp.route("/intelleges/initiate", methods=["POST"])
 def intelleges_initiate():
-    """
-    HRIC → Intelleges (initiate questionnaire)
-
-    Canonical string: "{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}"
-    Payload must be PascalCase per spec:
-      Pptq, Email, Country, Tier, Source, RedirectBaseUrl, Locale, IdempotencyKey, LinkTtlMinutes
-    """
     user, _, err = require_supabase_auth(db, User)
     if err:
         return err
@@ -407,28 +400,19 @@ def intelleges_initiate():
     api_base    = os.getenv("INTELLEGES_API_BASE", "").rstrip("/")
     api_key     = os.getenv("INTELLEGES_API_KEY")
     hmac_secret = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
-    source      = os.getenv("INTELLEGES_SOURCE", "Test")  # matches your sample
+    source      = os.getenv("INTELLEGES_SOURCE", "Test")
     locale      = os.getenv("INTELLEGES_LOCALE", "en-US")
-    # NOTE: Your sample shows RedirectBaseUrl pointing to login.intelleges.com, so we default to that to match EXACTLY.
+    # match the sample you provided
     redirect    = (os.getenv("INTELLEGES_REDIRECT_BASE_URL") or "https://login.intelleges.com/").rstrip("/")
 
-    # hard-fail if someone configured login.* as the API base (it will 404)
     host = (urlsplit(api_base).hostname or "").lower()
     if host.startswith("login."):
-        return jsonify({
-            "error": "Misconfiguration: INTELLEGES_API_BASE points to login.* (human site). Use the API host.",
-            "example": "https://api.intelleges.com or your tenant API base"
-        }), 400
+        current_app.logger.warning("[intelleges_initiate] Using login.* as API base per vendor instruction: %s", host)
 
-    paths = _intelleges_paths()
-    path  = paths["initiate"]
-    url   = f"{api_base}{path}"
-
-    # IdempotencyKey: sha256(email + "|" + RFC3339 timestamp) -> matches "sha256_of_email+timestamp"
+    # IdempotencyKey = sha256(email|timestamp)
     ts_for_idk = _rfc3339_z()
     idk = _sha256_hex(f"{email}|{ts_for_idk}")
 
-    # Upsert local registration shell
     reg = db.session.query(IntellegesRegistration)\
           .filter(func.lower(IntellegesRegistration.idempotency_key) == idk).one_or_none()
     if not reg:
@@ -436,17 +420,13 @@ def intelleges_initiate():
                                      status="EMAIL_SUBMITTED", idempotency_key=idk)
         db.session.add(reg); db.session.flush()
 
-    # Pptq & LinkTtlMinutes (defaults match your sample)
-    try:
-        pptq = int(body.get("Pptq") or os.getenv("INTELLEGES_PPTQ") or 111)
-    except Exception:
-        pptq = 111
-    try:
-        ttl_minutes = int(body.get("LinkTtlMinutes") or os.getenv("INTELLEGES_LINK_TTL_MINUTES") or 12)
-    except Exception:
-        ttl_minutes = 12
+    # Defaults per your sample
+    try: pptq = int(body.get("Pptq") or os.getenv("INTELLEGES_PPTQ") or 111)
+    except Exception: pptq = 111
+    try: ttl_minutes = int(body.get("LinkTtlMinutes") or os.getenv("INTELLEGES_LINK_TTL_MINUTES") or 12)
+    except Exception: ttl_minutes = 12
 
-    # Build EXACT PascalCase payload
+    # EXACT PascalCase payload
     payload = {
         "Pptq": pptq,
         "Email": email,
@@ -458,45 +438,64 @@ def intelleges_initiate():
         "IdempotencyKey": idk,
         "LinkTtlMinutes": ttl_minutes,
     }
-
     body_str = _compact_json(payload)
     ts = _rfc3339_z()
-    sig = _sign_canonical("POST", path, ts, body_str, hmac_secret)
 
-    current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
-    try:
-        resp = requests.post(
-            url,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "X-Timestamp": ts,
-                "X-Signature": sig,
-                "X-Api-Key": api_key,
-            },
-            data=body_str,
-            timeout=(10, 30),
-        )
-    except Exception as e:
-        current_app.logger.exception("[intelleges_initiate] request error")
-        return jsonify({"error": f"Request to Intelleges failed: {str(e)}"}), 502
+    # Try multiple path candidates (env overrides first)
+    candidates = [
+        os.getenv("INTELLEGES_INITIATE_PATH") or "/api/hric/verification/initiate",
+        "/api/HRIC/Verification/Initiate",
+        "/api/verification/initiate",
+    ]
 
-    if resp.status_code not in (200, 201):
-        snippet = (resp.text or "")[:500]
-        current_app.logger.warning("[intelleges_initiate] upstream %s: %s", resp.status_code, snippet)
+    last_resp = None
+    tried = []
+    for path in candidates:
+        url = f"{api_base}{path}"
+        tried.append(path)
+        try:
+            sig = _sign_canonical("POST", path, ts, body_str, hmac_secret)
+            current_app.logger.info("[intelleges_initiate] POST %s payload=%s", url, payload)
+            resp = requests.post(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Timestamp": ts,
+                    "X-Signature": sig,
+                    "X-Api-Key": api_key,
+                },
+                data=body_str,
+                timeout=(10, 30),
+            )
+            last_resp = resp
+            if resp.status_code == 404:
+                current_app.logger.warning("[intelleges_initiate] 404 on %s, trying next candidate", path)
+                continue
+            break
+        except Exception as e:
+            current_app.logger.exception("[intelleges_initiate] request error on %s", path)
+            return jsonify({"error": f"Request to Intelleges failed at {path}: {str(e)}",
+                            "tried_paths": tried}), 502
+
+    if not last_resp:
+        return jsonify({"error": "No response from Intelleges", "tried_paths": tried}), 502
+
+    if last_resp.status_code not in (200, 201):
+        snippet = (last_resp.text or "")[:500]
         return jsonify({"error": "Intelleges initiate failed",
-                        "upstream_status": resp.status_code,
-                        "upstream_body_snippet": snippet}), 502
+                        "upstream_status": last_resp.status_code,
+                        "upstream_body_snippet": snippet,
+                        "tried_paths": tried}), 502
 
-    # Ensure JSON
     try:
-        data = resp.json()
+        data = last_resp.json()
     except ValueError:
-        snippet = (resp.text or "")[:500]
-        current_app.logger.error("[intelleges_initiate] non-JSON response: %s", snippet)
+        snippet = (last_resp.text or "")[:500]
         return jsonify({"error": "Intelleges returned non-JSON response",
-                        "upstream_status": resp.status_code,
-                        "upstream_body_snippet": snippet}), 502
+                        "upstream_status": last_resp.status_code,
+                        "upstream_body_snippet": snippet,
+                        "tried_paths": tried}), 502
 
     reg.registration_id    = data.get("registration_id") or data.get("id") or reg.registration_id
     reg.questionnaire_link = data.get("questionnaire_link") or data.get("questionnaireLink") or reg.questionnaire_link
@@ -521,10 +520,6 @@ def intelleges_initiate():
 # ---------- GET /intelleges/status ----------
 @auth_bp.route("/intelleges/status", methods=["GET"])
 def intelleges_status_proxy():
-    """
-    HRIC → Intelleges: GET status by registration id.
-    Canonical: "GET\n{PATH}\n{TIMESTAMP}\n"
-    """
     user, _, err = require_supabase_auth(db, User)
     if err:
         return err
@@ -536,12 +531,6 @@ def intelleges_status_proxy():
     api_key     = os.getenv("INTELLEGES_API_KEY")
     hmac_secret = os.getenv("INTELLEGES_CLIENT_HMAC_SECRET")
 
-    host = (urlsplit(api_base).hostname or "").lower()
-    if host.startswith("login."):
-        return jsonify({
-            "error": "Misconfiguration: INTELLEGES_API_BASE points to login.* (human site). Use the API host."
-        }), 400
-
     rid = (request.args.get("id") or "").strip()
     if not rid:
         reg = (db.session.query(IntellegesRegistration)
@@ -551,45 +540,61 @@ def intelleges_status_proxy():
             return jsonify({"error": "registration id not found"}), 404
         rid = reg.registration_id
 
-    paths = _intelleges_paths()
-    path  = f"{paths['status']}/{rid}"
-    url   = f"{api_base}{path}"
-    ts    = _rfc3339_z()
-    body_str = ""
+    ts = _rfc3339_z()
+    candidates = [
+        (os.getenv("INTELLEGES_STATUS_PATH") or "/api/hric/verification/status") + f"/{rid}",
+        f"/api/HRIC/Verification/Status/{rid}",
+        f"/api/verification/status/{rid}",
+    ]
 
-    try:
-        sig = _sign_canonical("GET", path, ts, body_str, hmac_secret)
-        current_app.logger.info("[intelleges_status] GET %s", url)
-        resp = requests.get(
-            url,
-            headers={
-                "Accept": "application/json",
-                "X-Timestamp": ts,
-                "X-Signature": sig,
-                "X-Api-Key": api_key,
-            },
-            timeout=(10, 20),
-        )
-    except Exception as e:
-        current_app.logger.exception("[intelleges_status] request error")
-        return jsonify({"error": f"Request to Intelleges failed: {str(e)}"}), 502
+    last_resp = None
+    tried = []
+    for path in candidates:
+        url = f"{api_base}{path}"
+        tried.append(path)
+        try:
+            sig = _sign_canonical("GET", path, ts, "", hmac_secret)
+            current_app.logger.info("[intelleges_status] GET %s", url)
+            resp = requests.get(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "X-Timestamp": ts,
+                    "X-Signature": sig,
+                    "X-Api-Key": api_key,
+                },
+                timeout=(10, 20),
+            )
+            last_resp = resp
+            if resp.status_code == 404:
+                current_app.logger.warning("[intelleges_status] 404 on %s, trying next candidate", path)
+                continue
+            break
+        except Exception as e:
+            current_app.logger.exception("[intelleges_status] request error on %s", path)
+            return jsonify({"error": f"Request to Intelleges failed at {path}: {str(e)}",
+                            "tried_paths": tried}), 502
 
-    if resp.status_code != 200:
-        snippet = (resp.text or "")[:300]
-        current_app.logger.warning("[intelleges_status] upstream %s: %s", resp.status_code, snippet)
+    if not last_resp:
+        return jsonify({"error": "No response from Intelleges", "tried_paths": tried}), 502
+
+    if last_resp.status_code != 200:
+        snippet = (last_resp.text or "")[:300]
         return jsonify({"error": "Intelleges status fetch failed",
-                        "upstream_status": resp.status_code,
-                        "upstream_body_snippet": snippet}), 502
+                        "upstream_status": last_resp.status_code,
+                        "upstream_body_snippet": snippet,
+                        "tried_paths": tried}), 502
 
     try:
-        data = resp.json()
+        data = last_resp.json()
     except ValueError:
-        snippet = (resp.text or "")[:300]
+        snippet = (last_resp.text or "")[:300]
         return jsonify({"error": "Intelleges returned non-JSON response",
-                        "upstream_status": resp.status_code,
-                        "upstream_body_snippet": snippet}), 502
+                        "upstream_status": last_resp.status_code,
+                        "upstream_body_snippet": snippet,
+                        "tried_paths": tried}), 502
 
-    # mirror into DB
+    # mirror to DB
     reg = db.session.query(IntellegesRegistration).filter_by(registration_id=rid).first()
     if reg:
         st = (data.get("status") or "").upper()

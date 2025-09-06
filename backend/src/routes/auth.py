@@ -139,7 +139,7 @@ def _sha256_hex(s: str) -> str:
 def _intelleges_paths():
     return {
         "initiate": os.getenv("INTELLEGES_INITIATE_PATH", "/api/hric/verification/initiate"),
-        "status":   os.getenv("INTELLEGES_STATUS_PATH",   "/api/hric/verification/status"),
+        "status":   os.getenv("INTELLEGES_STATUS_PATH",   "/api/hric/registrations/status"),
     }
 
 

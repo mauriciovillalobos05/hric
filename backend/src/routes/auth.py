@@ -429,8 +429,8 @@ def intelleges_initiate():
         db.session.add(reg); db.session.flush()
 
     # Defaults per your sample
-    try: pptq = int(body.get("Pptq") or os.getenv("INTELLEGES_PPTQ") or 111)
-    except Exception: pptq = 111
+    try: pptq = int(body.get("Pptq") or os.getenv("INTELLEGES_PPTQ") or 221337)
+    except Exception: pptq = 221337
     try: ttl_minutes = int(body.get("LinkTtlMinutes") or os.getenv("INTELLEGES_LINK_TTL_MINUTES") or 12)
     except Exception: ttl_minutes = 12
 

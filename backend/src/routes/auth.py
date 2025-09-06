@@ -138,9 +138,22 @@ def _sha256_hex(s: str) -> str:
 
 def _intelleges_paths():
     return {
-        "initiate": os.getenv("INTELLEGES_INITIATE_PATH", "/api/hric/verification/initiate"),
+        "initiate": os.getenv("INTELLEGES_INITIATE_PATH", "/api/hric/registrations/initiate"),
         "status":   os.getenv("INTELLEGES_STATUS_PATH",   "/api/hric/registrations/status"),
     }
+
+def _unix_ts() -> str:
+    return str(int(dt.datetime.now(dt.timezone.utc).timestamp()))
+
+def _sign_canonical(method: str, path: str, ts: str, body_str: str, b64_secret: str) -> str:
+    try:
+        secret = base64.b64decode(_strip_quotes(b64_secret), validate=True)
+    except Exception:
+        raise ValueError("INTELLEGES_CLIENT_HMAC_SECRET must be valid base64")
+    canonical = "\n".join([method.upper(), path, ts, body_str])
+    digest = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("ascii")  # BASE64 signature
+
 
 
 def _upsert_user_status(user: User, status: str) -> None:
@@ -151,27 +164,8 @@ def _upsert_user_status(user: User, status: str) -> None:
 DEV_FAKE_INTELLEGES = os.getenv("DEV_FAKE_INTELLEGES", "false").lower() == "true"
 INTELLEGES_WEBHOOK_SECRET = os.getenv("INTELLEGES_WEBHOOK_SECRET", "dev-secret")
 
-def _unix_ts() -> str:
-    # UNIX timestamp (seconds, UTC) as a string, e.g. "1757176441"
-    return str(int(dt.datetime.now(dt.timezone.utc).timestamp()))
-
 def _strip_quotes(s: str) -> str:
     return s[1:-1] if s and len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"') else s
-
-def _sign_canonical(method: str, path: str, ts: str, body_str: str, b64_secret: str) -> str:
-    """
-    Canonical: "{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}"
-    TIMESTAMP must match the value you put in X-Timestamp (UNIX seconds).
-    Secret is BASE64; return signature as BASE64 (not hex).
-    """
-    try:
-        secret = base64.b64decode(_strip_quotes(b64_secret), validate=True)
-    except Exception:
-        raise ValueError("INTELLEGES_CLIENT_HMAC_SECRET must be valid base64")
-
-    canonical = "\n".join([method.upper(), path, ts, body_str])
-    digest = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).digest()
-    return base64.b64encode(digest).decode("ascii")
 
 def _build_payload_pascal(*, email: str, country: str, tier: str,
                           source: str, redirect: str, locale: str,
@@ -372,10 +366,11 @@ def intelleges_initiate():
 
     body = request.get_json(silent=True) or {}
     email   = (user.email or "").strip().lower()
-    country = (body.get("Country") or body.get("country") or body.get("country_of_origin") or body.get("countryOfOrigin") or "US").strip().upper()
-    tier    = (body.get("Tier") or body.get("product_tier") or body.get("productTier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
+    country = (body.get("Country") or body.get("country") or body.get("country_of_origin")
+               or body.get("countryOfOrigin") or "US").strip().upper()
+    tier    = (body.get("Tier") or body.get("product_tier")
+               or body.get("productTier") or "HRIC_STARTUP_BASIC_UNVERIFIED").strip()
 
-    # DEV short-circuit unchanged
     if DEV_FAKE_INTELLEGES:
         idk_seed = f"{email}|{tier}|{_now().date().isoformat()}".lower()
         idk = _sha256_hex(idk_seed)
@@ -399,7 +394,6 @@ def intelleges_initiate():
             "mode": "dev-fake",
         }), 200
 
-    # --- PROD CONFIG ---
     cfg_err = _require_cfg("INTELLEGES_API_BASE", "INTELLEGES_API_KEY", "INTELLEGES_CLIENT_HMAC_SECRET")
     if cfg_err: return cfg_err
 
@@ -410,17 +404,10 @@ def intelleges_initiate():
     locale      = os.getenv("INTELLEGES_LOCALE", "en-US")
     redirect    = (os.getenv("INTELLEGES_REDIRECT_BASE_URL") or "https://login.intelleges.com/").rstrip("/")
 
-    host = (urlsplit(api_base).hostname or "").lower()
-    if host.startswith("login."):
-        current_app.logger.warning("[intelleges_initiate] Using login.* as API base per vendor instruction: %s", host)
+    # Stable idempotency (don’t change per attempt)
+    ts_for_idk = _unix_ts()
+    idk = _sha256_hex(f"{email}|{ts_for_idk}")
 
-    # UNIX timestamp for headers + signing
-    ts_unix = _unix_ts()
-
-    # IdempotencyKey per vendor hint: sha256(email|timestamp)
-    idk = _sha256_hex(f"{email}|{ts_unix}")
-
-    # Upsert local registration shell
     reg = db.session.query(IntellegesRegistration)\
           .filter(func.lower(IntellegesRegistration.idempotency_key) == idk).one_or_none()
     if not reg:
@@ -428,13 +415,15 @@ def intelleges_initiate():
                                      status="EMAIL_SUBMITTED", idempotency_key=idk)
         db.session.add(reg); db.session.flush()
 
-    # Defaults per your sample
-    try: pptq = int(body.get("Pptq") or os.getenv("INTELLEGES_PPTQ") or 221337)
-    except Exception: pptq = 221337
-    try: ttl_minutes = int(body.get("LinkTtlMinutes") or os.getenv("INTELLEGES_LINK_TTL_MINUTES") or 12)
-    except Exception: ttl_minutes = 12
+    try:
+        pptq = int(body.get("Pptq") or os.getenv("INTELLEGES_PPTQ") or 111)
+    except Exception:
+        pptq = 111
+    try:
+        ttl_minutes = int(body.get("LinkTtlMinutes") or os.getenv("INTELLEGES_LINK_TTL_MINUTES") or 12)
+    except Exception:
+        ttl_minutes = 12
 
-    # EXACT PascalCase payload
     payload = {
         "Pptq": pptq,
         "Email": email,
@@ -447,12 +436,11 @@ def intelleges_initiate():
         "LinkTtlMinutes": ttl_minutes,
     }
     body_str = _compact_json(payload)
-
-    # Try multiple path candidates (env overrides first)
+    paths = _intelleges_paths()
     candidates = [
-        os.getenv("INTELLEGES_INITIATE_PATH") or "/api/hric/verification/initiate",
-        "/api/HRIC/Verification/Initiate",
-        "/api/verification/initiate",
+        paths["initiate"],                           # /api/hric/registrations/initiate  (env overridable)
+        "/api/HRIC/Registrations/Initiate",         # case variant
+        "/api/hric/registrations/initiate",         # explicit lower-case fallback
     ]
 
     last_resp = None
@@ -461,18 +449,17 @@ def intelleges_initiate():
         url = f"{api_base}{path}"
         tried.append(path)
         try:
-            sig = _sign_canonical("POST", path, ts_unix, body_str, hmac_secret)  # BASE64
+            ts_unix_now = _unix_ts()  # generate AT SEND TIME
+            sig = _sign_canonical("POST", path, ts_unix_now, body_str, hmac_secret)
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "X-Timestamp": ts_unix,                # UNIX seconds
-                "X-Signature": sig,                    # base64
+                "X-Timestamp": ts_unix_now,
+                "X-Signature": sig,
                 "X-Api-Key": api_key,
                 "Authorization": f"HMAC-SHA256 Credential={api_key}, Signature={sig}",
             }
-            current_app.logger.info("[intelleges_initiate] POST %s headers=%s payload=%s", url,
-                                    {k: (v if k != "Authorization" else "HMAC-SHA256 Credential=<redacted>, Signature=<redacted>") for k,v in headers.items()},
-                                    payload)
+            current_app.logger.info("[intelleges_initiate] POST %s tried=%s", url, tried)
             resp = requests.post(url, headers=headers, data=body_str, timeout=(10, 30))
             last_resp = resp
             if resp.status_code == 404:
@@ -481,8 +468,8 @@ def intelleges_initiate():
             break
         except Exception as e:
             current_app.logger.exception("[intelleges_initiate] request error on %s", path)
-            return jsonify({"error": f"Request to Intelleges failed at {path}: {str(e)}",
-                            "tried_paths": tried}), 502
+            # keep looping; if all fail we’ll return a clear error below
+            continue
 
     if not last_resp:
         return jsonify({"error": "No response from Intelleges", "tried_paths": tried}), 502
@@ -546,11 +533,10 @@ def intelleges_status_proxy():
             return jsonify({"error": "registration id not found"}), 404
         rid = reg.registration_id
 
-    ts_unix = _unix_ts()
     candidates = [
-        (os.getenv("INTELLEGES_STATUS_PATH") or "/api/hric/verification/status") + f"/{rid}",
-        f"/api/HRIC/Verification/Status/{rid}",
-        f"/api/verification/status/{rid}",
+        f"{_intelleges_paths()['status']}/{rid}",     # /api/hric/registrations/status/{rid}
+        f"/api/HRIC/Registrations/Status/{rid}",
+        f"/api/hric/registrations/status/{rid}",
     ]
 
     last_resp = None
@@ -559,16 +545,16 @@ def intelleges_status_proxy():
         url = f"{api_base}{path}"
         tried.append(path)
         try:
-            sig = _sign_canonical("GET", path, ts_unix, "", hmac_secret)  # BASE64
+            ts_unix_now = _unix_ts()
+            sig = _sign_canonical("GET", path, ts_unix_now, "", hmac_secret)
             headers = {
                 "Accept": "application/json",
-                "X-Timestamp": ts_unix,                # UNIX seconds
-                "X-Signature": sig,                    # base64
+                "X-Timestamp": ts_unix_now,
+                "X-Signature": sig,
                 "X-Api-Key": api_key,
                 "Authorization": f"HMAC-SHA256 Credential={api_key}, Signature={sig}",
             }
-            current_app.logger.info("[intelleges_status] GET %s headers=%s", url,
-                                    {k: (v if k != "Authorization" else "HMAC-SHA256 Credential=<redacted>, Signature=<redacted>") for k,v in headers.items()})
+            current_app.logger.info("[intelleges_status] GET %s tried=%s", url, tried)
             resp = requests.get(url, headers=headers, timeout=(10, 20))
             last_resp = resp
             if resp.status_code == 404:
@@ -577,8 +563,7 @@ def intelleges_status_proxy():
             break
         except Exception as e:
             current_app.logger.exception("[intelleges_status] request error on %s", path)
-            return jsonify({"error": f"Request to Intelleges failed at {path}: {str(e)}",
-                            "tried_paths": tried}), 502
+            continue
 
     if not last_resp:
         return jsonify({"error": "No response from Intelleges", "tried_paths": tried}), 502
@@ -599,7 +584,6 @@ def intelleges_status_proxy():
                         "upstream_body_snippet": snippet,
                         "tried_paths": tried}), 502
 
-    # mirror to DB
     reg = db.session.query(IntellegesRegistration).filter_by(registration_id=rid).first()
     if reg:
         st = (data.get("status") or "").upper()
